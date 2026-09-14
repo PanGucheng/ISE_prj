@@ -1,0 +1,13 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "counter_top",
+  "sources": [{"path":"src/counter_top.v","language":"verilog","library":"work"}],
+  "includeDirs": [],
+  "includeFiles": [],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/test.ucf",
+  "constraintsReviewed": true,
+  "optimization": "Speed",
+  "optimizationLevel": 1
+}

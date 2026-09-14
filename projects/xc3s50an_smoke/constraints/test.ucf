@@ -1,0 +1,7 @@
+# Synthetic 50 MHz test clock; not a board specification.
+NET "clk" IOSTANDARD = LVCMOS33;
+NET "count<*>" IOSTANDARD = LVCMOS33;
+NET "clk" TNM_NET = "clk_group";
+TIMESPEC "TS_clk" = PERIOD "clk_group" 20 ns HIGH 50%;
+OFFSET = OUT 10 ns AFTER "clk";
+# Deliberately no LOCs: automatic pin placement for build-only validation.

@@ -1,0 +1,13 @@
+{
+  "device": "",
+  "top": "",
+  "sources": [],
+  "includeDirs": [],
+  "includeFiles": [],
+  "defines": [],
+  "netlists": [],
+  "ucf": "",
+  "constraintsReviewed": false,
+  "optimization": "Speed",
+  "optimizationLevel": 1
+}
