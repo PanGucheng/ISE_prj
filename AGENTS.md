@@ -42,12 +42,13 @@
 
 - `probe` 只读：枚举下载线、识别 JTAG 链、读 IDCODE 并与 project.json 的器件核对。下载线不可见时输出 `CABLE_NOT_FOUND` 与 “USB/JTAG cable is not visible inside fpga-vm”，**不得修改 VM 配置或自动 attach USB**，也不得伪造 PASS。
 - `program` 是硬件写操作，**默认只预览**（PREVIEW ONLY：打印 cable/chain/device/position/bitstream/mode 后结束，不生成写脚本、不执行 program）。必须由用户明确要求并带 `-ConfirmHardwareWrite` 才真正写入。
-- 两种模式含义不同、不得混用：`-Mode Jtag` = 通过 JTAG 直接配置 FPGA（VOLATILE，掉电丢失）；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置）。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`（JTAG 无法证明板上跳线）。
+- 两种模式含义不同、不得混用，**且措辞必须跟随器件真实语义**：`-Mode Jtag` = 通过 JTAG 配置 FPGA（对无内部配置 Flash 的器件是 VOLATILE）；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置）。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`（JTAG 无法证明板上跳线）。
+- **实测结论（ISE 14.7 + XC3S50AN，2026-09-14）**：在 Boundary Scan 批处理流程里，Spartan-3AN 上 `assignFile` + `program` 写的就是内部 ISF（转录出现 `SPI access core`、`Programming Flash`、扇区/页地址）。`program` 没有 `-sram` 选项（`Switch "-sram" is not allowed`），`-onlyFpga` 属于需要 `.msk` mask 文件的另一条流程（实测报 `ERROR:Bitstream:2 ... design.msk does not exist`），`setTargetDevice -p N` 也不改变该行为。因此**不得声称 `-Mode Jtag` 在这类器件上是易失配置**：工具按 `xc3s<N>an` 识别并打印 `NON-VOLATILE WRITE`、在 run.json 记录 `hasInternalConfigFlash`/`modeIsNonVolatile`；只有在无内部配置 Flash 的器件上才使用 VOLATILE 措辞，且那时转录里出现 Flash 编程迹象必须判 FAIL（`MODE VIOLATION`）。
 - JTAG/ISF 编程用的是下载线的 TCK，与用户时钟无关；**烧录成功不等于设计工作正常**，`userDesignFunctional` 永远输出 `NOT_TESTED`，禁止打印 `BOARD PASS`。
 - 每次 program 前必须自动 preflight（等价 probe + bit 文件存在且非空 + 器件匹配）；不假定 position=1，多器件未指定 `-Position` 时报 `ERROR: Multiple JTAG devices detected; specify -Position.`。
 - verify 默认开启、禁止默认关闭；iMPACT 表示不适用时报 `NOT_APPLICABLE`，无结论时报 `NOT_REPORTED`，不得伪造 verify 通过。
 - Jtag/Isf 使用不同超时；超时标 `TIMEOUT`、保留日志、非零退出且**不自动重烧**。SSH 在写入中断开 → `PROGRAM_STATE_UNKNOWN`，不得自动重试，先重新 `probe`、查远端 `run.status`、取回原日志再决定。
-- iMPACT 退出码不可靠（同一次失败可能返回 0），判定一律解析转录日志；`setMode` 必须优先，`blankCheck` 等不得乱序调用。
+- iMPACT 退出码不可靠（同一次失败可能返回 0），判定一律解析转录日志；`setMode` 必须优先，`blankCheck` 等不得乱序调用。iMPACT **不会**把「打不开下载线」写成 `ERROR:`（只打印 `no JTAG device was found` / `Cable autodetection failed`，而状态文件仍为 `COMPLETE`），必须显式识别，否则会误报成「未确认的成功」；裸 `verify -p N` 未先 `assignFile` 时必然 `Verify failed on page 0`，verify 脚本必须先指定同一份 bitstream，且 `Verify failed` 一律判 FAIL。
 - 工具只写远端受管目录，不改 ISE 安装；`constraintsReviewed` 始终保持人工确认，不得为了让工具产生 bitstream 而自动置 true。
 
 ## 凭据与操作范围

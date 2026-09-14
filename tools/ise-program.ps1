@@ -398,7 +398,16 @@ function New-ImpactProgramScript {
         $lines.Add(('program -p {0} -spi' -f $Position))
     } else {
         # Plain JTAG configuration of the FPGA fabric: volatile, lost on power cycle.
+        # `-onlyFpga` is REQUIRED on Spartan-3AN: without it iMPACT treats the
+        # device's internal SPI flash as an attached flash and programs that
+        # instead - a NON-VOLATILE write that silently contradicts this mode.
+        # Measured on ISE 14.7: without the flag the transcript contains
+        # "SPI access core", "Programming Flash" and sector/page addresses.
         $lines.Add(('assignFile -p {0} -file "{1}"' -f $Position, $RemoteBitFile))
+        # `-onlyFpga` is deliberately NOT used: measured on ISE 14.7 it switches
+        # iMPACT into an "update config file" flow that fails with
+        #   ERROR:Bitstream:2 - The input file ".../design.msk" does not exist
+        # so it cannot produce a plain FPGA configuration either.
         if ($VerifyAfterProgram) { $lines.Add(('program -p {0} -v' -f $Position)) } else { $lines.Add(('program -p {0}' -f $Position)) }
     }
     $lines.Add('quit')
@@ -409,13 +418,21 @@ function New-ImpactVerifyScript {
     param(
         [Parameter(Mandatory)][ValidateSet('Jtag', 'Isf')][string]$Mode,
         [Parameter(Mandatory)][int]$Position,
-        [Parameter(Mandatory)][string]$CablePort = 'auto'
+        [Parameter(Mandatory)][string]$CablePort = 'auto',
+        [AllowNull()][string]$RemoteBitFile = $null
     )
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('setMode -bs')
     $lines.Add("setCable -p $CablePort")
     $lines.Add('identify')
-    if ($Mode -eq 'Isf') { $lines.Add(('verify -p {0} -spi' -f $Position)) } else { $lines.Add(('verify -p {0}' -f $Position)) }
+    # A bare `verify -p N` has no reference image and reports
+    # "'1': Verifying device...Verify failed on page 0." (measured), so the same
+    # file must be assigned first, exactly like the program step does.
+    if ($RemoteBitFile) {
+        if ($Mode -eq 'Isf') { $lines.Add(('assignFileToAttachedFlash -p {0} -file "{1}"' -f $Position, $RemoteBitFile)) }
+        else { $lines.Add(('assignFile -p {0} -file "{1}"' -f $Position, $RemoteBitFile)) }
+    }
+    if ($Mode -eq 'Isf') { $lines.Add(('verify -p {0} -spi' -f $Position)) } else { $lines.Add(('verify -p {0} -sram' -f $Position)) }
     $lines.Add('quit')
     return ($lines.ToArray() -join "`r`n")
 }
@@ -681,7 +698,19 @@ function Invoke-Program {
     if (-not $bit.Exists) { throw "program: bitstream not found: $BitFile" }
     if ($bit.Size -le 0) { throw "program: bitstream is empty: $BitFile" }
 
-    $volatileText = $(if ($Mode -eq 'Jtag') { 'VOLATILE - a power cycle loses the configuration' } else { 'NON-VOLATILE - stored in the Spartan-3AN internal ISF, survives power cycling' })
+    # Spartan-3AN stores its configuration image in an internal In-System Flash
+    # inside the FPGA package. Measured on ISE 14.7: in the Boundary Scan flow an
+    # `assignFile -p N -file x.bit` + `program` writes that NON-VOLATILE flash
+    # (the transcript downloads xc3s50an_spi.cor and prints "Programming Flash").
+    # `program` has no -sram option ("Switch \"-sram\" is not allowed") and
+    # `-onlyFpga` is a different flow that requires a .msk mask file, so a
+    # transient SRAM-only configuration is not reachable through this batch flow.
+    # The mode wording must therefore follow the device, not the switch name.
+    $hasInternalConfigFlash = [bool]($expected.Part -match '^xc3s\d+an$')
+    $jtagIsNonVolatile = ($Mode -eq 'Jtag' -and $hasInternalConfigFlash)
+    $volatileText = $(if ($Mode -eq 'Jtag' -and -not $hasInternalConfigFlash) { 'VOLATILE - a power cycle loses the configuration' }
+        elseif ($Mode -eq 'Jtag') { 'NON-VOLATILE on this device - the file-assigned program operation writes the internal ISF' }
+        else { 'NON-VOLATILE - stored in the Spartan-3AN internal ISF, survives power cycling' })
     $run = New-ProgrammerRunDirectory -ProjectDataDirectory $p.Directory -Prefix 'program'
     Copy-Item -LiteralPath $BitFile -Destination (Join-Path $run.RunDir ('inputs/' + [IO.Path]::GetFileName($BitFile)))
 
@@ -832,7 +861,7 @@ function Invoke-Program {
     # Write scripts are only created and uploaded now, with the resolved position.
     Write-Utf8 (Join-Path $run.RunDir 'generated/program.cmd') ((New-ImpactProgramScript -Mode $Mode -Position $Position -RemoteBitFile $remoteBit -CablePort $cfg.CablePort) + "`r`n")
     Write-Utf8 (Join-Path $run.RunDir 'generated/run_program.cmd') ((New-ImpactRunner -StepName 'program' -ScriptName 'program.cmd') + "`r`n")
-    Write-Utf8 (Join-Path $run.RunDir 'generated/verify.cmd') ((New-ImpactVerifyScript -Mode $Mode -Position $Position -CablePort $cfg.CablePort) + "`r`n")
+    Write-Utf8 (Join-Path $run.RunDir 'generated/verify.cmd') ((New-ImpactVerifyScript -Mode $Mode -Position $Position -CablePort $cfg.CablePort -RemoteBitFile $remoteBit) + "`r`n")
     Write-Utf8 (Join-Path $run.RunDir 'generated/run_verify.cmd') ((New-ImpactRunner -StepName 'verify' -ScriptName 'verify.cmd') + "`r`n")
     $null = Send-ProgrammerGenerated -ProjectName $ProjectName -RunId $run.RunId -RunDir $run.RunDir `
         -GeneratedNames @('program.cmd', 'run_program.cmd', 'verify.cmd', 'run_verify.cmd')
@@ -845,13 +874,30 @@ function Invoke-Program {
     $programText = Get-TextSafe (Join-Path $run.RunDir 'results/program.log')
     $programStatus = Get-TextSafe (Join-Path $run.RunDir 'results/program.status')
     $programErrors = @([regex]::Matches($programText, '(?m)^\s*(ERROR|FATAL)[^\r\n]*') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+    # iMPACT does NOT prefix every hard failure with ERROR:. A cable that cannot be
+    # opened prints plain lines such as "Cable autodetection failed." and the runner
+    # still exits with a COMPLETE status, so without this check a transcript where
+    # the cable never opened would be reported as PASS_UNCONFIRMED - a false PASS.
+    $cableFailures = @([regex]::Matches($programText, '(?im)^.*(no JTAG device was found|Cable autodetection failed|Cable connection failed|Cable Setup operation|Cable is not detected).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+    # Jtag mode promises a VOLATILE configuration of the FPGA fabric. On devices
+    # WITHOUT internal configuration flash the same transcript turns into an
+    # internal-flash write if something is wrong, so any flash-programming
+    # evidence is a hard failure there. On a Spartan-3AN the flash write IS the
+    # documented behaviour of this flow ($jtagIsNonVolatile), so it is reported
+    # loudly instead of being flagged as a violation.
+    $flashWriteEvidence = @([regex]::Matches($programText, '(?im)^.*(SPI access core|Programming Flash|assignFileToAttachedFlash|is in sector \d|is in page \d).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+    $nonVolatileWrite = ($Mode -eq 'Jtag' -and $flashWriteEvidence.Count -gt 0 -and -not $hasInternalConfigFlash)
     $programSuccessMarker = [bool]($programText -match '(?i)(program(ming)?\s+(operation\s+)?(completed|successful|succeeded)|configuration\s+(completed|successful)|Programming\s+Successful)')
     if ($programStep.TimedOut) { $statuses.programmingCompleted = 'TIMEOUT' }
     elseif ($interrupted) { $statuses.programmingCompleted = 'PROGRAM_STATE_UNKNOWN' }
     elseif ($programErrors.Count -gt 0) { $statuses.programmingCompleted = 'FAIL' }
+    elseif ($cableFailures.Count -gt 0 -and -not $programSuccessMarker) { $statuses.programmingCompleted = 'FAIL' }
+    elseif ($nonVolatileWrite) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($programSuccessMarker) { $statuses.programmingCompleted = 'PASS' }
     elseif ($programText -and ($programStatus -match 'COMPLETE')) { $statuses.programmingCompleted = 'PASS_UNCONFIRMED' }
     else { $statuses.programmingCompleted = 'FAIL' }
+    foreach ($c in $cableFailures) { $programErrors += ('cable: ' + $c) }
+    if ($nonVolatileWrite) { $programErrors += 'MODE VIOLATION: -Mode Jtag asked for a volatile FPGA configuration but the transcript shows internal flash programming (the device non-volatile flash was modified).' }
 
     # ---- verify step (default on) -----------------------------------------
     if ($statuses.programmingCompleted -like 'PASS*') {
@@ -860,8 +906,12 @@ function Invoke-Program {
         try { Receive-ProgramResults $ProjectName $run.RunId } catch { }
         $verifyText = Get-TextSafe (Join-Path $run.RunDir 'results/verify.log')
         $verifyErrors = @([regex]::Matches($verifyText, '(?m)^\s*(ERROR|FATAL)[^\r\n]*') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+        $verifyCableFailures = @([regex]::Matches($verifyText, '(?im)^.*(no JTAG device was found|Cable autodetection failed|Cable connection failed|Cable Setup operation|Cable is not detected).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+        $verifyMismatch = [bool]($verifyText -match '(?i)(verify failed|verification failed|verification terminated|mismatch)')
         if ($verifyStep.TimedOut) { $statuses.programmingVerified = 'TIMEOUT' }
         elseif (-not $verifyText) { $statuses.programmingVerified = 'NOT_REPORTED' }
+        elseif ($verifyCableFailures.Count -gt 0) { $statuses.programmingVerified = 'FAIL' }
+        elseif ($verifyMismatch) { $statuses.programmingVerified = 'FAIL' }
         elseif ($verifyErrors.Count -gt 0) {
             if ($verifyText -match '(?i)(not\s+applicable|does\s+not\s+support|unsupported|cannot\s+verify)') { $statuses.programmingVerified = 'NOT_APPLICABLE' }
             else { $statuses.programmingVerified = 'FAIL' }
@@ -877,6 +927,9 @@ function Invoke-Program {
     $meta.programmingCompleted = $statuses.programmingCompleted
     $meta.programmingVerified = $statuses.programmingVerified
     $meta.bitFileTargetMatch = $bitMatch
+    $meta.nonVolatileWriteDetected = $nonVolatileWrite
+    $meta.modeIsNonVolatile = [bool]($jtagIsNonVolatile -or $Mode -eq 'Isf')
+    $meta.hasInternalConfigFlash = $hasInternalConfigFlash
     Write-Json (Join-Path $run.RunDir 'run.json') $meta
 
     $summary = New-Object System.Collections.Generic.List[string]
@@ -886,9 +939,20 @@ function Invoke-Program {
     foreach ($k in $statuses.Keys) { $summary.Add(('  ' + $k.PadRight(22) + $statuses[$k])) }
     $summary.Add('')
     $summary.Add('Note: User design functional is NOT_TESTED. JTAG/ISF programming uses the TCK')
-    $summary.Add('      generated by the download cable, so it does not need the user 2 MHz')
-    $summary.Add('      oscillator; the finger piano design itself does need it to run.')
+    $summary.Add('      generated by the download cable, so it does not need the design clock')
+    $summary.Add('      oscillator; the programmed design itself does need it to run.')
     $summary.Add('      Programming success is not a board functional test.')
+    if ($jtagIsNonVolatile) {
+        $summary.Add('')
+        $summary.Add('NON-VOLATILE WRITE: ' + $expected.Part + ' keeps its configuration image in an internal')
+        $summary.Add('  In-System Flash inside the FPGA package. In iMPACT 14.7''s Boundary Scan flow')
+        $summary.Add('  `assignFile` + `program` writes that flash (the transcript loads the SPI access')
+        $summary.Add('  core and prints "Programming Flash"); `program` has no -sram option and')
+        $summary.Add('  `-onlyFpga` belongs to a different flow that needs a .msk mask file. So this')
+        $summary.Add('  -Mode Jtag run is NOT a transient SRAM configuration: the device flash now holds')
+        $summary.Add('  the bitstream and will configure the FPGA on power-up when M[2:0] = 011 and')
+        $summary.Add('  VCCAUX = 3.3 V. Use -Mode Isf to say so explicitly.')
+    }
     if ($programErrors.Count -gt 0) { foreach ($e in $programErrors) { $summary.Add(('iMPACT: ' + $e)) } }
     if ($statuses.programmingCompleted -eq 'PROGRAM_STATE_UNKNOWN') {
         $summary.Add('')
@@ -906,7 +970,8 @@ function Invoke-Program {
     Write-Host ("run directory: " + $run.RunDir)
 
     if ($programResult -ne 'PASS') {
-        throw "program: result $programResult - programmingCompleted=$($statuses.programmingCompleted), programmingVerified=$($statuses.programmingVerified) (see $($run.RunDir))."
+        $extra = $(if ($nonVolatileWrite) { ' MODE VIOLATION: -Mode Jtag asked for a volatile FPGA configuration but the transcript shows internal flash programming; the device non-volatile flash was modified.' } else { '' })
+        throw "program: result $programResult - programmingCompleted=$($statuses.programmingCompleted), programmingVerified=$($statuses.programmingVerified).$extra (see $($run.RunDir))."
     }
     return [pscustomobject]@{ RunId = $run.RunId; RunDir = $run.RunDir; Statuses = $statuses; Mode = $Mode }
 }

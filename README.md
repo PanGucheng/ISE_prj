@@ -208,8 +208,16 @@ pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.
 
 | 模式 | 含义 | 掉电后 | iMPACT 命令 |
 |---|---|---|---|
-| `-Mode Jtag` | 通过 JTAG 直接配置 FPGA 逻辑（SRAM） | **VOLATILE**，配置丢失 | `assignFile -p N -file x.bit` + `program -p N -v` |
+| `-Mode Jtag` | 通过 JTAG 配置 FPGA | **掉电丢失**（但见下方 Spartan-3AN 实测） | `assignFile -p N -file x.bit` + `program -p N -v` |
 | `-Mode Isf` | 通过 JTAG 编程 Spartan-3AN **内部 In-System Flash** | **NON-VOLATILE**，上电自动配置 | `assignFileToAttachedFlash -p N -file x.bit` + `program -p N -spi`，随后 `verify -p N -spi` |
+
+**实测（2026-09-14，真机 XC3S50AN）：在 ISE 14.7 的 Boundary Scan 批处理流程里，Spartan-3AN 上的 `assignFile -p N -file x.bit` + `program` 写的就是内部 ISF（非易失）。** 转录证据：`SPI access core not detected` → 下载 `spartan3a/data/xc3s50an_spi.cor` → `Address 0x00000000 is in sector 0` / `0x0000D587 is in page 207` → `'1': Programming Flash...done` → `'1': Programmed successfully` → `Checking done pin....done`。同一器件上：
+
+- `program -p N -v -sram` → `ERROR:Portability:90 - Switch "-sram" is not allowed.`（**program 没有 SRAM 选项**）；
+- `program -p N -v -onlyFpga` → `ERROR:Bitstream:2 - The input file ".../design.msk" does not exist`（属于另一条需要 mask 文件的流程，不是纯 SRAM 配置）；
+- `setTargetDevice -p N`（不带 `-attached`）之后再 `assignFile` + `program` → 依旧 `Programming Flash`。
+
+结论：**该器件经这条批处理流程不存在「只写 SRAM 的易失配置」**，`verify` 反而支持 `-sram`（只读校验）。因此工具按器件真实语义措辞：目标器件属于 `xc3s<N>an` 系列时，`-Mode Jtag` 会打印醒目的 `NON-VOLATILE WRITE` 说明，并在 `run.json` 记录 `hasInternalConfigFlash` / `modeIsNonVolatile`，**绝不会再声称「掉电丢失」**；只有在没有内部配置 Flash 的器件上，Jtag 模式才保留 VOLATILE 措辞，且此时转录里出现 Flash 编程迹象会直接判 FAIL（`MODE VIOLATION`）。
 
 **JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 12 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 12 MHz 时钟才能发声）。
 
@@ -229,6 +237,8 @@ pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.
 | `listUsbCables` | 只认 Xilinx Platform Cable USB，实测在有 Digilent 线时仍报“未检测到 Platform Cable”→ **不能**用作通用下载线探测 |
 | `blankCheck`（未先 setMode） | iMPACT 直接崩溃（RC `-1073741819` = 0xC0000005），因此工具绝不乱序调用 |
 | **退出码可信度** | **不可靠**：同一条失败的 `identify` 一次返回 0、一次返回 1。工具因此只把退出码当记录，判定一律解析转录日志 |
+| **无下载线的转录** | iMPACT **不会**把「打不开下载线」写成 `ERROR:`：它打印 `Digilent Plugin: no JTAG device was found.` / `Cable autodetection failed.`，而 runner 的状态文件仍是 `COMPLETE`。工具因此显式识别这些行，否则会把它误判成「未确认的成功」 |
+| **裸 `verify -p N` 无参照** | 没有先 `assignFile` 时 `verify -p N` 会报 `'1': Verifying device...Verify failed on page 0.` / `Verification Terminated`（实测）。所以 verify 脚本必须先把同一份 bitstream 指定给器件/Flash，工具并把 `Verify failed` 判为 FAIL 而不是「无结论」 |
 | XC3S50AN IDCODE | `0x02610093`，取自本安装自带的 `spartan3a/data/xc3s50an_tq144_1532.bsd`（工具在 probe 时读取该 BSDL 作为期望值并留档） |
 
 ### probe 的输出与判定

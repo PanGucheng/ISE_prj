@@ -71,8 +71,10 @@ $script:Scenario = 'pass'   # pass | fusefail | simfail | no-pattern | fail-patt
 $script:Mode = 'success'    # success | failure | disconnect (build flow)
 $script:SynthWarnings = 0   # XST warning count written into the mock synthesis report
 $script:ProgProbe = 'ok'     # ok | nocable | mismatch | twoDevices
-$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail
-$script:ProgVerify = 'ok'    # ok | fail | notapplicable | noreport
+$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail | cable | flash
+$script:ProgVerify = 'ok'    # ok | fail | notapplicable | noreport | cable | mismatch
+$script:ProbeDevice = 'xc3s50an'
+$script:ProbeIdcode = '02610093'
 $script:Remote = $null
 $script:ImpactSteps = New-Object System.Collections.Generic.List[string]
 
@@ -117,7 +119,7 @@ Identifying chain contents...done.
 '@
         }
         default {
-            return @'
+            return @"
 Release 14.7 - iMPACT P.20131013 (nt)
 INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4
 INFO:iMPACT - Digilent Plugin: found 1 device(s).
@@ -125,13 +127,12 @@ INFO:iMPACT - Digilent Plugin: opening device: "JtagHs2", SN:210241672559
 INFO:iMPACT - Digilent Plugin: Product Name: Digilent JTAG-HS2
 INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559
 INFO:iMPACT - Digilent Plugin: JTAG Clock Frequency: 10000000 Hz
-Identifying chain contents...'0': : Manufacturer's ID = Xilinx xc3s50an, Version : 0
-INFO:iMPACT:501 - '1': Added Device xc3s50an successfully.
-'1': IDCODE is '00000010011000010000000010010011'
-'1': IDCODE is '02610093' (in hex).
-'1': : Manufacturer's ID = Xilinx xc3s50an, Version : 0
+Identifying chain contents...'0': : Manufacturer's ID = Xilinx $($script:ProbeDevice), Version : 0
+INFO:iMPACT:501 - '1': Added Device $($script:ProbeDevice) successfully.
+'1': IDCODE is '$($script:ProbeIdcode)' (in hex).
+'1': : Manufacturer's ID = Xilinx $($script:ProbeDevice), Version : 0
 Elapsed time =      1 sec.
-'@
+"@
         }
     }
 }
@@ -235,6 +236,25 @@ function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
             'program' {
                 if ($script:ProgProgram -eq 'fail') {
                     Write-Utf8 "$results/program.log" "ERROR:iMPACT:1234 - simulated programming failure`n"
+                } elseif ($script:ProgProgram -eq 'cable') {
+                    # Byte-for-byte shape of a real ISE 14.7 transcript when the cable
+                    # disappeared between the preflight and the program step: no ERROR:
+                    # line at all, and the runner still writes status COMPLETE.
+                    Write-Utf8 "$results/program.log" ("INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4`n" +
+                        "INFO:iMPACT - Digilent Plugin: no JTAG device was found.`n" +
+                        "AutoDetecting cable. Please wait.`n" +
+                        "Connecting to cable (Usb Port - USB21).`n" +
+                        "The Platform Cable USB is not detected. Please connect a cable.`n" +
+                        "Cable connection failed.`n" +
+                        "Cable autodetection failed.`n")
+                } elseif ($script:ProgProgram -eq 'flash') {
+                    # Measured on real hardware: without `-onlyFpga` a Jtag-mode run
+                    # programs the Spartan-3AN internal SPI flash instead.
+                    Write-Utf8 "$results/program.log" ("INFO:iMPACT - Digilent Plugin: found 1 device(s).`n" +
+                        "'1': SPI access core not detected. SPI access core will be downloaded to the device to enable operations.`n" +
+                        "INFO:iMPACT - Address 0x00000000 is in sector 0.`n" +
+                        "'1': Programming Flash...done.`n" +
+                        "'1': Programming completed successfully.`n")
                 } else {
                     Write-Utf8 "$results/program.log" "INFO:iMPACT - programming device '1'`nProgramming operation completed successfully`n"
                 }
@@ -244,6 +264,8 @@ function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
                     'fail' { Write-Utf8 "$results/verify.log" "ERROR:iMPACT:4321 - simulated verify mismatch`n" }
                     'notapplicable' { Write-Utf8 "$results/verify.log" "ERROR:iMPACT:9 - verify is not applicable for this configuration mode`n" }
                     'noreport' { Write-Utf8 "$results/verify.log" "INFO:iMPACT - finished`n" }
+                    'cable' { Write-Utf8 "$results/verify.log" "INFO:iMPACT - Digilent Plugin: no JTAG device was found.`nCable autodetection failed.`n" }
+                    'mismatch' { Write-Utf8 "$results/verify.log" "'1': Verifying device...Verify failed on page 0.`n'1': Verification Terminated...done.`n" }
                     default { Write-Utf8 "$results/verify.log" "Verify operation completed successfully`n" }
                 }
             }
@@ -668,7 +690,18 @@ Assert ($jtagScript -notmatch 'spi') 'JTAG script must not use SPI options'
 $isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
 Assert ($isfScript -match 'assignFileToAttachedFlash -p 2 -file') 'ISF script must assign to the attached flash'
 Assert ($isfScript -match 'program -p 2 -spi') 'ISF script must use -spi'
-Assert ((New-ImpactVerifyScript -Mode Isf -Position 2 -CablePort 'auto') -match 'verify -p 2 -spi') 'ISF verify script malformed'
+# Measured: `program` has no -sram switch and on a Spartan-3AN an unqualified
+# `program` writes the internal ISF, so the script must not pretend otherwise.
+Assert ($jtagScript -match 'program -p 1 -v') 'Jtag script must request verification'
+Assert ($jtagScript -notmatch 'onlyFpga') 'Jtag script must not use -onlyFpga (it needs a .msk mask file and fails)'
+$jtagVerifyScript = New-ImpactVerifyScript -Mode Jtag -Position 1 -CablePort 'auto' -RemoteBitFile 'C:\r\work\d.bit'
+# A bare `verify -p N` has no reference image; measured output was
+# "'1': Verifying device...Verify failed on page 0."
+Assert ($jtagVerifyScript -match 'assignFile -p 1 -file') 'Jtag verify must assign the bitstream before verifying'
+Assert ($jtagVerifyScript -match 'verify -p 1 -sram') 'Jtag verify must verify the SRAM configuration'
+$isfVerifyScript = New-ImpactVerifyScript -Mode Isf -Position 2 -CablePort 'auto' -RemoteBitFile 'C:\r\work\d.bit'
+Assert ($isfVerifyScript -match 'assignFileToAttachedFlash -p 2 -file') 'ISF verify must assign the flash image first'
+Assert ($isfVerifyScript -match 'verify -p 2 -spi') 'ISF verify script malformed'
 Write-Host 'PASS: probe/program parsers and the generated iMPACT batch commands.'
 
 # --- probe: cable + chain + device match ------------------------------------
@@ -723,7 +756,7 @@ Assert ($jtagRun.Statuses.programmingVerified -eq 'VERIFIED') 'verify should rep
 Assert ($jtagRun.Statuses.userDesignFunctional -eq 'NOT_TESTED') 'user design must stay NOT_TESTED'
 $jtagSummary = Get-TextSafe "$($jtagRun.RunDir)/summary.txt"
 Assert ($jtagSummary -notmatch 'BOARD PASS') 'programming success must never print BOARD PASS'
-Assert ($jtagSummary -match 'does not need the user 2 MHz') 'the TCK vs user clock note is missing'
+Assert ($jtagSummary -match 'does not need the design clock') 'the TCK vs user clock note is missing'
 $jtagJson = Get-Content "$($jtagRun.RunDir)/run.json" -Raw | ConvertFrom-Json
 Assert ($jtagJson.operation -eq 'program' -and $jtagJson.result -eq 'PASS') 'run.json program result wrong'
 Assert ($jtagJson.bitFileSha256 -eq (Get-FileHash -LiteralPath $bitPath -Algorithm SHA256).Hash) 'bitFileSha256 wrong'
@@ -780,6 +813,57 @@ $script:ProgProbe = 'nocable'
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite } 'preflight failed'
 Assert (-not ($script:ImpactSteps -contains 'program')) 'a failed preflight still tried to write'
 $script:ProgProbe = 'ok'
+
+# --- a cable that vanished mid-flight must be FAIL, never PASS_UNCONFIRMED --
+# Real case: the preflight identifies the chain, then the next iMPACT invocation
+# cannot open the USB cable at all. iMPACT prints no ERROR: line and the runner
+# still exits COMPLETE, so this must be caught explicitly.
+$script:ProgProgram = 'cable'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
+$cableRun = Get-LatestProgrammerRun 'fixture' 'program-'
+$cableJson = Get-Content "$cableRun/run.json" -Raw | ConvertFrom-Json
+Assert ($cableJson.programmingCompleted -eq 'FAIL') "a cable that never opened must be FAIL, got $($cableJson.programmingCompleted)"
+Assert ($cableJson.result -eq 'FAIL') 'a cable that never opened must not be reported as PASS'
+$cableSummary = Get-TextSafe "$cableRun/summary.txt"
+Assert ($cableSummary -match 'Cable autodetection failed') 'the cable failure must be quoted in the summary'
+$script:ProgProgram = 'ok'
+
+# --- verify that cannot open the cable must be FAIL ------------------------
+$script:ProgVerify = 'cable'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
+Assert (((Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json).programmingVerified) -eq 'FAIL') 'a verify step with no cable must be FAIL'
+$script:ProgVerify = 'ok'
+
+# --- an in-band verify mismatch must be FAIL, not NOT_REPORTED -------------
+$script:ProgVerify = 'mismatch'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
+Assert (((Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json).programmingVerified) -eq 'FAIL') '"Verify failed on page 0" must be FAIL'
+$script:ProgVerify = 'ok'
+
+# --- Jtag mode on a device WITHOUT internal config flash: a flash write is a
+# --- hard mode violation; on a Spartan-3AN it is the documented behaviour -----
+$script:ProgProgram = 'flash'
+$anRun = Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
+Assert ($anRun.Statuses.programmingCompleted -eq 'PASS') 'the measured Spartan-3AN flow should be reported as a successful write'
+$anJson = Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json
+Assert ($anJson.modeIsNonVolatile -eq $true) 'a Spartan-3AN Jtag run must be recorded as non-volatile'
+Assert ($anJson.hasInternalConfigFlash -eq $true) 'the internal config flash must be recorded'
+$anSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'program-') + '/summary.txt')
+Assert ($anSummary -match 'NON-VOLATILE WRITE') 'the non-volatile nature must be stated loudly'
+Assert ($anSummary -match 'M\[2:0\] = 011') 'the boot requirement must be stated'
+
+New-Fixture 'fixture3a' @{ device = 'xc3s700a-4-fg484' }
+$script:ProbeDevice = 'xc3s700a'
+$script:ProbeIdcode = '0262C093'
+Expect-Failure { Invoke-Program -ProjectName 'fixture3a' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'MODE VIOLATION'
+$script:ProbeDevice = 'xc3s50an'
+$script:ProbeIdcode = '02610093'
+$violRun = Get-LatestProgrammerRun 'fixture3a' 'program-'
+$violJson = Get-Content "$violRun/run.json" -Raw | ConvertFrom-Json
+Assert ($violJson.programmingCompleted -eq 'FAIL') 'flash programming during a Jtag run on a flash-less device must not be a PASS'
+Assert ($violJson.nonVolatileWriteDetected -eq $true) 'the non-volatile write must be recorded in run.json'
+Assert ((Get-TextSafe "$violRun/summary.txt") -match 'non-volatile flash was modified') 'the mode violation must be explained'
+$script:ProgProgram = 'ok'
 
 # --- bitstream file checks --------------------------------------------------
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile (Join-Path $root 'missing.bit') -ConfirmHardwareWrite } 'bitstream not found'
