@@ -242,3 +242,4 @@ function Receive-Build([string]$Name, [string]$Id) {
 . "$PSScriptRoot\ise-report.ps1"
 . "$PSScriptRoot\ise-verify.ps1"
 . "$PSScriptRoot\ise-program.ps1"
+. "$PSScriptRoot\ise-probe-diag.ps1"

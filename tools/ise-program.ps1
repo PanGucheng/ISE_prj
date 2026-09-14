@@ -44,9 +44,9 @@ $script:ProgrammerTimeoutDefaults = @{
     JtagSeconds  = 300
     IsfSeconds   = 600
     VerifySeconds = 300
-    # A cable that never opened wrote nothing, so the preflight and the program
-    # step may both be re-invoked. Nothing is ever retried after a write could
-    # have started (TIMEOUT / PROGRAM_STATE_UNKNOWN).
+    # When iMPACT cannot enumerate/open the cable it wrote nothing, so the preflight
+    # and the program step may both be re-invoked. Nothing is ever retried after a
+    # write could have started (TIMEOUT / PROGRAM_STATE_UNKNOWN).
     CableRetryAttempts = 3
 }
 
@@ -160,8 +160,21 @@ function Get-ProbeLogFacts {
     $cableMissing = $false
     foreach ($p in $noCablePatterns) { if ($text -match $p) { $cableMissing = $true; break } }
 
-    if ($cableName -and -not $cableMissing) { $cableStatus = 'PASS' }
-    elseif ($cableMissing) { $cableStatus = 'CABLE_NOT_FOUND' }
+    # Cable status is layered on purpose. iMPACT's Digilent plugin enumerates the
+    # cable itself (Adept/DMGR) and can fail even while Windows still reports the
+    # FTDI device as present and healthy - measured: `wmic Win32_PnPEntity` showed
+    # USB\VID_0403&PID_6014\... Status=OK immediately before AND after a run whose
+    # transcript said "no JTAG device was found". So this layer must never be
+    # reported as "the cable is not visible to the VM".
+    $digilentEnumFailed = [bool]($text -match '(?i)Digilent Plugin: no JTAG device was found')
+    $digilentFound = [bool]($text -match "(?i)Digilent Plugin: found\s+[1-9]\d*\s+device")
+    $digilentOpened = [bool]($text -match '(?i)Digilent Plugin: opening device')
+    $fallbackFailed = [bool]($text -match '(?i)(Cable autodetection failed|Cable connection failed|Cable is not detected)')
+
+    if ($cableName -and -not $digilentEnumFailed) { $cableStatus = 'PASS' }
+    elseif ($digilentFound -and -not $digilentOpened) { $cableStatus = 'DIGILENT_OPEN_FAILED' }
+    elseif ($digilentEnumFailed) { $cableStatus = 'DIGILENT_ENUM_FAILED' }
+    elseif ($cableMissing) { $cableStatus = 'CABLE_UNAVAILABLE' }
     elseif ($cableName) { $cableStatus = 'PASS' }
     else { $cableStatus = 'UNKNOWN' }
 
@@ -346,7 +359,12 @@ function Get-BitFileFacts {
 # iMPACT does not mark a cable that could not be opened with ERROR: - it prints
 # plain lines and the runner still reports COMPLETE. Used to decide whether an
 # invocation did anything at all: no cable means no write, so a retry is safe.
-function Test-TranscriptCableFailure {
+# iMPACT does not mark an unusable cable with ERROR: - it prints plain lines and
+# the runner still reports COMPLETE. This says "the JTAG cable could not be
+# enumerated/opened by iMPACT", which is NOT the same thing as "the USB device is
+# missing from Windows": the FTDI device can be present and healthy (verified with
+# wmic Win32_PnPEntity) while the Digilent/Adept layer still fails to enumerate it.
+function Test-TranscriptCableUnavailable {
     param([AllowNull()][string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return $false }
     return [bool]($Text -match '(?im)(no JTAG device was found|Cable autodetection failed|Cable connection failed|Cable is not detected|Cable Setup operation)')
@@ -687,9 +705,17 @@ function Invoke-Probe {
     if ($matchDetail) { $summary.Add(('Match detail    ' + $matchDetail)) }
     if ($bsdlError) { $summary.Add(('BSDL            ' + $bsdlError)) }
     $summary.Add('')
-    if ($facts.CableStatus -eq 'CABLE_NOT_FOUND') {
-        $summary.Add('USB/JTAG cable is not visible inside fpga-vm')
-        $summary.Add('(no VM configuration change and no automatic USB attach is performed)')
+    if ($facts.CableStatus -eq 'DIGILENT_ENUM_FAILED') {
+        $summary.Add('DIGILENT_ENUM_FAILED: iMPACT''s Digilent plugin reported "no JTAG device')
+        $summary.Add('  was found", so it could not enumerate or open the cable.')
+        $summary.Add('  This is NOT proof that the USB device is missing from Windows: the FTDI')
+        $summary.Add('  device can be present and healthy while the Digilent/Adept layer still')
+        $summary.Add('  fails. Run `probe-diag` to compare the Windows PnP state with what')
+        $summary.Add('  iMPACT sees. No VM configuration change and no automatic USB attach.')
+    }
+    elseif ($facts.CableStatus -ne 'PASS' -and $facts.CableStatus -ne 'UNKNOWN') {
+        $summary.Add(('Cable could not be used: ' + $facts.CableStatus))
+        $summary.Add('  No VM configuration change and no automatic USB attach is performed.')
     }
     foreach ($e in @($facts.Errors)) { $summary.Add(('iMPACT: ' + $e)) }
     if ($sendError) { $summary.Add(('transport: ' + $sendError)) }
@@ -789,10 +815,10 @@ function Invoke-Program {
     if ($sendError) { throw "program: upload failed, nothing was written: $sendError" }
 
     # ---- preflight: probe (read only, same as the probe command) ------------
-    # The fpga-vm USB passthrough is intermittent: iMPACT can fail to open the
-    # cable on one invocation and succeed on the next. A cable that never opened
-    # means nothing was written, so retrying is safe and is done here rather than
-    # left to the caller. A retry NEVER happens once any write could have started.
+    # The Digilent/Adept layer can fail to enumerate the cable on one iMPACT
+    # invocation and succeed on the next, and when it fails nothing was written,
+    # so re-invoking here is safe and is done rather than left to the caller.
+    # A retry NEVER happens once any write could have started.
     Write-Host "Preflight probe ($($run.RunId)) ..."
     $probeStep = $null; $probeText = ''; $probeAttempts = 0
     for ($attempt = 1; $attempt -le $cfg.CableRetryAttempts; $attempt++) {
@@ -800,8 +826,8 @@ function Invoke-Program {
         $probeStep = Invoke-ImpactStep -RemoteRoot ("$script:RemoteRoot/$ProjectName/$($run.RunId)") -StepName 'probe' -TimeoutSeconds $cfg.ProbeTimeoutSeconds
         try { Receive-ProgramResults $ProjectName $run.RunId } catch { }
         $probeText = Get-TextSafe (Join-Path $run.RunDir 'results/probe.log')
-        if (-not (Test-TranscriptCableFailure $probeText) -or $probeStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
-        Write-Host ("  cable not visible inside fpga-vm (preflight attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
+        if (-not (Test-TranscriptCableUnavailable $probeText) -or $probeStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
+        Write-Host ("  iMPACT could not enumerate the cable (preflight attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
         Start-Sleep -Seconds 3
     }
     $probeFacts = Get-ProbeLogFacts $probeText
@@ -879,7 +905,12 @@ function Invoke-Program {
     if (-not $preflightOk) {
         foreach ($line in $preview) { Write-Host $line }
         Write-Host ''
-        if ($probeFacts.CableStatus -eq 'CABLE_NOT_FOUND') { Write-Host 'USB/JTAG cable is not visible inside fpga-vm (no VM change, no automatic USB attach).' }
+        if ($probeFacts.CableStatus -eq 'DIGILENT_ENUM_FAILED') {
+            Write-Host 'DIGILENT_ENUM_FAILED: iMPACT''s Digilent plugin could not enumerate the cable.'
+            Write-Host 'It is NOT established that the USB device is missing from Windows (a present,'
+            Write-Host 'healthy FTDI device can coexist with this failure). No VM configuration change'
+            Write-Host 'and no automatic USB attach is performed; run probe-diag to compare layers.'
+        }
         foreach ($e in @($probeFacts.Errors)) { Write-Host ('iMPACT: ' + $e) }
         $meta.result = 'PREFLIGHT_FAILED'
         Write-Json (Join-Path $run.RunDir 'run.json') $meta
@@ -912,8 +943,8 @@ function Invoke-Program {
 
     $timeout = $(if ($Mode -eq 'Isf') { $cfg.IsfTimeoutSeconds } else { $cfg.JtagTimeoutSeconds })
     Write-Host ("Programming ($Mode, position $Position, timeout ${timeout}s) ...")
-    # Same safe retry as the preflight: only a cable that never opened is retried,
-    # and only while the transcript shows no programming result at all.
+    # Same safe retry as the preflight: only an invocation that could not open the
+    # cable is retried, and only while the transcript shows no programming result.
     $programStep = $null; $programText = ''; $programAttempts = 0
     for ($attempt = 1; $attempt -le $cfg.CableRetryAttempts; $attempt++) {
         $programAttempts = $attempt
@@ -921,8 +952,8 @@ function Invoke-Program {
         try { Receive-ProgramResults $ProjectName $run.RunId } catch { if (-not $programStep.Error) { $programStep.Error = $_.Exception.Message } }
         $programText = Get-TextSafe (Join-Path $run.RunDir 'results/program.log')
         $anyWriteEvidence = [bool]($programText -match '(?i)(Programming Flash|Programming device|Programmed successfully|Programming completed successfully|Completed downloading bit file|Verifying device)')
-        if (-not (Test-TranscriptCableFailure $programText) -or $anyWriteEvidence -or $programStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
-        Write-Host ("  cable not visible inside fpga-vm (program attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
+        if (-not (Test-TranscriptCableUnavailable $programText) -or $anyWriteEvidence -or $programStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
+        Write-Host ("  iMPACT could not enumerate the cable (program attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
         Start-Sleep -Seconds 3
     }
     $interrupted = ($programStep.Error -and -not $programStep.TimedOut)

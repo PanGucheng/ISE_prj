@@ -89,10 +89,19 @@ attribute IDCODE_REGISTER of XC3S50AN_TQ144 : entity is "XXXX" & "0010011" &
 function New-FakeProbeLog {
     switch ($script:ProgProbe) {
         'nocable' {
+            # Real ISE 14.7 shape: the Digilent plugin enumerates zero devices, then
+            # iMPACT falls back to Platform Cable USB and the parallel ports. The
+            # failure is in the Digilent/Adept layer - the FTDI device itself can be
+            # present and healthy in Windows at the same moment.
             return @'
 Release 14.7 - iMPACT P.20131013 (nt)
-INFO:iMPACT - Digilent Plugin: found 0 device(s).
-ERROR:iMPACT - Cable is not detected. Please connect a cable.
+INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4
+INFO:iMPACT - Digilent Plugin: no JTAG device was found.
+AutoDetecting cable. Please wait.
+Connecting to cable (Usb Port - USB21).
+The Platform Cable USB is not detected. Please connect a cable.
+Cable connection failed.
+Cable autodetection failed.
 '@
         }
         'mismatch' {
@@ -750,8 +759,10 @@ Write-Host 'PASS: probe reports cable, chain and a matching XC3S50AN without wri
 $script:ProgProbe = 'nocable'
 Expect-Failure { Invoke-Probe -ProjectName 'fixture' } 'probe: result FAIL'
 $noCableSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'probe-') + '/summary.txt')
-Assert ($noCableSummary -match 'CABLE_NOT_FOUND') 'missing cable not reported'
-Assert ($noCableSummary -match 'not visible inside fpga-vm') 'the USB/VM hint is missing'
+Assert ($noCableSummary -match 'DIGILENT_ENUM_FAILED') 'digilent enumeration failure not reported'
+Assert ($noCableSummary -match 'NOT proof that the USB device is missing') 'the layered diagnosis must not over-claim a missing USB device'
+Assert ($noCableSummary -match 'probe-diag') 'the follow-up diagnostic must be pointed at'
+Assert ($probe.Facts.CableStatus -notmatch 'CABLE_NOT_FOUND') 'the over-claiming status name must be gone'
 
 # --- probe: identified device is not the project device ---------------------
 $script:ProgProbe = 'mismatch'
@@ -905,6 +916,31 @@ $emptyBit = Join-Path $root 'empty.bit'
 [IO.File]::WriteAllBytes($emptyBit, [byte[]]@())
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $emptyBit -ConfirmHardwareWrite } 'bitstream is empty'
 Write-Host 'PASS: probe/program reject missing/empty bitstreams and never write on a failed preflight.'
+
+#=============================================================================
+# 9. probe-diag (layered JTAG cable diagnostics) - script generation only
+#=============================================================================
+$diagAuto = New-DiagProbeScript -CableArgument '-p auto'
+Assert ($diagAuto -match '(?m)^setMode -bs\r?$') 'diag probe script must set the mode first'
+Assert ($diagAuto -match '(?m)^setCable -p auto\r?$') 'diag probe script must use the requested cable argument'
+Assert ($diagAuto -match '(?m)^identify\r?$') 'diag probe script must identify the chain'
+Assert ($diagAuto -match 'readIdcode -p 1') 'diag probe script must read the IDCODE'
+Assert ($diagAuto -match '(?m)^closeCable\r?$') 'diag probe script must close the cable'
+Assert ($diagAuto -notmatch 'assignFile|program|erase') 'probe-diag must stay read only'
+$diagSn = New-DiagProbeScript -CableArgument '-target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY:10000000"'
+Assert ($diagSn -match 'DEVICE=SN:210241672559') 'the explicit-SN variant must carry the measured serial'
+$diagWorker = New-DiagWorkerWithSn -Iterations 7
+Assert ($diagWorker -match 'for /L %%i in \(1,1,7\)') 'the worker must run the requested number of iterations'
+Assert ($diagWorker -match 'iteration,time,launch,sessionname,ftdi_pnp') 'the worker CSV header must record the launch context'
+Assert ($diagWorker -match 'echo DONE>>results.csv') 'the worker must mark completion'
+Assert ($diagWorker -match 'VID_0403') 'the worker must record the Windows PnP presence'
+Assert ($diagWorker -match 'tasklist /fi "imagename eq impact.exe"') 'the worker must look for leftover impact.exe processes'
+Assert ($diagWorker -match 'impact -batch probe_%TAG%\.cmd') 'the worker must run the read-only probe scripts'
+# The cable identity is read from our own transcripts; an empty artifact tree must
+# yield nulls instead of invented values.
+$diagIdentity = Get-KnownCableIdentity -ArtifactRoot (Join-Path $root 'no-such-artifacts')
+Assert ($null -eq $diagIdentity.Serial -and $null -eq $diagIdentity.FrequencyHz) 'no cable identity may be invented'
+Write-Host 'PASS: probe-diag generates read-only layered diagnostics and invents nothing.'
 
 Write-Host ''
 Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'

@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet('doctor','new','check','build','fetch','sim','verify','report','probe','program','board-check')]
+    [ValidateSet('doctor','new','check','build','fetch','sim','verify','report','probe','probe-diag','program','board-check')]
     [string]$Command = 'doctor',
     [string]$Project,
     [ValidateSet('synth','implement','bitstream')][string]$Stage = 'bitstream',
@@ -22,7 +22,10 @@ param(
     # program: JTAG chain position (required when the chain has more than one device)
     [int]$Position = 0,
     # program: without this switch the command only previews what it would do
-    [switch]$ConfirmHardwareWrite
+    [switch]$ConfirmHardwareWrite,
+    # probe-diag: how many measurement iterations, and in which Windows session
+    [int]$Iterations = 10,
+    [ValidateSet('Ssh','Interactive')][string]$DiagSession = 'Ssh'
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -38,6 +41,7 @@ try {
         'verify' { $null = Invoke-Verification -ProjectName $Project }
         'report' { Invoke-Report -ProjectName $Project -RunId $RunId -Latest:$Latest -Json:$Json }
         'probe' { $null = Invoke-Probe -ProjectName $Project }
+        'probe-diag' { $null = Invoke-ProbeDiag -ProjectName $Project -Iterations $Iterations -Session $DiagSession }
         'program' {
             if (-not $Mode) { throw 'program needs -Mode Jtag|Isf (JTAG configuration is volatile, Isf programs the internal flash).' }
             if (-not $BitFile) { throw 'program needs -BitFile <path>.' }
