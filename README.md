@@ -84,3 +84,5 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 fetch -Project demo -Run
 已用 `projects/xc3s50an_smoke` 完成 XC3S50AN 的真实综合、实现及 bit 文件生成（2026-09-13）。构建编号 `20260913-171049-6a6ab77b`，六阶段返回码均为 0；此测试验证了该器件的构建环境和本次运行所需许可。实际开发板尚未验证，其他器件的许可与构建仍需分别验证。详细结果见测试工程 README.md。
 
 工具自测命令为 `pwsh -NoProfile -File .\tools\test-tools.ps1`，使用隔离目录和模拟 SSH/ISE 验证编排错误处理，不代表真实综合通过。真实传输及远端批处理启动验证使用 `doctor -TransferTest`，只调用 ISE 帮助命令，不综合、不烧录。
+
+另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，外部有源晶振为唯一时钟）。其实施计划见 `doc/手指钢琴ISE工程实施计划.md`，工程结构、模块说明、UCF 填写清单、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）与三个 testbench 的远端 ISim 仿真（四组用例全部 PASS），但**尚未填写引脚约束、未做 implement/bitstream、未上板**；晶振频率、速度等级与 TQ144 引脚仍待用户提供。

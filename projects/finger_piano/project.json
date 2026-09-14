@@ -1,0 +1,20 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "finger_piano_top",
+  "sources": [
+    {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
+    {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
+    {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
+    {"path":"src/note_encoder.v",   "language":"verilog", "library":"work"},
+    {"path":"src/tone_generator.v", "language":"verilog", "library":"work"},
+    {"path":"src/finger_piano_top.v","language":"verilog","library":"work"}
+  ],
+  "includeDirs": ["src"],
+  "includeFiles": ["src/finger_piano_cfg.vh"],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/finger_piano.ucf",
+  "constraintsReviewed": false,
+  "optimization": "Speed",
+  "optimizationLevel": 1
+}
