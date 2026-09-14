@@ -38,6 +38,18 @@
 - `board-check` 目前只在缺少 `board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED`；不得猜测引脚，不得自动设置 `constraintsReviewed=true`，本轮不实现烧录。
 - 工具自测 `pwsh -NoProfile -File .\tools\test-tools.ps1` 覆盖失败路径（fuse 失败、超时、无 PASS 模式、failPattern、门禁两个方向、report 缺文件、旧工程兼容），使用隔离目录与模拟远端，不代表真实综合或真实仿真。
 
+## JTAG 探测与烧录
+
+- `probe` 只读：枚举下载线、识别 JTAG 链、读 IDCODE 并与 project.json 的器件核对。下载线不可见时输出 `CABLE_NOT_FOUND` 与 “USB/JTAG cable is not visible inside fpga-vm”，**不得修改 VM 配置或自动 attach USB**，也不得伪造 PASS。
+- `program` 是硬件写操作，**默认只预览**（PREVIEW ONLY：打印 cable/chain/device/position/bitstream/mode 后结束，不生成写脚本、不执行 program）。必须由用户明确要求并带 `-ConfirmHardwareWrite` 才真正写入。
+- 两种模式含义不同、不得混用：`-Mode Jtag` = 通过 JTAG 直接配置 FPGA（VOLATILE，掉电丢失）；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置）。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`（JTAG 无法证明板上跳线）。
+- JTAG/ISF 编程用的是下载线的 TCK，与用户时钟无关；**烧录成功不等于设计工作正常**，`userDesignFunctional` 永远输出 `NOT_TESTED`，禁止打印 `BOARD PASS`。
+- 每次 program 前必须自动 preflight（等价 probe + bit 文件存在且非空 + 器件匹配）；不假定 position=1，多器件未指定 `-Position` 时报 `ERROR: Multiple JTAG devices detected; specify -Position.`。
+- verify 默认开启、禁止默认关闭；iMPACT 表示不适用时报 `NOT_APPLICABLE`，无结论时报 `NOT_REPORTED`，不得伪造 verify 通过。
+- Jtag/Isf 使用不同超时；超时标 `TIMEOUT`、保留日志、非零退出且**不自动重烧**。SSH 在写入中断开 → `PROGRAM_STATE_UNKNOWN`，不得自动重试，先重新 `probe`、查远端 `run.status`、取回原日志再决定。
+- iMPACT 退出码不可靠（同一次失败可能返回 0），判定一律解析转录日志；`setMode` 必须优先，`blankCheck` 等不得乱序调用。
+- 工具只写远端受管目录，不改 ISE 安装；`constraintsReviewed` 始终保持人工确认，不得为了让工具产生 bitstream 而自动置 true。
+
 ## 凭据与操作范围
 
 - 复用 `ssh fpga-vm` 的本机密钥配置。不要要求用户重复提供密码，不向工程或日志写入密码、私钥内容。

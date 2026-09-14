@@ -16,7 +16,7 @@
 | 项 | 值 |
 |---|---|
 | 器件 | `xc3s50an-4-tqg144`（`-4` 暂定，README/project.json 标注 TODO 待按丝印核实） |
-| `SYS_CLK_HZ` 占位 | `50_000_000`，唯一真值源 `src/finger_piano_cfg.vh` |
+| `SYS_CLK_HZ` | `2_000_000`（外部有源晶振已确认为 2 MHz），唯一真值源 `src/finger_piano_cfg.vh`；UCF 时钟约束目标 `PERIOD = 500 ns` |
 | 验证深度 | `build -Stage synth` 成功 + 远端 `fuse`/ISim 编译并运行 3 个 Testbench，共 5 组仿真运行（含 `KEY_ACTIVE_HIGH` = 1/0 与 `KEY_FILTER_ENABLE` = 1/0） |
 | GitHub | `PanGucheng/ISE_prj`，仓库根 `D:\ISE_prj`，**当前为 public（公开）** |
 | 交付工程约束 | `constraintsReviewed` 固定 `false`；UCF 无任何 `LOC`/`IOSTANDARD`/`TIMESPEC` |
@@ -67,7 +67,7 @@ projects/finger_piano/
 ```verilog
 `ifndef FINGER_PIANO_CFG_VH
 `define FINGER_PIANO_CFG_VH
-`define SYS_CLK_HZ        50000000  // TODO: 必须改为板上实际有源晶振频率
+`define SYS_CLK_HZ        2000000   // 外部有源晶振 2 MHz（已确认），UCF PERIOD = 500 ns
 `define KEY_STABLE_MS     10        // 按键数字稳定滤波默认 10 ms
 `define KEY_FILTER_ENABLE 1         // 0 = 关闭滤波（纯直通）
 `define KEY_ACTIVE_HIGH   1         // 1 = 按下为高；0 = 按下为低
@@ -102,24 +102,24 @@ projects/finger_piano/
 ## 6. 文档规格
 
 - **`README.md`**：概述与器件 TODO；端口表；目录结构；模块关系图；4 个宏的配置方法；**2 MHz 课程时基对应说明**（只允许 `ce_2m` 单周期使能，绝不生成 `clk_2m`，本阶段不实现）；UCF 填写清单；`constraintsReviewed=true` 前置检查清单；ISE 综合/实现步骤；仿真步骤；计数器位宽与 214 MHz 边界表述；验证记录；阶段二扩展点。
-- **`frequency_table.md`**：公式与 50 MHz 表（见下），以及改频后重算方法。
+- **`frequency_table.md`**：公式与 2 MHz 表（见下），以及改频后重算方法。
 
 | 音符 | 标称 (Hz) | dHz | 半周期计数 N | 理论输出 (Hz) | 误差 |
 |---|---|---|---|---|---|
-| 1 C4 | 261.62 | 2616 | 95566 | 261.5993 | −0.0079% |
-| 2 D4 | 293.67 | 2937 | 85121 | 293.6996 | +0.0101% |
-| 3 E4 | 329.63 | 3296 | 75850 | 329.5979 | −0.0097% |
-| 4 F4 | 349.23 | 3492 | 71592 | 349.2010 | −0.0083% |
-| 5 G4 | 391.99 | 3920 | 63776 | 391.9970 | −0.0018% |
-| 6 A4 | 440.00 | 4400 | 56818 | 440.0014 | +0.0003% |
-| 7 B4 | 493.88 | 4939 | 50618 | 493.8955 | −0.0031% |
+| 1 C4 | 261.62 | 2616 | 3823 | 261.5747 | −0.0173% |
+| 2 D4 | 293.67 | 2937 | 3405 | 293.6858 | +0.0054% |
+| 3 E4 | 329.63 | 3296 | 3034 | 329.5979 | −0.0097% |
+| 4 F4 | 349.23 | 3492 | 2864 | 349.1620 | −0.0195% |
+| 5 G4 | 391.99 | 3920 | 2551 | 392.0031 | +0.0034% |
+| 6 A4 | 440.00 | 4400 | 2273 | 439.9472 | −0.0120% |
+| 7 B4 | 493.88 | 4939 | 2025 | 493.8272 | −0.0107% |
 
 ## 7. 构建与验证（按序，失败即停、如实报告）
 
 1. `check -Project finger_piano -Stage synth` → PASS。
 2. `build -Project finger_piano -Stage synth` → 退出码 0；读 `synthesis.srp` 与日志：0 ERROR、无 latch、无多驱动；确认 `design.ngc`；记录 run id。
 3. `check -Project finger_piano -Stage implement` → **必须按设计失败**。
-4. 静态合规检查：`genvar` 只允许独立声明；顶层无 `KEY_WIDTH`；极性逻辑只在顶层；时序边沿只允许 `posedge clk` 与 `negedge rst_n`/`negedge rst_n_sync`；无 `clk_2m`；`50000000` 只在 `cfg.vh`；无 SystemVerilog 特性。
+4. 静态合规检查：`genvar` 只允许独立声明；顶层无 `KEY_WIDTH`；极性逻辑只在顶层；时序边沿只允许 `posedge clk` 与 `negedge rst_n`/`negedge rst_n_sync`；无 `clk_2m`；具体时钟频率字面量只在 `cfg.vh`；无 SystemVerilog 特性。
 5. 远端仿真：每 TB 一个 prj，`fuse -prj sim_<tb>.prj -top <tb> -i src -o <tb>.exe`，退出码与 `>` 之间留空格；运行 exe，120 s 超时，判据为日志出现 `PASS`；极性用例加跑 `--generic_top "TB_KEY_ACTIVE_HIGH=0"`；若无法批处理运行则如实报告“仅完成 fuse 编译验证”。
 6. 结果写入 README；`summary.txt` 时序结论保持 NEEDS_REVIEW。
 
@@ -170,8 +170,8 @@ ADC、DDS、显示屏、数码管、PWM 音量、和弦、UART、自动演奏器
 [x] README 写明 2 MHz 课程要求与本工程单时钟实现的对应关系
 [x] README/UCF 写明 debug 顶层端口的最终约束策略
 [x] 仓库已推送（当前 public），git status 干净，远端 HEAD 与本地一致
-[x] frequency_table.md 的 PowerShell 重算脚本显式 Floor，50 MHz 七个 N 与 RTL 完全一致
-[x] 滤波计数器容量公式含 /1000，19 位足够 / 24 位裕量 / 50 MHz 上限约 335 ms 均核对
+[x] frequency_table.md 的 PowerShell 重算脚本显式 Floor，2 MHz 下七个 N（3823/3405/3034/2864/2551/2273/2025）与 RTL 完全一致
+[x] 滤波计数器容量公式含 /1000，2 MHz/10 ms = 20000 周期（15 位够）、24 位裕量、上限约 8388 ms 均核对
 [x] KEY_FILTER_ENABLE=0 旁路最小验证 PASS
 
 尚未完成（等待实际板级参数，不计入本轮）：

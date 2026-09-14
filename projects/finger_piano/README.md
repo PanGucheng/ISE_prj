@@ -70,7 +70,7 @@ projects/finger_piano/
 
 | 宏 | 默认 | 含义 |
 |---|---|---|
-| `` `SYS_CLK_HZ `` | `50000000` | **板上实际有源晶振频率，必须核对后修改**；所有时序常量都由它推导 |
+| `` `SYS_CLK_HZ `` | `2000000` | **外部有源晶振频率 = 2 MHz（已确认）**；所有时序常量都由它推导 |
 | `` `KEY_STABLE_MS `` | `10` | 按键数字稳定滤波时间（ms），默认 10 ms |
 | `` `KEY_FILTER_ENABLE `` | `1` | `1` 开启滤波；`0` 关闭（纯直通，零资源） |
 | `` `KEY_ACTIVE_HIGH `` | `1` | `1`=按下为高；`0`=按下为低（外部比较器输出极性） |
@@ -78,12 +78,14 @@ projects/finger_piano/
 | `` `FP_TONE_CNT_WIDTH `` | `24` | 音频半周期计数器位宽 |
 
 - **禁止**把具体频率写进其它模块：其他 RTL 只通过 `parameter SYS_CLK_HZ = `SYS_CLK_HZ` 取默认值，并由顶层参数向下覆盖。改频后 `frequency_table.md` 的表格需按同公式重算（见该文件）。
-- UCF 中 `TIMESPEC PERIOD` 的 ns 值必须与 `` `SYS_CLK_HZ `` 一致：`PERIOD_ns = 1000 / SYS_CLK_MHz`。
+- UCF 中 `TIMESPEC PERIOD` 的 ns 值必须与 `` `SYS_CLK_HZ `` 一致：`PERIOD_ns = 1000 / SYS_CLK_MHz`。本工程 2 MHz → **`PERIOD = 500 ns`**（该值仍只以注释形式写在 UCF 模板里，clk 的 `LOC` 未确认前不得填写）。
 - 仿真时不需要改动本文件：testbench 用参数覆盖（`#(.SYS_CLK_HZ(...))`）把系统时钟降到 1 MHz 以缩短仿真时间。
 
 ## 5. 与课程资料“2 MHz 分频”的对应关系
 
 > 课程资料使用 2 MHz 时基分频作为基础实现提示。本工程为避免由普通逻辑产生新的内部时钟域，统一采用外部有源晶振作为唯一系统时钟，并通过同步计数器或 clock-enable 实现等效分频。若实际系统晶振可整数分频得到 2 MHz，可产生 `ce_2m` 单周期时钟使能，但不将其作为独立时钟驱动时序逻辑。
+
+**本工程的最新情况**：板上外部有源晶振已确认为 **2 MHz**，即系统时钟本身就是课程资料里的那个 2 MHz 时基，因此本工程**不需要任何分频，也不需要 `ce_2m`**：`tone_generator` 直接对 2 MHz 计数得到七音半周期（见 `frequency_table.md`）。仍然禁止出现 `clk_2m` 之类的第二时钟域。
 
 即：**不允许**出现 `always @(posedge clk_2m)` 这类第二时钟域，也不允许把 `audio_out` 当时钟。本阶段没有实现 `ce_2m`（`tone_generator` 直接从 `SYS_CLK_HZ` 计数，功能等价且不需要中间时基）；阶段二若需要 2 MHz 时基，只允许以单周期使能 `ce_2m` 的形式接入。
 
@@ -247,6 +249,33 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 - **DDS 正弦波**：把 `tone_generator` 的“半周期翻转”替换为相位累加器 + 正弦查找表（可用 `ip/` 下的分布式 ROM 或 Block RAM）；`SYS_CLK_HZ` 与相位增量仍由同一参数推导。
 
 ## 13. 验证记录
+
+### 第五轮：时钟确认为 2 MHz + JTAG/ISF 烧录工具（2026-09-14）
+
+**时钟**：外部有源晶振已确认为 **2 MHz**。`src/finger_piano_cfg.vh` 的 `` `SYS_CLK_HZ `` 由占位的 50 000 000 改为 **2 000 000**；`frequency_table.md` 用 RTL 等价脚本（`[int64]` + `[math]::Floor`）重算，并新增 `tone_generator_2m` 用例在真实 2 MHz 下**实测**半周期：
+
+| 音符 | 频率表 N | 2 MHz 实测 N | f_out (Hz) | 误差 |
+|---|---|---|---|---|
+| C4 | 3823 | 3823 | 261.5747 | −0.0173% |
+| D4 | 3405 | 3405 | 293.6858 | +0.0054% |
+| E4 | 3034 | 3034 | 329.5979 | −0.0097% |
+| F4 | 2864 | 2864 | 349.1620 | −0.0195% |
+| G4 | 2551 | 2551 | 392.0031 | +0.0034% |
+| A4 | 2273 | 2273 | 439.9472 | −0.0120% |
+| B4 | 2025 | 2025 | 493.8272 | −0.0107% |
+
+表与 RTL **逐位一致**（相位重启用例实测 D4 = 3405）。与“按实数频率取整”的预期值相比：D4/E4/G4/A4/B4 一致；**C4 得到 3823（预期 3822）、F4 得到 2864（预期 2863）**，各差 1 个计数——原因是 RTL 使用 0.1 Hz 整数频率表（261.6 / 349.2 Hz）配合「先加半个除数再截断」，而实数取整是另一条路径。两种取值的误差都 ≤ 0.02%，远优于 1%；表格以 **RTL 实际算法**为准（见 `frequency_table.md` 的说明）。若要与实数取整逐位一致，需要把 `tone_generator.v` 的频率常量精度从 0.1 Hz 改为 0.01 Hz——属 RTL 修改，本轮未做。
+
+滤波与位宽：2 MHz × 10 ms → `STABLE_CYCLES = 20000`（15 位就够），`FP_FILTER_CNT_WIDTH = 24` 保持不变、**无需缩位**；24 位下 `KEY_STABLE_MS` 上限约 8388 ms。UCF 时钟约束目标为 **`PERIOD = 500 ns`**，但仍只写在注释里——clk 的 `LOC` 未确认前不得填写。
+
+**烧录工具**：新增只读 `probe` 与 `program -Mode Jtag|Isf`，其中 iMPACT batch 命令全部来自对真实 ISE 14.7 的实测（命令表、顺序要求、退出码不可靠、IDCODE 0x02610093 等，详见根 README 的「JTAG 探测与烧录」）。`constraintsReviewed` 仍为 `false`，没有为了让工具产生 bitstream 而让 ISE 自动分配未知 I/O。
+
+**本轮验证（2 MHz 配置，6 个仿真用例）**
+
+- 综合：`20260914-164037-9a8f4f9d`（verify 内）与 `20260914-163756-0fc737e0`（单独 build）→ 0 errors / 0 warnings / 0 latches，231 个触发器、20 个 I/O，`design.ngc` 已生成。
+- 仿真全部 PASS：`note_encoder`、`tone_generator`、**`tone_generator_2m`**（`sim-20260914-164029-dfcb69a7`，实测半周期与频率表逐位一致）、`top_default`、`top_active_low`、`top_filter_bypass`。
+- `verify` → **Overall PASS**（`verify-20260914-164037-b82da68b`，Stage `PRE_BOARD`）：静态检查 PASS、综合 0 errors/0 warnings、warnings 策略 blocking、implement 门禁 EXPECTED BLOCK = PASS。
+- 烧录相关：`probe` 实测三次——16:19 下载线可见（Digilent JTAG-HS2）但 `identify` 报链未识别；16:27 / 16:28 通过工具再测时下载线已从 VM 消失（`no JTAG device was found`）→ 工具如实报 `CABLE_NOT_FOUND` + `JTAG chain NOT_RUN` + `Result FAIL`，未改 VM 配置、未自动 attach USB。**本轮没有执行任何 program 写入。**
 
 ### 第四轮：report 缺文件判定收紧 + 综合 warning 策略（2026-09-14）
 

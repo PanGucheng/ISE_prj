@@ -14,10 +14,12 @@
 `ifndef FINGER_PIANO_CFG_VH
 `define FINGER_PIANO_CFG_VH
 
-// 外部有源晶振频率（Hz）。TODO: 必须以板上实际晶振频率替换本占位值！
-// 允许范围：远大于 2*493.88 Hz，且 SYS_CLK_HZ*10 不得溢出 32 位有符号整数
-//           （即 <= 约 214 MHz）。
-`define SYS_CLK_HZ        50000000
+// 外部有源晶振频率（Hz）。本工程实际使用 **2 MHz** 有源晶振（已确认）。
+//   - UCF 时钟约束应为 TIMESPEC PERIOD = 500 ns（1000 / 2 MHz）。
+//   - 在 TQ144 板级时钟输入引脚确认之前，仍不得填写 clk 的 LOC。
+//   - 允许范围：远大于 2*493.88 Hz，且 SYS_CLK_HZ*10 不得溢出 32 位有符号整数
+//     （即 <= 约 214 MHz）。
+`define SYS_CLK_HZ        2000000
 
 // 按键数字稳定滤波时间（ms）。默认 10 ms。
 // 生效容量条件（注意 /1000，ms 与 Hz 差千倍）：
@@ -32,13 +34,12 @@
 `define KEY_ACTIVE_HIGH   1
 
 // 滤波计数器位宽。RTL 计算 STABLE_CYCLES = (SYS_CLK_HZ / 1000) * STABLE_MS；
-// 50 MHz / 10 ms 时为 500000，19 位已足够（2^19 = 524288），24 位为更高系统
-// 时钟和更长滤波时间预留裕量。容量条件：
+// 2 MHz / 10 ms 时为 20000，15 位就够（2^15 = 32768），24 位裕量很大。容量条件：
 //   (SYS_CLK_HZ / 1000) * KEY_STABLE_MS <= 2**`FP_FILTER_CNT_WIDTH
-// 24 位、50 MHz 下 KEY_STABLE_MS 上限约 335 ms（2^24 / 50000 = 335.5）。
+// 24 位、2 MHz 下 KEY_STABLE_MS 上限约 8388 ms（2^24 / 2000）。
 `define FP_FILTER_CNT_WIDTH 24
 
-// 音频半周期计数器位宽。50 MHz 下最高音 B4 只需 50618（16 位），24 位充足。
+// 音频半周期计数器位宽。2 MHz 下最高音 B4 只需 2025（11 位），24 位非常充足。
 `define FP_TONE_CNT_WIDTH   24
 
 `endif // FINGER_PIANO_CFG_VH

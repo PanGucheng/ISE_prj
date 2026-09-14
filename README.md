@@ -28,6 +28,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 verify -Project finger_p
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 report -Project finger_piano -Latest
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 report -Project finger_piano -RunId <构建编号> -Json
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 board-check -Project finger_piano
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 probe       -Project finger_piano
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 program -Project finger_piano -Mode Jtag -BitFile <path>
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile <path> -ConfirmHardwareWrite
 ```
 
 填写 `projects/demo/project.json`，把源码放入 src，把 UCF 放入 constraints。配置示例仅展示格式，器件、顶层和约束必须按实际工程填写：
@@ -191,6 +194,117 @@ pwsh -File .\ise.ps1 board-check -Project finger_piano
 
 没有 `projects/<工程>/board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED` 并列出还缺什么；`board.json` 已存在时输出 `BOARD_CHECK: NOT_IMPLEMENTED`。**不猜引脚、不改 UCF、不自动设置 `constraintsReviewed`，本轮不实现烧录。**
 
+## JTAG 探测与烧录（probe / program）
+
+`probe` 是**只读**的；`program` 是**硬件写操作**，默认只预览，必须显式加 `-ConfirmHardwareWrite` 才会真正写入。
+
+```powershell
+pwsh -File .\ise.ps1 probe   -Project finger_piano
+pwsh -File .\ise.ps1 program -Project finger_piano -Mode Jtag -BitFile .\design.bit     # 预览
+pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.bit -ConfirmHardwareWrite
+```
+
+两个模式含义不同，不允许混用：
+
+| 模式 | 含义 | 掉电后 | iMPACT 命令 |
+|---|---|---|---|
+| `-Mode Jtag` | 通过 JTAG 直接配置 FPGA 逻辑（SRAM） | **VOLATILE**，配置丢失 | `assignFile -p N -file x.bit` + `program -p N -v` |
+| `-Mode Isf` | 通过 JTAG 编程 Spartan-3AN **内部 In-System Flash** | **NON-VOLATILE**，上电自动配置 | `assignFileToAttachedFlash -p N -file x.bit` + `program -p N -spi`，随后 `verify -p N -spi` |
+
+**JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 2 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 2 MHz 时钟才能发声）。
+
+### iMPACT batch 命令是实测得到的，不是猜的
+
+本轮在真实 Win7/ISE 14.7 上做了如下探测，结论写进了工具：
+
+| 实测项 | 结果 |
+|---|---|
+| `impact -batch <file>` | 可无 GUI 运行，输出重定向到日志 |
+| `help`（在 batch 内） | 打印本安装支持的完整命令表，含 `assignfiletoattachedflash`、`attachflash`、`blankcheck`、`readidcode`、`checkidcode`、`erase`、`program`、`verify`、`setmode`、`setcable` 等 |
+| `help -m program` / `-m verify` / `-m erase` / `-m identify` | 打印这些命令的权威语法（`-spi[<part>]`、`-spionly`、`-p|-position`、`-e|-erase`、`-v|-verify` 等）；其余命令 `help -c` 只回显名字 |
+| 顺序要求 | 除 `setMode` 外一切命令都报 `ERROR:iMPACT:351 - setMode is required before this operation.`，所以脚本必须 `setMode` 优先 |
+| `setMode -bs` / `-bscan` | 均被接受（RC=0）；`setMode` 空参 → `ERROR:iMPACT:339 - Mode string is required` |
+| `setCable -p auto` | 通过 Digilent 插件枚举/打开下载器（实测枚举到 Digilent JTAG-HS2，SN 210241672559，TCK 10 MHz） |
+| `assignFile -p N -file X`、`assignFileToAttachedFlash -p N -file X` | 语法被接受（无链时只报 `ERROR:iMPACT:589 - No devices on chain, can't assign file`，未报参数错误） |
+| `listUsbCables` | 只认 Xilinx Platform Cable USB，实测在有 Digilent 线时仍报“未检测到 Platform Cable”→ **不能**用作通用下载线探测 |
+| `blankCheck`（未先 setMode） | iMPACT 直接崩溃（RC `-1073741819` = 0xC0000005），因此工具绝不乱序调用 |
+| **退出码可信度** | **不可靠**：同一条失败的 `identify` 一次返回 0、一次返回 1。工具因此只把退出码当记录，判定一律解析转录日志 |
+| XC3S50AN IDCODE | `0x02610093`，取自本安装自带的 `spartan3a/data/xc3s50an_tq144_1532.bsd`（工具在 probe 时读取该 BSDL 作为期望值并留档） |
+
+### probe 的输出与判定
+
+```
+ISE PROGRAMMER PROBE
+
+iMPACT          PASS
+Cable           PASS | CABLE_NOT_FOUND | UNKNOWN
+JTAG chain      PASS | FAIL | INCONCLUSIVE | NOT_RUN
+
+Position 1:
+  Device        <器件名或 UNKNOWN>
+  IDCODE        0x........
+
+Expected        xc3s50an
+Match           YES | NO | UNDETERMINED
+Result          PASS | FAIL
+```
+
+- 下载线不可见时输出 `CABLE_NOT_FOUND` 与 `USB/JTAG cable is not visible inside fpga-vm`，**不修改 VM 配置、不自动 USB attach**，只报告。
+- 只有「下载线 PASS + 链 PASS + 器件匹配」才 PASS；解析不出器件时是 `UNDETERMINED`/`FAIL`，**绝不伪造成 PASS**。
+- probe 会下载对应 BSDL 到 `artifacts/probe-*/inputs/fpga.bsd` 作为期望 IDCODE 的依据与留档。
+
+### program 的安全与状态模型
+
+- 强制 preflight：每次 `program` 先自动做一次与 `probe` 等价的只读检查（iMPACT 可执行、下载线、链、目标 position、器件系列匹配、bit 文件存在且非空）。
+- `-Position`：**不假定 position=1**。链上恰好一个器件才自动选 1；多于一个器件而未指定 → `ERROR: Multiple JTAG devices detected; specify -Position.`。
+- bit 文件：从 `.bit` 文本头尽量解析 `Target Device/Package/Speed` 并与 JTAG 实物对照；**解析不出来就明确写 `NOT_PARSED` 并依赖 iMPACT 自身的器件兼容检查**，不自行发明解析规则。
+- 无 `-ConfirmHardwareWrite` → `PREVIEW ONLY`：打印 cable / chain / device / position / bitstream / mode 后立即结束，**不下载写脚本、不执行 program**（连 `program.cmd` 都不会生成）。
+- 超时：`Jtag` 与 `Isf` 用不同超时（默认 300 s / 600 s，probe 120 s，verify 300 s，可在 project.json 的 `programming` 段覆盖）。超时 → 非零退出、保留日志、标记 `TIMEOUT`，**不自动重烧**。
+- SSH 在写入过程中断开 → `PROGRAM_STATE_UNKNOWN`：因为无法确定第一次写操作进行到哪一步，工具**不会自动重试**，并要求先重新 `probe`、查看远端 `run.status`、取回原日志，再决定是否重烧。
+- 状态严格分开，前五项由工具判断，最后一项永远是 `NOT_TESTED`：
+
+```
+cableDetected        PASS / CABLE_NOT_FOUND / UNKNOWN
+jtagChainDetected    PASS / FAIL / INCONCLUSIVE / NOT_RUN
+deviceMatched        PASS / FAIL / UNDETERMINED
+programmingCompleted PASS / PASS_UNCONFIRMED / FAIL / TIMEOUT / PROGRAM_STATE_UNKNOWN / NOT_RUN
+programmingVerified  VERIFIED / NOT_APPLICABLE / NOT_REPORTED / FAIL / TIMEOUT / NOT_RUN
+userDesignFunctional NOT_TESTED
+```
+
+**Verify 默认开启，禁止默认关闭。** JTAG 直配若 iMPACT 表示 verify 不适用，工具据日志报 `NOT_APPLICABLE`；日志没给结论就报 `NOT_REPORTED`；**任何情况下都不伪造 verify 通过**。烧录成功也不会打印 `BOARD PASS`。
+
+`-Mode Isf` 在执行前一定会打印持久启动的硬件前置条件（JTAG 无法证明板上跳线是否正确）：
+
+```
+Persistent boot requirements:
+  Internal Master SPI mode M[2:0] = 011
+  VCCAUX = 3.3 V
+```
+
+### 产物与配置
+
+每次操作一个独立目录 `projects/<工程>/artifacts/{probe,program}-<时间戳>-<随机>/`：`run.json`（operation/project/mode/device/position/bitFile/bitFileSha256/result/时间戳等，**不含任何凭据**）、`inputs/`（bit 文件与 BSDL 副本）、`generated/`（`probe.cmd`、`program.cmd`、`verify.cmd`、`run_*.cmd`、`probe.expected.txt`）、`results/`（各步 `*.log`、`*.exitcode`、`*.status`）、`summary.txt`。`artifacts/` 仍被 `.gitignore` 排除。
+
+可选配置（`project.json`）：
+
+```json
+"programming": {
+  "cablePort": "auto",
+  "probeTimeoutSeconds": 120,
+  "jtagTimeoutSeconds": 300,
+  "isfTimeoutSeconds": 600,
+  "verifyTimeoutSeconds": 300
+}
+```
+
+### 本轮真实硬件观察（未做任何写入）
+
+- 16:19 手工探测时，Digilent JTAG-HS2 **可见**（`found 1 device(s)`），但 `identify` 报 iMPACT 的硬件配置错误（链未识别）。
+- 16:27 / 16:28 通过工具再探测两次，Digilent 插件报 `no JTAG device was found`，即**下载线在两次之间从 fpga-vm 中消失**（USB 透传/硬件状态问题，非工具差异；用同一份脚本手工复跑得到同样结果）。
+- 工具如实报告 `CABLE_NOT_FOUND` + `JTAG chain NOT_RUN` + `Result FAIL`，并未修改 VM 配置、未自动 attach USB。
+- **本轮没有执行任何 `program` 写入**；`Mode Isf` 的端到端烧录流程仍需要在真实上电板卡上做一次验证。
+
 ## 排错与验证范围
 
 - Permission denied：检查本机 SSH 别名和 IdentityFile，先运行 ssh fpga-vm whoami。
@@ -203,4 +317,4 @@ pwsh -File .\ise.ps1 board-check -Project finger_piano
 
 工具自测命令为 `pwsh -NoProfile -File .\tools\test-tools.ps1`，使用隔离目录和模拟 SSH/ISE 验证编排错误处理，不代表真实综合通过。真实传输及远端批处理启动验证使用 `doctor -TransferTest`，只调用 ISE 帮助命令，不综合、不烧录。
 
-另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，外部有源晶振为唯一时钟）。其实施计划见 `doc/手指钢琴ISE工程实施计划.md`，工程结构、模块说明、UCF 填写清单、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）与三个 testbench 的远端 ISim 仿真（五组用例，含输入极性与滤波旁路，全部 PASS），但**尚未填写引脚约束、未做 implement/bitstream、未上板、未实测频率**；晶振频率、速度等级与 TQ144 引脚仍待用户提供。
+另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，外部 2 MHz 有源晶振为唯一时钟）。其实施计划见 `doc/手指钢琴ISE工程实施计划.md`，工程结构、模块说明、UCF 填写清单、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）与三个 testbench 的远端 ISim 仿真（六组用例：默认、极性两种取值、滤波旁路、2 MHz 频率算术，全部 PASS），但**尚未填写引脚约束、未做 implement/bitstream、未上板、未实测频率**；速度等级与 TQ144 引脚仍待用户提供。

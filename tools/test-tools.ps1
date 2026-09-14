@@ -70,25 +70,89 @@ endmodule
 $script:Scenario = 'pass'   # pass | fusefail | simfail | no-pattern | fail-pattern | timeout
 $script:Mode = 'success'    # success | failure | disconnect (build flow)
 $script:SynthWarnings = 0   # XST warning count written into the mock synthesis report
+$script:ProgProbe = 'ok'     # ok | nocable | mismatch | twoDevices
+$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail
+$script:ProgVerify = 'ok'    # ok | fail | notapplicable | noreport
 $script:Remote = $null
+$script:ImpactSteps = New-Object System.Collections.Generic.List[string]
+
+function Get-FakeBsdl {
+    return @'
+-- MOCK BSDL (unit test fixture, not a real Xilinx file)
+attribute INSTRUCTION_LENGTH of XC3S50AN_TQ144 : entity is 6;
+attribute IDCODE_REGISTER of XC3S50AN_TQ144 : entity is "XXXX" & "0010011" &
+    "000010000" & "00001001001" & "1";
+'@
+}
+function New-FakeProbeLog {
+    switch ($script:ProgProbe) {
+        'nocable' {
+            return @'
+Release 14.7 - iMPACT P.20131013 (nt)
+INFO:iMPACT - Digilent Plugin: found 0 device(s).
+ERROR:iMPACT - Cable is not detected. Please connect a cable.
+'@
+        }
+        'mismatch' {
+            return @'
+Release 14.7 - iMPACT P.20131013 (nt)
+INFO:iMPACT - Digilent Plugin: opening device: "JtagHs2", SN:210241672559
+INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559
+INFO:iMPACT - Digilent Plugin: JTAG Clock Frequency: 10000000 Hz
+Identifying chain contents...done.
+'1': IDCODE = 0x04001093
+'1': : Manufacturer's ID = Xilinx xc6slx9, Version : 2
+'@
+        }
+        'twoDevices' {
+            return @'
+Release 14.7 - iMPACT P.20131013 (nt)
+INFO:iMPACT - Digilent Plugin: opening device: "JtagHs2", SN:210241672559
+INFO:iMPACT - Digilent Plugin: JTAG Clock Frequency: 10000000 Hz
+Identifying chain contents...done.
+'1': IDCODE = 0x02610093
+'1': : Manufacturer's ID = Xilinx xc3s50an, Version : 4
+'2': IDCODE = 0x04001093
+'2': : Manufacturer's ID = Xilinx xc6slx9, Version : 2
+'@
+        }
+        default {
+            return @'
+Release 14.7 - iMPACT P.20131013 (nt)
+INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4
+INFO:iMPACT - Digilent Plugin: found 1 device(s).
+INFO:iMPACT - Digilent Plugin: opening device: "JtagHs2", SN:210241672559
+INFO:iMPACT - Digilent Plugin: Product Name: Digilent JTAG-HS2
+INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559
+INFO:iMPACT - Digilent Plugin: JTAG Clock Frequency: 10000000 Hz
+Identifying chain contents...done.
+'1': IDCODE = 0x02610093
+'1': : Manufacturer's ID = Xilinx xc3s50an, Version : 4
+Elapsed time =      1 sec.
+'@
+        }
+    }
+}
 
 function Get-RemoteRun([string]$RemotePath) {
-    $m = [regex]::Match($RemotePath, '(?<id>(?:sim-|verify-)?\d{8}-\d{6}-[a-f0-9]{8})/(?<rest>[^"]+)$')
+    $m = [regex]::Match($RemotePath, '(?<id>(?:sim-|verify-|probe-|program-)?\d{8}-\d{6}-[a-f0-9]{8})/(?<rest>[^"]+)$')
     if (-not $m.Success) { throw "Unexpected remote path in test mock: $RemotePath" }
     return @{ Id = $m.Groups['id'].Value; Rest = $m.Groups['rest'].Value.Replace('/', '\') }
 }
 function Initialize-FakeRemote([string]$RunId) {
     $dir = Join-Path $root ('remote-' + $RunId)
-    foreach ($sub in @('inputs', 'results', 'out')) { New-Item -ItemType Directory -Force -Path (Join-Path $dir $sub) | Out-Null }
+    foreach ($sub in @('inputs', 'results', 'out', 'work')) { New-Item -ItemType Directory -Force -Path (Join-Path $dir $sub) | Out-Null }
     $script:Remote = $dir
     return $dir
 }
 function Invoke-Ssh([string]$RemoteCommand) {
     if ($RemoteCommand -match 'mkdir') {
-        $id = [regex]::Match($RemoteCommand, '(?<id>(?:sim-|verify-)?\d{8}-\d{6}-[a-f0-9]{8})')
+        $id = [regex]::Match($RemoteCommand, '(?<id>(?:sim-|verify-|probe-|program-)?\d{8}-\d{6}-[a-f0-9]{8})')
         if ($id.Success) { $null = Initialize-FakeRemote $id.Groups['id'].Value }
         return ''
     }
+    if ($RemoteCommand -match 'if exist .*\.bsd') { return 'FOUND' }
+    if ($RemoteCommand -match 'dir /b /s .*\.bsd') { return 'C:\Xilinx\14.7\ISE_DS\ISE\spartan3a\data\xc3s50an_tq144.bsd' }
     if ($RemoteCommand -match 'taskkill|echo TIMEOUT') {
         $statusFile = Join-Path $script:Remote 'results/run.status'
         Add-Content -LiteralPath $statusFile -Value 'TIMEOUT'
@@ -152,8 +216,39 @@ function Invoke-Ssh([string]$RemoteCommand) {
     throw "Unexpected remote command in test mock: $RemoteCommand"
 }
 function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
-    if ($script:Scenario -eq 'timeout' -and $RemoteCommand -match 'run\.cmd' -and $RemoteCommand -notmatch '_tool') {
+    if ($script:Scenario -eq 'timeout' -and $RemoteCommand -match 'run\.cmd' -and $RemoteCommand -notmatch '_tool' -and $RemoteCommand -notmatch 'run_(probe|program|verify)') {
         throw 'TIMEOUT: simulated simulation timeout'
+    }
+    if ($RemoteCommand -match 'run_(probe|program|verify)\.cmd') {
+        $step = $Matches[1]
+        $script:ImpactSteps.Add($step)
+        $results = Join-Path $script:Remote 'results'
+        New-Item -ItemType Directory -Force -Path $results | Out-Null
+        if ($step -eq 'program') {
+            if ($script:ProgProgram -eq 'timeout') { throw 'TIMEOUT: simulated impact timeout' }
+            if ($script:ProgProgram -eq 'interrupted') { throw 'SSH exit 255: simulated connection drop during program' }
+        }
+        switch ($step) {
+            'probe' { Write-Utf8 "$results/probe.log" (New-FakeProbeLog) }
+            'program' {
+                if ($script:ProgProgram -eq 'fail') {
+                    Write-Utf8 "$results/program.log" "ERROR:iMPACT:1234 - simulated programming failure`n"
+                } else {
+                    Write-Utf8 "$results/program.log" "INFO:iMPACT - programming device '1'`nProgramming operation completed successfully`n"
+                }
+            }
+            'verify' {
+                switch ($script:ProgVerify) {
+                    'fail' { Write-Utf8 "$results/verify.log" "ERROR:iMPACT:4321 - simulated verify mismatch`n" }
+                    'notapplicable' { Write-Utf8 "$results/verify.log" "ERROR:iMPACT:9 - verify is not applicable for this configuration mode`n" }
+                    'noreport' { Write-Utf8 "$results/verify.log" "INFO:iMPACT - finished`n" }
+                    default { Write-Utf8 "$results/verify.log" "Verify operation completed successfully`n" }
+                }
+            }
+        }
+        Write-Utf8 "$results/$step.status" 'COMPLETE'
+        Write-Utf8 "$results/$step.exitcode" '0'
+        return ''
     }
     return Invoke-Ssh $RemoteCommand
 }
@@ -178,6 +273,10 @@ function Invoke-Sftp([string[]]$Lines) {
             foreach ($child in @(Get-ChildItem -LiteralPath $src -Force)) {
                 Copy-Item -LiteralPath $child.FullName -Destination $Matches[2] -Recurse -Force
             }
+        } elseif ($line -match '^get "([^"]+)" "([^"]+)"$') {
+            if ($Matches[1] -notmatch '\.bsd$') { throw "Unexpected SFTP get: $line" }
+            New-Item -ItemType Directory -Force -Path (Split-Path $Matches[2]) | Out-Null
+            Write-Utf8 $Matches[2] (Get-FakeBsdl)
         } else { throw "Unexpected SFTP request: $line" }
     }
 }
@@ -497,6 +596,162 @@ Assert ($legacyVerify.result -eq 'PASS') "legacy project verify expected PASS, g
 Invoke-BoardCheck -ProjectName 'legacy' | Out-Null
 Write-Host 'PASS: projects without simulations/verification keep working for check/build, and sim/verify say so explicitly.'
 
+#=============================================================================
+# 8. probe / program (JTAG configuration and Spartan-3AN internal ISF)
+#=============================================================================
+function Get-LatestProgrammerRun([string]$ProjectName, [string]$Prefix) {
+    $d = Get-ChildItem "$root/projects/$ProjectName/artifacts" -Directory | Where-Object { $_.Name -match ('^' + $Prefix) } |
+        Sort-Object -Property @{ Expression = 'CreationTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $true } |
+        Select-Object -First 1
+    Assert ($null -ne $d) "no $Prefix run directory found"
+    return $d.FullName
+}
+
+$script:ProgProbe = 'ok'; $script:ProgProgram = 'ok'; $script:ProgVerify = 'ok'
+$bitPath = Join-Path $root 'fixture-design.bit'
+$bitHeader = "Bitstream generation date/time: 2026/09/14 16:00:00`r`nTarget Device: xc3s50an`r`nTarget Package: tq144`r`nTarget Speed: -4`r`n"
+[IO.File]::WriteAllBytes($bitPath, ([Text.Encoding]::ASCII.GetBytes($bitHeader) + [byte[]](0..255)))
+
+# --- pure parsers -----------------------------------------------------------
+$devFacts = Get-ExpectedDeviceFacts 'xc3s50an-4-tqg144'
+Assert ($devFacts.Part -eq 'xc3s50an') 'device part not parsed'
+Assert ($devFacts.BsdlPackage -eq 'tq144') 'Pb-free package not normalised for BSDL lookup'
+$bsdlId = Get-BsdlIdcode (Get-FakeBsdl)
+Assert ($bsdlId.IdcodeHex -eq '0x02610093') "BSDL IDCODE parse failed: $($bsdlId.IdcodeHex)"
+Assert ($bsdlId.InstructionLength -eq 6) 'BSDL instruction length not parsed'
+$bitFacts = Get-BitFileFacts $bitPath
+Assert ($bitFacts.Exists -and $bitFacts.Part -eq 'xc3s50an' -and $bitFacts.Package -eq 'tq144') 'bitstream header not parsed'
+$noHeaderBit = Join-Path $root 'noheader.bit'
+[IO.File]::WriteAllBytes($noHeaderBit, [byte[]](1..64))
+Assert ((Get-BitFileFacts $noHeaderBit).HeaderParsed -eq $false) 'an absent bitstream header must be reported as not parsed'
+
+# --- generated batch scripts (commands verified against the real install) ---
+$jtagScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
+Assert ($jtagScript -match '(?m)^setMode -bs\r?$') 'JTAG script must start with setMode'
+Assert ($jtagScript -match 'assignFile -p 1 -file') 'JTAG script missing assignFile'
+Assert ($jtagScript -match 'program -p 1 -v') 'JTAG script must request verification'
+Assert ($jtagScript -notmatch 'spi') 'JTAG script must not use SPI options'
+$isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
+Assert ($isfScript -match 'assignFileToAttachedFlash -p 2 -file') 'ISF script must assign to the attached flash'
+Assert ($isfScript -match 'program -p 2 -spi') 'ISF script must use -spi'
+Assert ((New-ImpactVerifyScript -Mode Isf -Position 2 -CablePort 'auto') -match 'verify -p 2 -spi') 'ISF verify script malformed'
+Write-Host 'PASS: probe/program parsers and the generated iMPACT batch commands.'
+
+# --- probe: cable + chain + device match ------------------------------------
+$probe = Invoke-Probe -ProjectName 'fixture'
+Assert ($probe.Facts.CableStatus -eq 'PASS') 'probe did not detect the mock cable'
+Assert ($probe.Facts.ChainStatus -eq 'PASS') 'probe did not detect the mock chain'
+Assert ($probe.Facts.DeviceCount -eq 1) 'probe did not parse exactly one device'
+Assert ($probe.Matched -eq $true) 'probe did not match xc3s50an'
+Assert ((Get-TextSafe "$($probe.RunDir)/summary.txt") -match 'Match\s+YES') 'probe summary missing the YES match'
+Write-Host 'PASS: probe reports cable, chain and a matching XC3S50AN without writing anything.'
+
+# --- probe: no cable --------------------------------------------------------
+$script:ProgProbe = 'nocable'
+Expect-Failure { Invoke-Probe -ProjectName 'fixture' } 'probe: result FAIL'
+$noCableSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'probe-') + '/summary.txt')
+Assert ($noCableSummary -match 'CABLE_NOT_FOUND') 'missing cable not reported'
+Assert ($noCableSummary -match 'not visible inside fpga-vm') 'the USB/VM hint is missing'
+
+# --- probe: identified device is not the project device ---------------------
+$script:ProgProbe = 'mismatch'
+Expect-Failure { Invoke-Probe -ProjectName 'fixture' } 'probe: result FAIL'
+$mismatchSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'probe-') + '/summary.txt')
+Assert ($mismatchSummary -match 'Match\s+NO') 'device mismatch not reported as NO'
+Assert ($mismatchSummary -notmatch 'Match\s+YES') 'a mismatch must never report a match'
+$script:ProgProbe = 'ok'
+
+# --- program: preview only, no hardware write -------------------------------
+$script:ImpactSteps.Clear()
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath } 'PREVIEW ONLY'
+Assert (-not ($script:ImpactSteps -contains 'program')) 'preview mode ran the program step'
+Assert (-not ($script:ImpactSteps -contains 'verify')) 'preview mode ran the verify step'
+$previewDir = Get-LatestProgrammerRun 'fixture' 'program-'
+Assert (-not (Test-Path "$previewDir/results/program.log")) 'preview mode produced a program log'
+Assert (-not (Test-Path "$previewDir/generated/program.cmd")) 'preview mode generated a write script'
+$previewJson = Get-Content "$previewDir/run.json" -Raw | ConvertFrom-Json
+Assert ($previewJson.result -eq 'PREVIEW_ONLY') 'PREVIEW_ONLY not recorded in run.json'
+Assert ($previewJson.mode -eq 'Jtag') 'mode not recorded in run.json'
+Assert ($previewJson.position -eq 1) 'resolved position not recorded in run.json'
+Assert ($previewJson.bitFileSha256) 'bitstream hash not recorded in run.json'
+Write-Host 'PASS: program without -ConfirmHardwareWrite only previews and uploads no write script.'
+
+# --- program Jtag with confirmation ----------------------------------------
+$script:ImpactSteps.Clear()
+$jtagRun = Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
+Assert ($jtagRun.Statuses.cableDetected -eq 'PASS') 'cable status missing'
+Assert ($jtagRun.Statuses.jtagChainDetected -eq 'PASS') 'chain status missing'
+Assert ($jtagRun.Statuses.deviceMatched -eq 'PASS') 'device match status missing'
+Assert ($jtagRun.Statuses.programmingCompleted -eq 'PASS') 'JTAG programming should pass'
+Assert ($jtagRun.Statuses.programmingVerified -eq 'VERIFIED') 'verify should report VERIFIED'
+Assert ($jtagRun.Statuses.userDesignFunctional -eq 'NOT_TESTED') 'user design must stay NOT_TESTED'
+$jtagSummary = Get-TextSafe "$($jtagRun.RunDir)/summary.txt"
+Assert ($jtagSummary -notmatch 'BOARD PASS') 'programming success must never print BOARD PASS'
+Assert ($jtagSummary -match 'does not need the user 2 MHz') 'the TCK vs user clock note is missing'
+$jtagJson = Get-Content "$($jtagRun.RunDir)/run.json" -Raw | ConvertFrom-Json
+Assert ($jtagJson.operation -eq 'program' -and $jtagJson.result -eq 'PASS') 'run.json program result wrong'
+Assert ($jtagJson.bitFileSha256 -eq (Get-FileHash -LiteralPath $bitPath -Algorithm SHA256).Hash) 'bitFileSha256 wrong'
+Assert ($jtagJson.confirmHardwareWrite -eq $true) 'confirmation not recorded'
+Assert ((Get-TextSafe "$($jtagRun.RunDir)/generated/program.cmd") -match 'assignFile -p 1 -file') 'Jtag program.cmd wrong'
+
+# --- program Isf (persistent) ----------------------------------------------
+$script:ImpactSteps.Clear()
+$isfRun = Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite
+Assert ($isfRun.Statuses.programmingCompleted -eq 'PASS') 'ISF programming should pass'
+$isfSummary = Get-TextSafe "$($isfRun.RunDir)/summary.txt"
+Assert ($isfSummary -match 'M\[2:0\] = 011') 'ISF boot requirement M[2:0] missing'
+Assert ($isfSummary -match 'VCCAUX = 3.3 V') 'ISF boot requirement VCCAUX missing'
+Assert ($isfSummary -match 'NON-VOLATILE') 'ISF persistence not stated'
+$isfCmd = Get-TextSafe "$($isfRun.RunDir)/generated/program.cmd"
+Assert ($isfCmd -match 'assignFileToAttachedFlash') 'ISF program.cmd missing the attach command'
+Assert ($isfCmd -match 'program -p 1 -spi') 'ISF program.cmd missing -spi'
+Assert ((Get-Content "$($isfRun.RunDir)/run.json" -Raw | ConvertFrom-Json).mode -eq 'Isf') 'ISF mode not recorded'
+Write-Host 'PASS: Jtag program is marked volatile, Isf program is marked persistent with its boot requirements.'
+
+# --- multiple devices need an explicit position ----------------------------
+$script:ProgProbe = 'twoDevices'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'Multiple JTAG devices detected; specify -Position'
+$script:ProgProbe = 'ok'
+
+# --- verify outcomes --------------------------------------------------------
+$script:ProgVerify = 'notapplicable'
+$notApplicable = Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
+Assert ($notApplicable.Statuses.programmingVerified -eq 'NOT_APPLICABLE') 'not-applicable verify not reported'
+Assert ($notApplicable.Statuses.programmingCompleted -eq 'PASS') 'programming itself should still be PASS'
+$script:ProgVerify = 'noreport'
+Assert ((Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite).Statuses.programmingVerified -eq 'NOT_REPORTED') 'unreported verify not flagged'
+$script:ProgVerify = 'fail'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
+$script:ProgVerify = 'ok'
+Write-Host 'PASS: verify is always attempted and its outcome is reported honestly (VERIFIED/NOT_APPLICABLE/NOT_REPORTED/FAIL).'
+
+# --- timeout and connection loss -------------------------------------------
+$script:ProgProgram = 'timeout'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'TIMEOUT'
+$timeoutSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'program-') + '/summary.txt')
+Assert ($timeoutSummary -match 'TIMEOUT') 'timeout not documented in the summary'
+$script:ProgProgram = 'interrupted'
+$script:ImpactSteps.Clear()
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'PROGRAM_STATE_UNKNOWN'
+Assert (@($script:ImpactSteps | Where-Object { $_ -eq 'program' }).Count -eq 1) 'program must not be retried automatically'
+$interruptSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'program-') + '/summary.txt')
+Assert ($interruptSummary -match 'Do NOT re-run program blindly') 'recovery instructions missing'
+$script:ProgProgram = 'ok'
+
+# --- failed preflight writes nothing ---------------------------------------
+$script:ImpactSteps.Clear()
+$script:ProgProbe = 'nocable'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite } 'preflight failed'
+Assert (-not ($script:ImpactSteps -contains 'program')) 'a failed preflight still tried to write'
+$script:ProgProbe = 'ok'
+
+# --- bitstream file checks --------------------------------------------------
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile (Join-Path $root 'missing.bit') -ConfirmHardwareWrite } 'bitstream not found'
+$emptyBit = Join-Path $root 'empty.bit'
+[IO.File]::WriteAllBytes($emptyBit, [byte[]]@())
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $emptyBit -ConfirmHardwareWrite } 'bitstream is empty'
+Write-Host 'PASS: probe/program reject missing/empty bitstreams and never write on a failed preflight.'
+
 Write-Host ''
-Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility).'
+Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'
 Write-Host "Test evidence retained: $root"

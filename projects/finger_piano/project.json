@@ -37,6 +37,15 @@
       "failPattern": "TB_TONE_GENERATOR: FAIL"
     },
     {
+      "name": "tone_generator_2m",
+      "top": "tb_tone_generator",
+      "sources": ["sim/tb_tone_generator.v"],
+      "generics": {"TB_SYS_CLK_HZ": "2000000"},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_TONE_GENERATOR: PASS",
+      "failPattern": "TB_TONE_GENERATOR: FAIL"
+    },
+    {
       "name": "top_default",
       "top": "tb_finger_piano_top",
       "sources": ["sim/tb_finger_piano_top.v"],
@@ -70,5 +79,12 @@
     "clockName": "clk",
     "resetNames": ["rst_n", "rst_n_sync"],
     "forbiddenEdgeSignals": ["clk_2m", "audio_out"]
+  },
+  "programming": {
+    "cablePort": "auto",
+    "probeTimeoutSeconds": 120,
+    "jtagTimeoutSeconds": 300,
+    "isfTimeoutSeconds": 600,
+    "verifyTimeoutSeconds": 300
   }
 }
