@@ -40,13 +40,16 @@
 
 ## JTAG 探测与烧录
 
-- `probe` 只读：枚举下载线、识别 JTAG 链、读 IDCODE 并与 project.json 的器件核对。下载线不可见时输出 `CABLE_NOT_FOUND` 与 “USB/JTAG cable is not visible inside fpga-vm”，**不得修改 VM 配置或自动 attach USB**，也不得伪造 PASS。
+- `probe` 只读：按配置的显式序列号打开下载线、识别 JTAG 链、读 IDCODE 并与 project.json 的器件核对。失败时按分层状态报告（见下），**不得修改 VM 配置或自动 attach USB**，也不得伪造 PASS，更不得把 Adept 层失败说成「下载线对虚拟机不可见」。
 - `program` 是硬件写操作，**默认只预览**（PREVIEW ONLY：打印 cable/chain/device/position/bitstream/mode 后结束，不生成写脚本、不执行 program）。必须由用户明确要求并带 `-ConfirmHardwareWrite` 才真正写入。
 - 两种模式含义不同、不得混用：`-Mode Jtag` = 通过 JTAG 配置 FPGA 本体（VOLATILE），`program -p N -onlyFpga`；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置），`program -p N -v`。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`。
 - **实测结论（ISE 14.7 + XC3S50AN，2026-09-14）**：同一个 `assignFile` + `program` 因 `-onlyFpga` 而含义不同——不加它是写**内部 ISF**（转录出现 `SPI access core`、`Programming Flash`、sector/page），加它是**只配置 FPGA 本体**（`Programming device` → `Completed downloading bit file to device`，无任何 SPI/Flash 行）。因此：Jtag 模式必须带 `-onlyFpga` 且**默认不加 `-v`**（FPGA 回读校验需要 BitGen `-m` 的 `.msk`，否则报 `ERROR:Bitstream:2 ... design.msk does not exist`）；Isf 模式用 `-v` 作为 in-step 校验。`assignFileToAttachedFlash`/`-spi` 属于**外挂** PROM 的 indirect SPI 流程，对内部 ISF 会报 `No attached device found at position '1'`，不得使用。
 - **不跑独立 `verify`**：实测 `verify -p N` 与 `verify -p N -sram` 均回 `Verify failed on page 0`（即使紧接在一次 iMPACT 已自行 `Verification completed successfully` 的写入之后），其结论不可信。校验结论一律取自 program 转录：`Verification completed successfully` → `VERIFIED`；出现 `Verify failed` → `FAIL`；FPGA 配置且 `DONEIN=1`/`CRC error=0` → `CONFIG_STATUS_OK`。转录里的器件状态寄存器（`M[2:0]`、`DONEIN`、`CRC error`、`VSEL`）必须解析并在摘要中显示。
 - Jtag 模式的转录里若出现任何内部 Flash 编程迹象，判 FAIL 并标注 `MODE VIOLATION`（易失语义被破坏、非易失 Flash 已被改动）。
-- 下载线从未打开（`no JTAG device was found` / `Cable autodetection failed`）意味着**一个字节都没写**，因此允许对 preflight 与 program 步骤重试（`programming.cableRetryAttempts`，默认 3，上限 10）；一旦转录出现任何写入迹象或出现 `TIMEOUT`/`PROGRAM_STATE_UNKNOWN`，**绝不重试**。所有脚本以 `closeCable` 收尾。
+- **正式 probe / program 必须固定下载线**：`programming.cableType/cableSerial/cableFrequencyHz` → `setCable -target "digilent_plugin DEVICE=SN:<sn> FREQUENCY=<measured>"`。`cableFrequencyHz` 只能来自真实转录，缺失就报错停止，**永不默认 10000000**。`-p auto` 只允许出现在 `probe-diag`。摘要必须打印 cable provider/serial/target/frequency 与转录中实际出现的序列号，不符即 `CABLE MISMATCH` 判 FAIL。
+- **一次硬件事务**：本机只做静态检查（工程配置、bit 头、SHA-256、期望器件、已确认序列号、`-ConfirmHardwareWrite`），一次性上传脚本与 bitstream，然后由远端**一个** `hardware_transaction.cmd` 完成「只读 preflight → 立即写入」。两个 iMPACT 调用之间**不得有 sleep / SSH / SFTP / 本地解析**；preflight 不通过时 `program.cmd` 绝不执行。实测动机：下载线刚打开过时可稳定重开，静置数秒后易出现 `failed to open device (DmgrOpenEx, erc = 3072)`（`ercConnectionFailed`）。
+- 重试只允许发生在「转录里完全没有写入迹象」时（`programming.cableRetryAttempts`），退避 **150 ms 而非数秒**；出现 `Programming device`/`Programming Flash`/`Completed downloading`/`Programmed successfully`/`Verifying`/`TIMEOUT`/SSH 中断后**绝不重试**。事务用 `exit /b 2`（preflight 失败）与 `exit /b 3`（环境失败）表达预期结果，按 `run.status` 判定，不得误报 `PROGRAM_STATE_UNKNOWN`。
+- 下载线失败必须分层：`DIGILENT_ENUM_FAILED`（`no JTAG device was found`）/ `DIGILENT_OPEN_FAILED`（`failed to open device (DmgrOpenEx, erc = 3072)`）/ `CABLE_UNAVAILABLE`。**Windows PnP 里设备存在不等于 Adept 能打开**，不得声称「下载线对虚拟机不可见」。
 - JTAG/ISF 编程用的是下载线的 TCK，与用户时钟无关；**烧录成功不等于设计工作正常**，`userDesignFunctional` 永远输出 `NOT_TESTED`，禁止打印 `BOARD PASS`。
 - 每次 program 前必须自动 preflight（等价 probe + bit 文件存在且非空 + 器件匹配）；不假定 position=1，多器件未指定 `-Position` 时报 `ERROR: Multiple JTAG devices detected; specify -Position.`。
 - 不运行独立的 `verify` 步骤（其结论不可信，见上）；`programmingVerified` 只能取自 program 转录的证据：有校验结论就如实报 `VERIFIED`/`FAIL`，只有 FPGA 配置状态可依据时报 `CONFIG_STATUS_OK`，PASS 但无任何校验证据时报 `NOT_APPLICABLE`，不得伪造 verify 通过。

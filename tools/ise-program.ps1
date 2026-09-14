@@ -169,9 +169,13 @@ function Get-ProbeLogFacts {
     $digilentEnumFailed = [bool]($text -match '(?i)Digilent Plugin: no JTAG device was found')
     $digilentFound = [bool]($text -match "(?i)Digilent Plugin: found\s+[1-9]\d*\s+device")
     $digilentOpened = [bool]($text -match '(?i)Digilent Plugin: opening device')
+    # The Adept open can fail even when the device was enumerated, with a concrete
+    # error code; measured on this board: erc = 3072 (ercConnectionFailed).
+    $adeptOpenFailed = [bool]($text -match '(?i)failed to open device \(DmgrOpenEx')
     $fallbackFailed = [bool]($text -match '(?i)(Cable autodetection failed|Cable connection failed|Cable is not detected)')
 
-    if ($cableName -and -not $digilentEnumFailed) { $cableStatus = 'PASS' }
+    if ($cableName -and -not $digilentEnumFailed -and -not $adeptOpenFailed) { $cableStatus = 'PASS' }
+    elseif ($adeptOpenFailed) { $cableStatus = 'DIGILENT_OPEN_FAILED' }
     elseif ($digilentFound -and -not $digilentOpened) { $cableStatus = 'DIGILENT_OPEN_FAILED' }
     elseif ($digilentEnumFailed) { $cableStatus = 'DIGILENT_ENUM_FAILED' }
     elseif ($cableMissing) { $cableStatus = 'CABLE_UNAVAILABLE' }
@@ -367,7 +371,7 @@ function Get-BitFileFacts {
 function Test-TranscriptCableUnavailable {
     param([AllowNull()][string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return $false }
-    return [bool]($Text -match '(?im)(no JTAG device was found|Cable autodetection failed|Cable connection failed|Cable is not detected|Cable Setup operation)')
+    return [bool]($Text -match '(?im)(no JTAG device was found|Cable autodetection failed|Cable connection failed|Cable is not detected|Cable Setup operation|failed to open device \(DmgrOpenEx)')
 }
 
 function Get-ProgrammingConfig {
@@ -377,33 +381,52 @@ function Get-ProgrammingConfig {
     $isf = $script:ProgrammerTimeoutDefaults.IsfSeconds
     $verify = $script:ProgrammerTimeoutDefaults.VerifySeconds
     $cableRetry = $script:ProgrammerTimeoutDefaults.CableRetryAttempts
-    $port = 'auto'
+    $cableType = 'auto'; $serial = $null; $freq = $null; $position = 0
     $block = $ProjectData.Config.PSObject.Properties['programming']
     if ($block -and $block.Value) {
         $b = $block.Value
+        if ($b.PSObject.Properties['position'] -and $b.position) { $position = [int]$b.position }
         if ($b.PSObject.Properties['probeTimeoutSeconds'] -and $b.probeTimeoutSeconds) { $probe = [int]$b.probeTimeoutSeconds }
         if ($b.PSObject.Properties['jtagTimeoutSeconds'] -and $b.jtagTimeoutSeconds) { $jtag = [int]$b.jtagTimeoutSeconds }
         if ($b.PSObject.Properties['isfTimeoutSeconds'] -and $b.isfTimeoutSeconds) { $isf = [int]$b.isfTimeoutSeconds }
         if ($b.PSObject.Properties['verifyTimeoutSeconds'] -and $b.verifyTimeoutSeconds) { $verify = [int]$b.verifyTimeoutSeconds }
         if ($b.PSObject.Properties['cableRetryAttempts'] -and $b.cableRetryAttempts) { $cableRetry = [int]$b.cableRetryAttempts }
-        if ($b.PSObject.Properties['cablePort'] -and $b.cablePort) { $port = [string]$b.cablePort }
+        if ($b.PSObject.Properties['cableType'] -and $b.cableType) { $cableType = ([string]$b.cableType).ToLowerInvariant() }
+        if ($b.PSObject.Properties['cableSerial'] -and $b.cableSerial) { $serial = ([string]$b.cableSerial).Trim() }
+        if ($b.PSObject.Properties['cableFrequencyHz'] -and $b.cableFrequencyHz) { $freq = [int]$b.cableFrequencyHz }
     }
     foreach ($t in @($probe, $jtag, $isf, $verify)) {
         if ($t -lt 10 -or $t -gt 7200) { throw "programming timeouts must be 10..7200 seconds (got $t)" }
     }
     if ($cableRetry -lt 1 -or $cableRetry -gt 10) { throw "programming.cableRetryAttempts must be 1..10 (got $cableRetry)" }
-    if ($port -notmatch '^[A-Za-z0-9]+$') { throw "Unsafe cable port: $port" }
-    return [pscustomobject]@{ ProbeTimeoutSeconds = $probe; JtagTimeoutSeconds = $jtag; IsfTimeoutSeconds = $isf; VerifyTimeoutSeconds = $verify; CablePort = $port; CableRetryAttempts = $cableRetry }
+    if ($cableType -notin @('auto', 'digilent')) { throw "programming.cableType must be 'digilent' or 'auto' (got $cableType)" }
+    if ($cableType -eq 'digilent') {
+        if (-not $serial) { throw "programming.cableType is 'digilent' but programming.cableSerial is missing." }
+        if ($serial -notmatch '^\d{6,32}$') { throw "Unsafe cable serial: $serial" }
+        # A frequency must come from a real transcript. Never default it.
+        if (-not $freq) { throw "programming.cableFrequencyHz is required for a pinned cable (measured value only, never guessed)." }
+        if ($freq -lt 1 -or $freq -gt 200000000) { throw "programming.cableFrequencyHz out of range: $freq" }
+    }
+    $argument = $(if ($cableType -eq 'digilent') {
+            '-target "digilent_plugin DEVICE=SN:' + $serial + ' FREQUENCY=' + $freq + '"'
+        } else { '-p auto' })
+    if ($position -lt 0 -or $position -gt 32) { throw "programming.position must be 0..32 (got $position)" }
+    return [pscustomobject]@{
+        ProbeTimeoutSeconds = $probe; JtagTimeoutSeconds = $jtag; IsfTimeoutSeconds = $isf
+        VerifyTimeoutSeconds = $verify; CableRetryAttempts = $cableRetry
+        CableType = $cableType; CableSerial = $serial; CableFrequencyHz = $freq
+        CableArgument = $argument; Position = $position
+    }
 }
 
 #-----------------------------------------------------------------------------
 # iMPACT batch scripts (text generation only)
 #-----------------------------------------------------------------------------
 function New-ImpactProbeScript {
-    param([Parameter(Mandatory)][string]$CablePort = 'auto')
+    param([Parameter(Mandatory)][string]$CableArgument)
     return @(
         'setMode -bs'
-        "setCable -p $CablePort"
+        ('setCable ' + $CableArgument)
         'identify'
         # In this ISE 14.7 build `identify` prints the device name but not the
         # 32 bit IDCODE; `readIdcode -p 1` adds
@@ -419,12 +442,12 @@ function New-ImpactProgramScript {
         [Parameter(Mandatory)][ValidateSet('Jtag', 'Isf')][string]$Mode,
         [Parameter(Mandatory)][int]$Position,
         [Parameter(Mandatory)][string]$RemoteBitFile,
-        [Parameter(Mandatory)][string]$CablePort = 'auto',
+        [Parameter(Mandatory)][string]$CableArgument,
         [switch]$DeviceHasInternalConfigFlash
     )
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('setMode -bs')
-    $lines.Add("setCable -p $CablePort")
+    $lines.Add('setCable ' + $CableArgument)
     $lines.Add('identify')
     $lines.Add(('assignFile -p {0} -file "{1}"' -f $Position, $RemoteBitFile))
     if ($Mode -eq 'Isf') {
@@ -466,12 +489,12 @@ function New-ImpactVerifyScript {
     param(
         [Parameter(Mandatory)][ValidateSet('Jtag', 'Isf')][string]$Mode,
         [Parameter(Mandatory)][int]$Position,
-        [Parameter(Mandatory)][string]$CablePort = 'auto',
+        [Parameter(Mandatory)][string]$CableArgument,
         [AllowNull()][string]$RemoteBitFile = $null
     )
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('setMode -bs')
-    $lines.Add("setCable -p $CablePort")
+    $lines.Add('setCable ' + $CableArgument)
     $lines.Add('identify')
     if ($RemoteBitFile) { $lines.Add(('assignFile -p {0} -file "{1}"' -f $Position, $RemoteBitFile)) }
     if ($Mode -eq 'Isf') { $lines.Add(('verify -p {0} -spi' -f $Position)) } else { $lines.Add(('verify -p {0} -sram' -f $Position)) }
@@ -507,6 +530,76 @@ function New-ImpactRunner {
 #-----------------------------------------------------------------------------
 # Remote step execution
 #-----------------------------------------------------------------------------
+# One hardware transaction: the read-only preflight and the write run as two
+# iMPACT invocations inside ONE remote script, back to back, with no SSH round
+# trip, no SFTP, no local parsing and no sleep in between. Measured on this setup,
+# a cable that was just opened can be reopened reliably, while a few seconds of
+# idle in between makes the next Adept open fail (ercConnectionFailed = 3072).
+# The safety boundary is unchanged: if the preflight markers are not all present,
+# program.cmd is never executed.
+function New-HardwareTransactionScript {
+    param(
+        [Parameter(Mandatory)][string]$ExpectedPart,
+        [AllowNull()][string]$ExpectedIdcodeHex = $null,
+        [Parameter(Mandatory)][int]$Position,
+        [int]$PreflightAttempts = 4
+    )
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('@echo off')
+    $lines.Add('setlocal')
+    $lines.Add('cd /d "%~dp0"')
+    $lines.Add('if not exist "..\results" mkdir "..\results"')
+    foreach ($f in @('probe.log', 'program.log', 'run.status', 'program.exitcode', 'probe.exitcode')) {
+        $lines.Add('if exist ..\results\' + $f + ' del /q ..\results\' + $f)
+    }
+    $lines.Add('call "' + $script:Settings + '" > ..\results\transaction.environment.log 2>&1')
+    $lines.Add('if errorlevel 1 goto env_failed')
+    $lines.Add('echo RUNNING>..\results\run.status')
+    $lines.Add('set PF=0')
+    $lines.Add('')
+    # The preflight is retried INSIDE this transaction. Each attempt is a fresh
+    # iMPACT process, but there is no SSH round trip, no SFTP, no local parsing and
+    # no multi-second sleep between attempts, and program.cmd starts in the same
+    # instant the preflight markers are all present. Measured: an immediate reopen
+    # of the cable behaves much better than one after several seconds of idle.
+    $lines.Add(':preflight')
+    $lines.Add('set /a PF+=1')
+    $lines.Add('impact -batch probe.cmd < nul > ..\results\probe.log 2>&1')
+    $lines.Add('echo %ERRORLEVEL% > ..\results\probe.exitcode')
+    # These are the same success markers the local parser looks for. ERRORLEVEL is
+    # not trusted (measured: the same failing identify returned 0 and 1).
+    $lines.Add('findstr /i /c:"Digilent Plugin: opening device" ..\results\probe.log >nul')
+    $lines.Add('if errorlevel 1 goto preflight_retry')
+    $lines.Add('findstr /i /c:"Added Device ' + $ExpectedPart + '" ..\results\probe.log >nul')
+    $lines.Add('if errorlevel 1 goto preflight_retry')
+    if ($ExpectedIdcodeHex) {
+        $token = $ExpectedIdcodeHex -replace '^0[xX]', ''
+        $lines.Add('findstr /i /c:"' + $token + '" ..\results\probe.log >nul')
+        $lines.Add('if errorlevel 1 goto preflight_retry')
+    }
+    $lines.Add('echo PREFLIGHT_OK>..\results\preflight.status')
+    $lines.Add('')
+    $lines.Add('rem ---- preflight verified: write IMMEDIATELY, no sleep, no round trip ----')
+    $lines.Add('impact -batch program.cmd < nul > ..\results\program.log 2>&1')
+    $lines.Add('echo %ERRORLEVEL% > ..\results\program.exitcode')
+    $lines.Add('echo COMPLETE>..\results\run.status')
+    $lines.Add('exit /b 0')
+    $lines.Add('')
+    $lines.Add(':preflight_retry')
+    $lines.Add('copy /y ..\results\probe.log ..\results\probe_attempt%PF%.log >nul')
+    $lines.Add('if %PF% GEQ ' + $PreflightAttempts + ' goto preflight_failed')
+    $lines.Add('goto preflight')
+    $lines.Add('')
+    $lines.Add(':preflight_failed')
+    $lines.Add('echo PREFLIGHT_FAILED>..\results\run.status')
+    $lines.Add('exit /b 2')
+    $lines.Add('')
+    $lines.Add(':env_failed')
+    $lines.Add('echo ENV_FAILED>..\results\run.status')
+    $lines.Add('exit /b 3')
+    return ($lines -join "`r`n")
+}
+
 function Invoke-ImpactStep {
     param(
         [Parameter(Mandatory)][string]$RemoteRoot,
@@ -611,13 +704,15 @@ function Invoke-Probe {
         $bsdlError = "no BSDL file found for $($expected.Part)/$($expected.BsdlPackage) in the ISE installation"
     }
 
-    Write-Utf8 (Join-Path $run.RunDir 'generated/probe.cmd') ((New-ImpactProbeScript -CablePort $cfg.CablePort) + "`r`n")
+    Write-Utf8 (Join-Path $run.RunDir 'generated/probe.cmd') ((New-ImpactProbeScript -CableArgument $cfg.CableArgument) + "`r`n")
     Write-Utf8 (Join-Path $run.RunDir 'generated/probe.expected.txt') (@(
         "device      = $($expected.DeviceString)"
         "part        = $($expected.Part)"
         "package     = $($expected.Package)"
         "bsdl        = $(if ($bsdlRemote) { $bsdlRemote } else { 'NOT_FOUND' })"
         "expected idcode = $(if ($bsdlIdcode) { $bsdlIdcode.IdcodeHex } else { 'NOT_AVAILABLE' })"
+        "cable target = $($cfg.CableArgument)"
+        "cable serial = $(if ($cfg.CableSerial) { $cfg.CableSerial } else { 'NOT_CONFIGURED (auto is diagnostic only)' })"
     ) -join "`r`n")
     $generated = @('probe.cmd', 'probe.expected.txt', 'run_probe.cmd')
     Write-Utf8 (Join-Path $run.RunDir 'generated/run_probe.cmd') ((New-ImpactRunner -StepName 'probe' -ScriptName 'probe.cmd') + "`r`n")
@@ -679,7 +774,7 @@ function Invoke-Probe {
         host      = $script:RemoteHost
         remotePath = "$script:RemoteRoot/$ProjectName/$($run.RunId)"
         impact    = $paths.Impact
-        cablePort = $cfg.CablePort
+        cableTarget = $cfg.CableArgument
         bsdl      = $bsdlRemote
         expectedIdcode = $(if ($bsdlIdcode) { $bsdlIdcode.IdcodeHex } else { $null })
         result    = $result
@@ -713,6 +808,14 @@ function Invoke-Probe {
         $summary.Add('  fails. Run `probe-diag` to compare the Windows PnP state with what')
         $summary.Add('  iMPACT sees. No VM configuration change and no automatic USB attach.')
     }
+    elseif ($facts.CableStatus -eq 'DIGILENT_OPEN_FAILED') {
+        $summary.Add('DIGILENT_OPEN_FAILED: iMPACT enumerated the cable but Adept could not open it.')
+        $summary.Add('  Measured on this board the plugin answers:')
+        $summary.Add('    failed to open device (DmgrOpenEx, erc = 3072)   = ercConnectionFailed')
+        $summary.Add('  A cable that was just used opens reliably, while several seconds of idle')
+        $summary.Add('  in between makes this failure much more likely, so the formal path runs the')
+        $summary.Add('  preflight and the write inside one remote transaction.')
+    }
     elseif ($facts.CableStatus -ne 'PASS' -and $facts.CableStatus -ne 'UNKNOWN') {
         $summary.Add(('Cable could not be used: ' + $facts.CableStatus))
         $summary.Add('  No VM configuration change and no automatic USB attach is performed.')
@@ -733,6 +836,82 @@ function Invoke-Probe {
 #-----------------------------------------------------------------------------
 # program (hardware write)
 #-----------------------------------------------------------------------------
+# The report body is built twice: once for the PREVIEW / preflight-failure paths and
+# once after the transaction, when the chain facts come from the transaction's own
+# probe.log instead of a local probe.
+function New-ProgrammerReportLines {
+    param(
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$Mode,
+        [Parameter(Mandatory)]$Expected,
+        [AllowNull()]$BsdlIdcode,
+        [Parameter(Mandatory)]$Bit,
+        [AllowNull()]$BitMatch,
+        [Parameter(Mandatory)][string]$BitFile,
+        [Parameter(Mandatory)][string]$VolatileText,
+        [Parameter(Mandatory)][int]$Position,
+        [Parameter(Mandatory)][string]$CableArgument,
+        [AllowNull()][string]$CableSerial,
+        [bool]$LocalProbe,
+        [AllowNull()]$ProbeFacts,
+        [AllowNull()][string]$ChainStatus,
+        [int]$ChainCount,
+        [AllowNull()][string]$DeviceMatchedText,
+        [AllowNull()][string]$PreflightState = $null
+    )
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('==================================================')
+    $lines.Add(('ISE PROGRAMMER - ' + $Mode.ToUpperInvariant() + ' MODE'))
+    $lines.Add(('Project : ' + $ProjectName))
+    $lines.Add(('Run     : ' + $RunId))
+    $lines.Add('==================================================')
+    $lines.Add(('cable target     : ' + $CableArgument + $(if ($CableSerial) { '   (pinned)' } else { '   (auto: diagnostic only)' })))
+    if ($LocalProbe -and $ProbeFacts) {
+        $lines.Add(('cable            : ' + $(if ($ProbeFacts.CableName) { $ProbeFacts.CableName } else { 'UNKNOWN' }) + $(if ($ProbeFacts.CableSerial) { ' (SN ' + $ProbeFacts.CableSerial + ')' } else { '' })))
+        $lines.Add(('cable status     : ' + $ProbeFacts.CableStatus))
+        $lines.Add(('JTAG chain       : ' + $ChainStatus + ' (' + $ChainCount + ' device(s))'))
+        foreach ($d in @($ProbeFacts.Devices)) {
+            $lines.Add(('  position ' + $d.Position + '    : ' + $(if ($d.Name) { $d.Name } else { 'UNKNOWN' }) + ' ' + $(if ($d.Idcode) { $d.Idcode } else { 'IDCODE NOT_PARSED' })))
+        }
+    } elseif ($PreflightState) {
+        $lines.Add('cable            : (chain facts below come from the transaction preflight)')
+        $lines.Add(('cable status     : ' + $(if ($ProbeFacts) { $ProbeFacts.CableStatus } else { 'UNKNOWN' })))
+        $lines.Add(('JTAG chain       : ' + $ChainStatus + ' (' + $ChainCount + ' device(s))'))
+        foreach ($d in @($ProbeFacts.Devices)) {
+            $lines.Add(('  position ' + $d.Position + '    : ' + $(if ($d.Name) { $d.Name } else { 'UNKNOWN' }) + ' ' + $(if ($d.Idcode) { $d.Idcode } else { 'IDCODE NOT_PARSED' })))
+        }
+        $lines.Add(('preflight        : ' + $PreflightState))
+    } else {
+        $lines.Add('cable            : (not probed locally on purpose)')
+        $lines.Add('cable status     : PENDING - the preflight inside the hardware transaction opens')
+        $lines.Add('                   the cable and verifies the chain immediately before the write')
+        $lines.Add('JTAG chain       : PENDING (checked inside the hardware transaction)')
+    }
+    $lines.Add(('expected device  : ' + $Expected.DeviceString + '  (IDCODE ' + $(if ($BsdlIdcode) { $BsdlIdcode.IdcodeHex } else { 'NOT_AVAILABLE' }) + ')'))
+    $lines.Add(('device match     : ' + $DeviceMatchedText))
+    if ($Bit.HeaderParsed) {
+        $targetText = $(if ($Bit.Part) { $Bit.Part } else { '?' }) +
+                      ' (header: ' + $Bit.HeaderFormat + '; package ' + $(if ($Bit.Package) { $Bit.Package } else { 'not in header' }) +
+                      '; speed ' + $(if ($Bit.Speed) { $Bit.Speed } else { 'not in header' }) + ')' +
+                      '   match: ' + $(if ($BitMatch -eq $true) { 'YES' } elseif ($BitMatch -eq $false) { 'NO - bitstream targets another device' } else { 'UNDETERMINED' })
+        $lines.Add('bitstream target : ' + $targetText)
+    } else { $lines.Add('bitstream target : NOT_PARSED (relying on iMPACT compatibility checking)') }
+    $lines.Add(('bitstream        : ' + $BitFile + '  (' + $Bit.Size + ' bytes, SHA-256 ' + $Bit.Sha256.Substring(0, 16) + '...)'))
+    $lines.Add(('mode             : ' + $Mode + ' - ' + $VolatileText))
+    $lines.Add(('position         : ' + $(if ($Position -gt 0) { $Position } else { 'UNRESOLVED' })))
+    $lines.Add('')
+    if ($Mode -eq 'Isf') {
+        $lines.Add('Persistent boot requirements:')
+        $lines.Add('  Internal Master SPI mode M[2:0] = 011')
+        $lines.Add('  VCCAUX = 3.3 V')
+        $lines.Add('  (JTAG cannot prove the board straps; verify these on the hardware.)')
+        $lines.Add('')
+    }
+    # The comma keeps PowerShell from unrolling the list into a fixed-size array.
+    return , $lines
+}
+
 function Invoke-Program {
     param(
         [Parameter(Mandatory)][string]$ProjectName,
@@ -779,11 +958,13 @@ function Invoke-Program {
     }
 
     $remoteBit = ("$script:RemoteRoot/$ProjectName/$($run.RunId)" + '/work/' + [IO.Path]::GetFileName($BitFile))
-    Write-Utf8 (Join-Path $run.RunDir 'generated/probe.cmd') ((New-ImpactProbeScript -CablePort $cfg.CablePort) + "`r`n")
+    $remoteWin = "$script:RemoteRoot/$ProjectName/$($run.RunId)".Replace('/', '\')
+    Write-Utf8 (Join-Path $run.RunDir 'generated/probe.cmd') ((New-ImpactProbeScript -CableArgument $cfg.CableArgument) + "`r`n")
     Write-Utf8 (Join-Path $run.RunDir 'generated/run_probe.cmd') ((New-ImpactRunner -StepName 'probe' -ScriptName 'probe.cmd') + "`r`n")
-    # program.cmd / verify.cmd are generated only after the preflight has passed
-    # and after the -ConfirmHardwareWrite gate, so a preview run never uploads a
-    # write script at all.
+    # probe.cmd is uploaded up front so the local preflight (position resolution and
+    # the preview) can run; program.cmd, hardware_transaction.cmd and the bitstream
+    # are only generated and uploaded after -ConfirmHardwareWrite, so a preview run
+    # never uploads a write script.
     $probeGenerated = @('probe.cmd', 'run_probe.cmd')
 
     $meta = [ordered]@{
@@ -802,7 +983,7 @@ function Invoke-Program {
         startedAt   = (Get-Date -Format 'o')
         host        = $script:RemoteHost
         remotePath  = "$script:RemoteRoot/$ProjectName/$($run.RunId)"
-        cablePort   = $cfg.CablePort
+        cableTarget = $cfg.CableArgument
         expectedIdcode = $(if ($bsdlIdcode) { $bsdlIdcode.IdcodeHex } else { $null })
         confirmHardwareWrite = [bool]$ConfirmHardwareWrite
         result      = 'RUNNING'
@@ -814,24 +995,32 @@ function Invoke-Program {
     catch { $sendError = $_.Exception.Message }
     if ($sendError) { throw "program: upload failed, nothing was written: $sendError" }
 
-    # ---- preflight: probe (read only, same as the probe command) ------------
-    # The Digilent/Adept layer can fail to enumerate the cable on one iMPACT
-    # invocation and succeed on the next, and when it fails nothing was written,
-    # so re-invoking here is safe and is done rather than left to the caller.
-    # A retry NEVER happens once any write could have started.
-    Write-Host "Preflight probe ($($run.RunId)) ..."
+    # ---- chain facts --------------------------------------------------------
+    # For a preview (or when no position is configured) a local read-only probe
+    # supplies the facts. For a real write the chain is NOT probed locally: the
+    # preflight inside hardware_transaction.cmd owns that, because a cable that was
+    # just opened is reliably reusable while a local probe followed by an upload
+    # leaves exactly the idle gap that makes the next Adept open fail
+    # (ercConnectionFailed = 3072). The write path's facts are read back from the
+    # transaction's own probe.log afterwards.
+    $positionKnown = [bool](($Position -gt 0) -or ($cfg.Position -gt 0))
+    $localProbeNeeded = (-not $ConfirmHardwareWrite) -or (-not $positionKnown)
     $probeStep = $null; $probeText = ''; $probeAttempts = 0
-    for ($attempt = 1; $attempt -le $cfg.CableRetryAttempts; $attempt++) {
-        $probeAttempts = $attempt
-        $probeStep = Invoke-ImpactStep -RemoteRoot ("$script:RemoteRoot/$ProjectName/$($run.RunId)") -StepName 'probe' -TimeoutSeconds $cfg.ProbeTimeoutSeconds
-        try { Receive-ProgramResults $ProjectName $run.RunId } catch { }
-        $probeText = Get-TextSafe (Join-Path $run.RunDir 'results/probe.log')
-        if (-not (Test-TranscriptCableUnavailable $probeText) -or $probeStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
-        Write-Host ("  iMPACT could not enumerate the cable (preflight attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
-        Start-Sleep -Seconds 3
+    if ($localProbeNeeded) {
+        Write-Host "Local read-only probe ($($run.RunId)) ..."
+        for ($attempt = 1; $attempt -le $cfg.CableRetryAttempts; $attempt++) {
+            $probeAttempts = $attempt
+            $probeStep = Invoke-ImpactStep -RemoteRoot ("$script:RemoteRoot/$ProjectName/$($run.RunId)") -StepName 'probe' -TimeoutSeconds $cfg.ProbeTimeoutSeconds
+            try { Receive-ProgramResults $ProjectName $run.RunId } catch { }
+            $probeText = Get-TextSafe (Join-Path $run.RunDir 'results/probe.log')
+            if (-not (Test-TranscriptCableUnavailable $probeText) -or $probeStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
+            Write-Host ("  iMPACT could not open the cable (local probe attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
+            Start-Sleep -Milliseconds 150
+        }
     }
     $probeFacts = Get-ProbeLogFacts $probeText
     $meta.probeAttempts = $probeAttempts
+    $meta.localProbe = $localProbeNeeded
 
     $deviceMatched = $null
     if ($probeFacts.DeviceCount -gt 0) {
@@ -842,6 +1031,7 @@ function Invoke-Program {
 
     $chainStatus = $probeFacts.ChainStatus
     $chainCount = $probeFacts.DeviceCount
+    if ($Position -le 0 -and $cfg.Position -gt 0) { $Position = $cfg.Position }
     if ($Position -le 0) {
         if ($chainCount -eq 1) { $Position = 1 }
         elseif ($chainCount -gt 1) { throw 'ERROR: Multiple JTAG devices detected; specify -Position.' }
@@ -856,60 +1046,43 @@ function Invoke-Program {
         if ($null -eq $bitMatch -and $bit.Part) { $bitMatch = Test-BitPartMatchesDevice -BitPartRaw $bit.Part -ExpectedPart $expected.Part -ExpectedPackage $expected.Package }
     }
 
-    $preflightOk = ($probeFacts.CableStatus -eq 'PASS') -and ($chainStatus -eq 'PASS') -and ($deviceMatched -eq $true)
+    # With no local probe there is nothing to gate on yet: the transaction enforces
+    # the chain check and refuses to run program.cmd when it does not pass.
+    $preflightOk = $true
+    if ($localProbeNeeded) {
+        $preflightOk = ($probeFacts.CableStatus -eq 'PASS') -and ($chainStatus -eq 'PASS') -and ($deviceMatched -eq $true)
+    }
     $statuses = [ordered]@{
-        cableDetected        = $probeFacts.CableStatus
-        jtagChainDetected    = $chainStatus
-        deviceMatched        = $(if ($deviceMatched -eq $true) { 'PASS' } elseif ($deviceMatched -eq $false) { 'FAIL' } else { 'UNDETERMINED' })
+        cableDetected        = $(if ($localProbeNeeded) { $probeFacts.CableStatus } else { 'PENDING (checked inside the transaction)' })
+        jtagChainDetected    = $(if ($localProbeNeeded) { $chainStatus } else { 'PENDING (checked inside the transaction)' })
+        deviceMatched        = $(if (-not $localProbeNeeded) { 'PENDING (checked inside the transaction)' } elseif ($deviceMatched -eq $true) { 'PASS' } elseif ($deviceMatched -eq $false) { 'FAIL' } else { 'UNDETERMINED' })
         programmingCompleted = 'NOT_RUN'
         programmingVerified  = 'NOT_RUN'
         userDesignFunctional = 'NOT_TESTED'
     }
 
-    $preview = New-Object System.Collections.Generic.List[string]
-    $preview.Add('==================================================')
-    $preview.Add(('ISE PROGRAMMER - ' + $Mode.ToUpperInvariant() + ' MODE'))
-    $preview.Add(('Project : ' + $ProjectName))
-    $preview.Add(('Run     : ' + $run.RunId))
-    $preview.Add('==================================================')
-    $preview.Add(('cable            : ' + $(if ($probeFacts.CableName) { $probeFacts.CableName } else { 'UNKNOWN' }) + $(if ($probeFacts.CableSerial) { ' (SN ' + $probeFacts.CableSerial + ')' } else { '' })))
-    $preview.Add(('cable status     : ' + $probeFacts.CableStatus))
-    $preview.Add(('JTAG chain       : ' + $chainStatus + ' (' + $chainCount + ' device(s))'))
-    foreach ($d in @($probeFacts.Devices)) {
-        $preview.Add(('  position ' + $d.Position + '    : ' + $(if ($d.Name) { $d.Name } else { 'UNKNOWN' }) + ' ' + $(if ($d.Idcode) { $d.Idcode } else { 'IDCODE NOT_PARSED' })))
-    }
-    $preview.Add(('expected device  : ' + $expected.DeviceString + '  (IDCODE ' + $(if ($bsdlIdcode) { $bsdlIdcode.IdcodeHex } else { 'NOT_AVAILABLE' }) + ')'))
-    $preview.Add(('device match     : ' + $statuses.deviceMatched))
-    if ($bit.HeaderParsed) {
-        $targetText = $(if ($bit.Part) { $bit.Part } else { '?' }) +
-                      ' (header: ' + $bit.HeaderFormat + '; package ' + $(if ($bit.Package) { $bit.Package } else { 'not in header' }) +
-                      '; speed ' + $(if ($bit.Speed) { $bit.Speed } else { 'not in header' }) + ')' +
-                      '   match: ' + $(if ($bitMatch -eq $true) { 'YES' } elseif ($bitMatch -eq $false) { 'NO - bitstream targets another device' } else { 'UNDETERMINED' })
-        $preview.Add('bitstream target : ' + $targetText)
-    }
-    else { $preview.Add('bitstream target : NOT_PARSED (relying on iMPACT compatibility checking)') }
-    $preview.Add(('bitstream        : ' + $BitFile + '  (' + $bit.Size + ' bytes, SHA-256 ' + $bit.Sha256.Substring(0, 16) + '...)'))
-    $preview.Add(('mode             : ' + $Mode + ' - ' + $volatileText))
-    $preview.Add(('position         : ' + $(if ($Position -gt 0) { $Position } else { 'UNRESOLVED' })))
-    $preview.Add('')
-    if ($Mode -eq 'Isf') {
-        $preview.Add('Persistent boot requirements:')
-        $preview.Add('  Internal Master SPI mode M[2:0] = 011')
-        $preview.Add('  VCCAUX = 3.3 V')
-        $preview.Add('  (JTAG cannot prove the board straps; verify these on the hardware.)')
-        $preview.Add('')
-    }
-    $preview.Add('Status:')
-    foreach ($k in $statuses.Keys) { $preview.Add(('  ' + $k.PadRight(22) + $statuses[$k])) }
+    $preview = New-ProgrammerReportLines -ProjectName $ProjectName -RunId $run.RunId -Mode $Mode `
+        -Expected $expected -BsdlIdcode $bsdlIdcode -Bit $bit -BitMatch $bitMatch -BitFile $BitFile `
+        -VolatileText $volatileText -Position $Position -CableArgument $cfg.CableArgument -CableSerial $cfg.CableSerial `
+        -LocalProbe $localProbeNeeded -ProbeFacts $probeFacts -ChainStatus $chainStatus -ChainCount $chainCount `
+        -DeviceMatchedText $statuses.deviceMatched
 
     if (-not $preflightOk) {
         foreach ($line in $preview) { Write-Host $line }
+        Write-Host ''
+        Write-Host 'Status:'
+        foreach ($k in $statuses.Keys) { Write-Host ('  ' + $k.PadRight(22) + $statuses[$k]) }
         Write-Host ''
         if ($probeFacts.CableStatus -eq 'DIGILENT_ENUM_FAILED') {
             Write-Host 'DIGILENT_ENUM_FAILED: iMPACT''s Digilent plugin could not enumerate the cable.'
             Write-Host 'It is NOT established that the USB device is missing from Windows (a present,'
             Write-Host 'healthy FTDI device can coexist with this failure). No VM configuration change'
             Write-Host 'and no automatic USB attach is performed; run probe-diag to compare layers.'
+        }
+        elseif ($probeFacts.CableStatus -eq 'DIGILENT_OPEN_FAILED') {
+            Write-Host 'DIGILENT_OPEN_FAILED: the cable was enumerated but Adept could not open it'
+            Write-Host '(measured: DmgrOpenEx, erc = 3072 = ercConnectionFailed). No VM configuration'
+            Write-Host 'change and no automatic USB attach is performed.'
         }
         foreach ($e in @($probeFacts.Errors)) { Write-Host ('iMPACT: ' + $e) }
         $meta.result = 'PREFLIGHT_FAILED'
@@ -919,6 +1092,8 @@ function Invoke-Program {
     }
 
     if (-not $ConfirmHardwareWrite) {
+        $preview.Add('Status:')
+        foreach ($k in $statuses.Keys) { $preview.Add(('  ' + $k.PadRight(22) + $statuses[$k])) }
         $preview.Add('')
         $preview.Add('PREVIEW ONLY - no hardware write was performed.')
         $preview.Add('Pass -ConfirmHardwareWrite to actually program the device.')
@@ -929,36 +1104,95 @@ function Invoke-Program {
         throw 'program: PREVIEW ONLY (no hardware write). Re-run with -ConfirmHardwareWrite to program.'
     }
 
-    # ---- program step ------------------------------------------------------
-    # Write scripts are only created and uploaded now, with the resolved position.
-    Write-Utf8 (Join-Path $run.RunDir 'generated/program.cmd') ((New-ImpactProgramScript -Mode $Mode -Position $Position -RemoteBitFile $remoteBit -CablePort $cfg.CablePort -DeviceHasInternalConfigFlash:$hasInternalConfigFlash) + "`r`n")
-    Write-Utf8 (Join-Path $run.RunDir 'generated/run_program.cmd') ((New-ImpactRunner -StepName 'program' -ScriptName 'program.cmd') + "`r`n")
+    # ---- one hardware transaction -------------------------------------------
+    # Everything static was already checked locally (project config, bitstream
+    # header, SHA-256, expected device, confirmed cable SN, -ConfirmHardwareWrite).
+    # All scripts and the bitstream are uploaded once, then ONE remote script runs
+    # the read-only preflight and the write back to back with no SSH round trip,
+    # no SFTP, no local parsing and no sleep between the two iMPACT invocations.
+    Write-Utf8 (Join-Path $run.RunDir 'generated/probe.cmd') ((New-ImpactProbeScript -CableArgument $cfg.CableArgument) + "`r`n")
+    Write-Utf8 (Join-Path $run.RunDir 'generated/program.cmd') ((New-ImpactProgramScript -Mode $Mode -Position $Position -RemoteBitFile $remoteBit -CableArgument $cfg.CableArgument -DeviceHasInternalConfigFlash:$hasInternalConfigFlash) + "`r`n")
+    Write-Utf8 (Join-Path $run.RunDir 'generated/hardware_transaction.cmd') ((New-HardwareTransactionScript -ExpectedPart $expected.Part -ExpectedIdcodeHex $(if ($bsdlIdcode) { $bsdlIdcode.IdcodeHex } else { $null }) -Position $Position) + "`r`n")
     # No standalone verify step: measured on ISE 14.7 an XC3S50AN answers
     # "'1': Verifying device...Verify failed on page 0." to `verify -p 1` and to
     # `verify -p 1 -sram` even right after a write that iMPACT itself verified, so
     # its verdict is not usable. Verification comes from the program step itself.
-    Write-Utf8 (Join-Path $run.RunDir 'generated/verify.cmd') ((New-ImpactVerifyScript -Mode $Mode -Position $Position -CablePort $cfg.CablePort -RemoteBitFile $remoteBit) + "`r`n")
     $null = Send-ProgrammerGenerated -ProjectName $ProjectName -RunId $run.RunId -RunDir $run.RunDir `
-        -GeneratedNames @('program.cmd', 'run_program.cmd', 'verify.cmd')
+        -GeneratedNames @('probe.cmd', 'program.cmd', 'hardware_transaction.cmd')
+    # the bitstream must be on the remote side before the transaction starts
+    $null = Invoke-Sftp @("put `"$((Join-Path $run.RunDir ('inputs/' + [IO.Path]::GetFileName($BitFile))).Replace('\','/'))`" `"$remoteBit`"")
 
     $timeout = $(if ($Mode -eq 'Isf') { $cfg.IsfTimeoutSeconds } else { $cfg.JtagTimeoutSeconds })
-    Write-Host ("Programming ($Mode, position $Position, timeout ${timeout}s) ...")
-    # Same safe retry as the preflight: only an invocation that could not open the
-    # cable is retried, and only while the transcript shows no programming result.
-    $programStep = $null; $programText = ''; $programAttempts = 0
+    $transactionTimeout = $timeout + $cfg.ProbeTimeoutSeconds
+    Write-Host ("Programming ($Mode, position $Position, transaction timeout ${transactionTimeout}s) ...")
+    $preflightState = 'UNKNOWN'
+    $programStep = $null; $programText = ''; $probeText = ''; $programAttempts = 0
     for ($attempt = 1; $attempt -le $cfg.CableRetryAttempts; $attempt++) {
         $programAttempts = $attempt
-        $programStep = Invoke-ImpactStep -RemoteRoot ("$script:RemoteRoot/$ProjectName/$($run.RunId)") -StepName 'program' -TimeoutSeconds $timeout
-        try { Receive-ProgramResults $ProjectName $run.RunId } catch { if (-not $programStep.Error) { $programStep.Error = $_.Exception.Message } }
+        if ($attempt -gt 1) {
+            # keep every attempt's evidence
+            $prev = Join-Path $run.RunDir ('attempt-' + ($attempt - 1))
+            if (Test-Path -LiteralPath $prev) { Remove-Item -LiteralPath $prev -Recurse -Force }
+            if (Test-Path -LiteralPath (Join-Path $run.RunDir 'results')) { Move-Item -LiteralPath (Join-Path $run.RunDir 'results') -Destination $prev }
+        }
+        $step = [pscustomobject]@{ Step = 'hardware_transaction'; TimedOut = $false; Error = $null }
+        try {
+            $null = Invoke-SshTimed ('cmd /d /c "' + $remoteWin + '\work\hardware_transaction.cmd"') $transactionTimeout
+        } catch {
+            $step.Error = $_.Exception.Message
+            if ($step.Error -match '^TIMEOUT:') { $step.TimedOut = $true }
+        }
+        try { Receive-ProgramResults $ProjectName $run.RunId } catch { if (-not $step.Error) { $step.Error = $_.Exception.Message } }
+        $programStep = $step
+        $probeText = Get-TextSafe (Join-Path $run.RunDir 'results/probe.log')
         $programText = Get-TextSafe (Join-Path $run.RunDir 'results/program.log')
+        $runStatusRaw = Get-TextSafe (Join-Path $run.RunDir 'results/run.status')
+        $runStatus = $(if ($runStatusRaw) { $runStatusRaw.Trim() } else { '' })
+        $preflightState = $(if ($runStatus -match 'PREFLIGHT_FAILED') { 'PREFLIGHT_FAILED' } elseif ($runStatus -match 'ENV_FAILED') { 'ENV_FAILED' } elseif ($runStatus -match 'COMPLETE') { 'COMPLETE' } else { 'UNKNOWN' })
+        # The transaction reports its outcome through run.status and uses exit codes
+        # 2 (preflight failed) and 3 (environment failed) on purpose. Those are
+        # expected results, not a dropped session, so they must not turn into
+        # PROGRAM_STATE_UNKNOWN. Only a missing verdict with a transport error is
+        # treated as an interrupted write.
+        if ($preflightState -in @('COMPLETE', 'PREFLIGHT_FAILED', 'ENV_FAILED')) { $step.Error = $null }
+        # A preflight that could not open the cable wrote nothing, so the whole
+        # transaction may be retried - immediately, not after a multi-second sleep
+        # (measured: idling makes the next Adept open more likely to fail).
+        # Everything else (any write evidence, timeout, dropped session) stops here.
         $anyWriteEvidence = [bool]($programText -match '(?i)(Programming Flash|Programming device|Programmed successfully|Programming completed successfully|Completed downloading bit file|Verifying device)')
-        if (-not (Test-TranscriptCableUnavailable $programText) -or $anyWriteEvidence -or $programStep.TimedOut -or $attempt -ge $cfg.CableRetryAttempts) { break }
-        Write-Host ("  iMPACT could not enumerate the cable (program attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying ...")
-        Start-Sleep -Seconds 3
+        $cableUnavailable = ((Test-TranscriptCableUnavailable $probeText) -or (Test-TranscriptCableUnavailable $programText))
+        $retryable = ($cableUnavailable -and -not $anyWriteEvidence -and -not $step.TimedOut -and -not $step.Error -and $attempt -lt $cfg.CableRetryAttempts)
+        if ($retryable -and $preflightState -eq 'PREFLIGHT_FAILED') {
+            Write-Host ("  preflight could not open the cable (attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying immediately ...")
+            Start-Sleep -Milliseconds 150
+            continue
+        }
+        if ($retryable -and $preflightState -eq 'COMPLETE') {
+            Write-Host ("  iMPACT could not open the cable for the write (attempt $attempt/$($cfg.CableRetryAttempts)); nothing was written - retrying immediately ...")
+            Start-Sleep -Milliseconds 150
+            continue
+        }
+        break
     }
     $interrupted = ($programStep.Error -and -not $programStep.TimedOut)
     $programStatus = Get-TextSafe (Join-Path $run.RunDir 'results/program.status')
     $meta.programAttempts = $programAttempts
+    $meta.preflightState = $preflightState
+
+    # The chain facts now come from the transaction's own preflight transcript, which
+    # is the one that actually protected the write.
+    $probeFacts = Get-ProbeLogFacts $probeText
+    $deviceMatched = $null
+    if ($probeFacts.DeviceCount -gt 0) {
+        if (@($probeFacts.Devices | Where-Object { $_.Name -eq $expected.Part }).Count -gt 0) { $deviceMatched = $true }
+        elseif ($bsdlIdcode -and @($probeFacts.Devices | Where-Object { $_.Idcode -eq $bsdlIdcode.IdcodeHex }).Count -gt 0) { $deviceMatched = $true }
+        else { $deviceMatched = $false }
+    }
+    $chainStatus = $probeFacts.ChainStatus
+    $chainCount = $probeFacts.DeviceCount
+    $statuses.cableDetected = $probeFacts.CableStatus
+    $statuses.jtagChainDetected = $chainStatus
+    $statuses.deviceMatched = $(if ($deviceMatched -eq $true) { 'PASS' } elseif ($deviceMatched -eq $false) { 'FAIL' } else { 'UNDETERMINED' })
     $programErrors = @([regex]::Matches($programText, '(?m)^\s*(ERROR|FATAL)[^\r\n]*') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
     # iMPACT does NOT prefix every hard failure with ERROR:. A cable that cannot be
     # opened prints plain lines such as "Cable autodetection failed." and the runner
@@ -973,9 +1207,21 @@ function Invoke-Program {
     $flashWriteEvidence = @([regex]::Matches($programText, '(?im)^.*(SPI access core|Programming Flash|is in sector \d|is in page \d).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
     $nonVolatileWrite = ($Mode -eq 'Jtag' -and $flashWriteEvidence.Count -gt 0)
     $programSuccessMarker = [bool]($programText -match '(?i)(program(ming)?\s+(operation\s+)?(completed|successful|succeeded)|Programmed successfully|Completed downloading bit file to device)')
+    # The transcripts must name the cable we pinned. ANY other serial - in the
+    # preflight or in the write - means the transaction talked to a different cable,
+    # which is a hard failure.
+    $seenSerials = @()
+    foreach ($t in @($probeText, $programText)) {
+        foreach ($m in [regex]::Matches($t, 'Serial Number:\s*(\d+)')) { $seenSerials += $m.Groups[1].Value }
+    }
+    $seenSerials = @($seenSerials | Select-Object -Unique)
+    $actualSerial = $(if ($seenSerials.Count -gt 0) { $seenSerials -join '+' } else { $null })
+    $foreignSerials = @($seenSerials | Where-Object { $_ -ne $cfg.CableSerial })
+    $serialMismatch = [bool]($cfg.CableSerial -and $foreignSerials.Count -gt 0)
     if ($programStep.TimedOut) { $statuses.programmingCompleted = 'TIMEOUT' }
     elseif ($interrupted) { $statuses.programmingCompleted = 'PROGRAM_STATE_UNKNOWN' }
     elseif ($programErrors.Count -gt 0) { $statuses.programmingCompleted = 'FAIL' }
+    elseif ($serialMismatch) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($cableFailures.Count -gt 0 -and -not $programSuccessMarker) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($nonVolatileWrite) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($programSuccessMarker) { $statuses.programmingCompleted = 'PASS' }
@@ -983,6 +1229,8 @@ function Invoke-Program {
     else { $statuses.programmingCompleted = 'FAIL' }
     foreach ($c in $cableFailures) { $programErrors += ('cable: ' + $c) }
     if ($nonVolatileWrite) { $programErrors += 'MODE VIOLATION: -Mode Jtag asked for a volatile FPGA configuration (-onlyFpga) but the transcript shows internal flash programming; the device non-volatile flash was modified.' }
+    if ($serialMismatch) { $programErrors += ('CABLE MISMATCH: the transcript names cable SN ' + $actualSerial + ' but programming.cableSerial is ' + $cfg.CableSerial + '.') }
+    if ($preflightState -eq 'PREFLIGHT_FAILED') { $programErrors += 'PREFLIGHT_FAILED: the remote preflight did not verify the chain, so program.cmd was never executed.' }
 
     # ---- verification evidence, taken from the program transcript ----------
     # The device status register that iMPACT prints at the end of a successful
@@ -1016,6 +1264,12 @@ function Invoke-Program {
     $meta.programmingVerified = $statuses.programmingVerified
     $meta.bitFileTargetMatch = $bitMatch
     $meta.nonVolatileWriteDetected = $nonVolatileWrite
+    $meta.cableType = $cfg.CableType
+    $meta.cableSerial = $cfg.CableSerial
+    $meta.cableFrequencyHz = $cfg.CableFrequencyHz
+    $meta.cableTarget = $cfg.CableArgument
+    $meta.cableSerialSeen = $actualSerial
+    $meta.cableSerialMismatch = $serialMismatch
     $meta.modeIsNonVolatile = [bool]($Mode -eq 'Isf')
     $meta.hasInternalConfigFlash = $hasInternalConfigFlash
     $meta.configurationStatus = [ordered]@{
@@ -1026,8 +1280,19 @@ function Invoke-Program {
     }
     Write-Json (Join-Path $run.RunDir 'run.json') $meta
 
-    $summary = New-Object System.Collections.Generic.List[string]
-    foreach ($line in $preview) { if ($line -notmatch '^Status:') { $summary.Add($line) } }
+    $summary = New-ProgrammerReportLines -ProjectName $ProjectName -RunId $run.RunId -Mode $Mode `
+        -Expected $expected -BsdlIdcode $bsdlIdcode -Bit $bit -BitMatch $bitMatch -BitFile $BitFile `
+        -VolatileText $volatileText -Position $Position -CableArgument $cfg.CableArgument -CableSerial $cfg.CableSerial `
+        -LocalProbe $false -ProbeFacts $probeFacts -ChainStatus $chainStatus -ChainCount $chainCount `
+        -DeviceMatchedText $statuses.deviceMatched -PreflightState $preflightState
+    $summary.Add('')
+    $summary.Add('Cable identity:')
+    $summary.Add(('  Cable provider : ' + $(if ($cfg.CableType -eq 'digilent') { 'Digilent' } else { 'auto-detect (diagnostic only)' })))
+    $summary.Add(('  Cable serial   : ' + $(if ($cfg.CableSerial) { $cfg.CableSerial } else { 'NOT_CONFIGURED' })))
+    $summary.Add(('  Cable target   : ' + $(if ($cfg.CableSerial) { 'explicit' } else { 'auto' }) + '  (' + $cfg.CableArgument + ')'))
+    $summary.Add(('  Cable frequency: ' + $(if ($cfg.CableFrequencyHz) { $cfg.CableFrequencyHz.ToString() + ' Hz (measured)' } else { 'NOT_CONFIGURED' })))
+    $summary.Add(('  Cable in log   : ' + $(if ($actualSerial) { $actualSerial } else { 'NOT_REPORTED' }) + $(if ($serialMismatch) { '   MISMATCH -> FAIL' } else { '' })))
+    $summary.Add(('  Preflight      : ' + $preflightState + $(if ($preflightState -eq 'PREFLIGHT_FAILED') { ' (program.cmd was never executed)' } else { '' })))
     $summary.Add('')
     $summary.Add('Status:')
     foreach ($k in $statuses.Keys) { $summary.Add(('  ' + $k.PadRight(22) + $statuses[$k])) }
@@ -1077,8 +1342,11 @@ function Invoke-Program {
     Write-Host ("run directory: " + $run.RunDir)
 
     if ($programResult -ne 'PASS') {
-        $extra = $(if ($nonVolatileWrite) { ' MODE VIOLATION: -Mode Jtag asked for a volatile FPGA configuration but the transcript shows internal flash programming; the device non-volatile flash was modified.' } else { '' })
+        $extra = ''
+        if ($nonVolatileWrite) { $extra += ' MODE VIOLATION: -Mode Jtag asked for a volatile FPGA configuration but the transcript shows internal flash programming; the device non-volatile flash was modified.' }
+        if ($serialMismatch) { $extra += ' CABLE MISMATCH: the transcript names cable SN ' + $actualSerial + ' but programming.cableSerial is ' + $cfg.CableSerial + '.' }
         throw "program: result $programResult - programmingCompleted=$($statuses.programmingCompleted), programmingVerified=$($statuses.programmingVerified).$extra (see $($run.RunDir))."
     }
     return [pscustomobject]@{ RunId = $run.RunId; RunDir = $run.RunDir; Statuses = $statuses; Mode = $Mode }
 }
+

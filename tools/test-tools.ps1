@@ -146,8 +146,84 @@ Elapsed time =      1 sec.
     }
 }
 
-function Get-RemoteRun([string]$RemotePath) {
-    $m = [regex]::Match($RemotePath, '(?<id>(?:sim-|verify-|probe-|program-)?\d{8}-\d{6}-[a-f0-9]{8})/(?<rest>[^"]+)$')
+# The write transcript. Shapes are taken from real ISE 14.7 runs on this board.
+function New-FakeProgramLog {
+    switch ($script:ProgProgram) {
+        'fail' { return "ERROR:iMPACT:1234 - simulated programming failure`n" }
+        'cable' {
+            # Real shape when the cable cannot be opened: no ERROR: line at all.
+            return ("INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4`n" +
+                "INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "INFO:iMPACT - Digilent Plugin: no JTAG device was found.`n" +
+                "AutoDetecting cable. Please wait.`n" +
+                "Connecting to cable (Usb Port - USB21).`n" +
+                "The Platform Cable USB is not detected. Please connect a cable.`n" +
+                "Cable connection failed.`n" +
+                "Cable autodetection failed.`n")
+        }
+        'openfail' {
+            # Real shape of an Adept open failure with an explicit serial.
+            return ("INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4`n" +
+                "INFO:iMPACT - Digilent Plugin: Opening device : `"SN:210241672559`".`n" +
+                "ERROR:iMPACT - Digilent Plugin: failed to open device (DmgrOpenEx, erc = 3072).`n")
+        }
+        'otherserial' {
+            return ("INFO:iMPACT - Digilent Plugin: found 1 device(s).`n" +
+                "INFO:iMPACT - Digilent Plugin: Serial Number: 210241794853`n" +
+                "'1': Programming device...`n" +
+                "INFO:iMPACT:188 - '1': Programming completed successfully.`n" +
+                "'1': Programmed successfully.`n")
+        }
+        'flash' {
+            # Measured: without `-onlyFpga` a Jtag-mode run programs the internal ISF.
+            return ("INFO:iMPACT - Digilent Plugin: found 1 device(s).`n" +
+                "INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': SPI access core not detected. SPI access core will be downloaded to the device to enable operations.`n" +
+                "INFO:iMPACT - Address 0x00000000 is in sector 0.`n" +
+                "'1': Programming Flash...done.`n" +
+                "'1': Programming completed successfully.`n")
+        }
+        'verified' {
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Programming Flash...done.`n" +
+                "'1': Programming completed successfully.`n" +
+                "'1': Verifying device...done.`n" +
+                "'1': Verification completed successfully.`n" +
+                "'1': Programmed successfully.`n")
+        }
+        'verifyfail' {
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Programming completed successfully.`n" +
+                "'1': Verifying device...Verify failed on page 0.`n" +
+                "'1': Verification Terminated...done.`n")
+        }
+        'status' {
+            # Real -onlyFpga shape: FPGA configured, status register reports the MODE
+            # pin straps and the DONE pin.
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Programming device...`n" +
+                "'1': Reading status register contents...`n" +
+                "CRC error                                                                  :    0`n" +
+                "DCM Locked                                                                 :    1`n" +
+                "status of GWE                                                              :    1`n" +
+                "value of MODE pin M0                                                       :    1`n" +
+                "value of MODE pin M1                                                       :    1`n" +
+                "value of MODE pin M2                                                       :    0`n" +
+                "value of CFG_RDY (INIT_B)                                                  :    1`n" +
+                "DONEIN input from Done Pin                                                 :    1`n" +
+                "SYNC word not found                                                        :    0`n" +
+                "INFO:iMPACT:579 - '1': Completed downloading bit file to device.`n" +
+                "INFO:iMPACT:188 - '1': Programming completed successfully.`n" +
+                "'1': Programmed successfully.`n")
+        }
+        default {
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "INFO:iMPACT - programming device '1'`nProgramming operation completed successfully`n")
+        }
+    }
+}
+
+function Get-RemoteRun([string]$RemotePath) {    $m = [regex]::Match($RemotePath, '(?<id>(?:sim-|verify-|probe-|program-)?\d{8}-\d{6}-[a-f0-9]{8})/(?<rest>[^"]+)$')
     if (-not $m.Success) { throw "Unexpected remote path in test mock: $RemotePath" }
     return @{ Id = $m.Groups['id'].Value; Rest = $m.Groups['rest'].Value.Replace('/', '\') }
 }
@@ -228,8 +304,32 @@ function Invoke-Ssh([string]$RemoteCommand) {
     throw "Unexpected remote command in test mock: $RemoteCommand"
 }
 function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
-    if ($script:Scenario -eq 'timeout' -and $RemoteCommand -match 'run\.cmd' -and $RemoteCommand -notmatch '_tool' -and $RemoteCommand -notmatch 'run_(probe|program|verify)') {
+    if ($script:Scenario -eq 'timeout' -and $RemoteCommand -match 'run\.cmd' -and $RemoteCommand -notmatch '_tool' -and $RemoteCommand -notmatch 'run_(probe|program|verify)' -and $RemoteCommand -notmatch 'hardware_transaction') {
         throw 'TIMEOUT: simulated simulation timeout'
+    }
+    # One hardware transaction: the mock runs the preflight, decides on the same
+    # success markers the real script uses, and only then runs the write.
+    if ($RemoteCommand -match 'hardware_transaction\.cmd') {
+        $script:ImpactSteps.Add('hardware_transaction')
+        $results = Join-Path $script:Remote 'results'
+        New-Item -ItemType Directory -Force -Path $results | Out-Null
+        $probeLog = New-FakeProbeLog
+        Write-Utf8 "$results/probe.log" $probeLog
+        $preflightOk = ($probeLog -match 'Digilent Plugin: opening device') -and
+                       ($probeLog -match ('Added Device ' + $script:ProbeDevice)) -and
+                       ($probeLog -match $script:ProbeIdcode)
+        if (-not $preflightOk) {
+            Write-Utf8 "$results/run.status" 'PREFLIGHT_FAILED'
+            return ''
+        }
+        Write-Utf8 "$results/preflight.status" 'PREFLIGHT_OK'
+        if ($script:ProgProgram -eq 'timeout') { throw 'TIMEOUT: simulated impact timeout' }
+        if ($script:ProgProgram -eq 'interrupted') { throw 'SSH exit 255: simulated connection drop during program' }
+        $script:ImpactSteps.Add('program')
+        Write-Utf8 "$results/program.log" (New-FakeProgramLog)
+        Write-Utf8 "$results/program.exitcode" '0'
+        Write-Utf8 "$results/run.status" 'COMPLETE'
+        return ''
     }
     if ($RemoteCommand -match 'run_(probe|program|verify)\.cmd') {
         $step = $Matches[1]
@@ -242,60 +342,7 @@ function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
         }
         switch ($step) {
             'probe' { Write-Utf8 "$results/probe.log" (New-FakeProbeLog) }
-            'program' {
-                if ($script:ProgProgram -eq 'fail') {
-                    Write-Utf8 "$results/program.log" "ERROR:iMPACT:1234 - simulated programming failure`n"
-                } elseif ($script:ProgProgram -eq 'cable') {
-                    # Byte-for-byte shape of a real ISE 14.7 transcript when the cable
-                    # disappeared between the preflight and the program step: no ERROR:
-                    # line at all, and the runner still writes status COMPLETE.
-                    Write-Utf8 "$results/program.log" ("INFO:iMPACT - Digilent Plugin: Plugin Version: 2.4.4`n" +
-                        "INFO:iMPACT - Digilent Plugin: no JTAG device was found.`n" +
-                        "AutoDetecting cable. Please wait.`n" +
-                        "Connecting to cable (Usb Port - USB21).`n" +
-                        "The Platform Cable USB is not detected. Please connect a cable.`n" +
-                        "Cable connection failed.`n" +
-                        "Cable autodetection failed.`n")
-                } elseif ($script:ProgProgram -eq 'flash') {
-                    # Measured on real hardware: without `-onlyFpga` a Jtag-mode run
-                    # programs the Spartan-3AN internal SPI flash instead.
-                    Write-Utf8 "$results/program.log" ("INFO:iMPACT - Digilent Plugin: found 1 device(s).`n" +
-                        "'1': SPI access core not detected. SPI access core will be downloaded to the device to enable operations.`n" +
-                        "INFO:iMPACT - Address 0x00000000 is in sector 0.`n" +
-                        "'1': Programming Flash...done.`n" +
-                        "'1': Programming completed successfully.`n")
-                } elseif ($script:ProgProgram -eq 'verified') {
-                    # Real ISF transcript shape: the in-step flash verify passes.
-                    Write-Utf8 "$results/program.log" ("'1': Programming Flash...done.`n" +
-                        "'1': Programming completed successfully.`n" +
-                        "'1': Verifying device...done.`n" +
-                        "'1': Verification completed successfully.`n" +
-                        "'1': Programmed successfully.`n")
-                } elseif ($script:ProgProgram -eq 'verifyfail') {
-                    Write-Utf8 "$results/program.log" ("'1': Programming completed successfully.`n" +
-                        "'1': Verifying device...Verify failed on page 0.`n" +
-                        "'1': Verification Terminated...done.`n")
-                } elseif ($script:ProgProgram -eq 'status') {
-                    # Real -onlyFpga transcript shape: FPGA configured, status register
-                    # reports the MODE pin straps and the DONE pin.
-                    Write-Utf8 "$results/program.log" ("'1': Programming device...`n" +
-                        "'1': Reading status register contents...`n" +
-                        "CRC error                                                                  :    0`n" +
-                        "DCM Locked                                                                 :    1`n" +
-                        "status of GWE                                                              :    1`n" +
-                        "value of MODE pin M0                                                       :    1`n" +
-                        "value of MODE pin M1                                                       :    1`n" +
-                        "value of MODE pin M2                                                       :    0`n" +
-                        "value of CFG_RDY (INIT_B)                                                  :    1`n" +
-                        "DONEIN input from Done Pin                                                 :    1`n" +
-                        "SYNC word not found                                                        :    0`n" +
-                        "INFO:iMPACT:579 - '1': Completed downloading bit file to device.`n" +
-                        "INFO:iMPACT:188 - '1': Programming completed successfully.`n" +
-                        "'1': Programmed successfully.`n")
-                } else {
-                    Write-Utf8 "$results/program.log" "INFO:iMPACT - programming device '1'`nProgramming operation completed successfully`n"
-                }
-            }
+            'program' { Write-Utf8 "$results/program.log" (New-FakeProgramLog) }
             'verify' {
                 switch ($script:ProgVerify) {
                     'fail' { Write-Utf8 "$results/verify.log" "ERROR:iMPACT:4321 - simulated verify mismatch`n" }
@@ -721,27 +768,51 @@ Assert ((Test-BitPartMatchesDevice -BitPartRaw '3s50antq144' -ExpectedPart 'xc3s
 # --- generated batch scripts (commands verified against the real install) ---
 # Device with internal configuration flash (Spartan-3AN): the same `program`
 # command means "write the ISF" unless -onlyFpga selects the FPGA fabric.
-$jtagScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto' -DeviceHasInternalConfigFlash
+$snTarget = '-target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"'
+$jtagScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CableArgument $snTarget -DeviceHasInternalConfigFlash
 Assert ($jtagScript -match '(?m)^setMode -bs\r?$') 'JTAG script must start with setMode'
+Assert ($jtagScript -match 'setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"') 'JTAG script must pin the cable by serial'
+Assert ($jtagScript -notmatch '\-p auto') 'the formal path must not auto-detect the cable'
 Assert ($jtagScript -match 'assignFile -p 1 -file') 'JTAG script missing assignFile'
 Assert ($jtagScript -match 'program -p 1 -onlyFpga') 'JTAG script must select the FPGA fabric with -onlyFpga'
 Assert ($jtagScript -notmatch 'program -p 1 -v') 'JTAG script must NOT add -v (an FPGA readback verify needs a .msk mask file)'
 Assert ($jtagScript -match '(?m)^closeCable\r?$') 'JTAG script must close the cable'
-$isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto' -DeviceHasInternalConfigFlash
+$isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CableArgument $snTarget -DeviceHasInternalConfigFlash
+Assert ($isfScript -match 'setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"') 'ISF script must pin the same cable as the preflight'
 Assert ($isfScript -match 'assignFile -p 2 -file') 'ISF script must assign the bitstream to the device'
 Assert ($isfScript -match 'program -p 2 -v') 'ISF script must program with the in-step flash verify'
 Assert ($isfScript -notmatch 'assignFileToAttachedFlash') 'the internal ISF is not an "attached" flash (that command answers "No attached device found")'
 Assert ($isfScript -notmatch '\-spi') 'the internal ISF flow does not use -spi'
 Assert ($isfScript -notmatch 'onlyFpga') 'ISF mode must not use -onlyFpga'
 # Device without internal flash: a plain program is the volatile configuration.
-$plainScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
+$plainScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CableArgument $snTarget
 Assert ($plainScript -match 'program -p 1 -v') 'a flash-less device keeps the verified program'
 Assert ($plainScript -notmatch 'onlyFpga') 'a flash-less device must not use -onlyFpga'
-$jtagVerifyScript = New-ImpactVerifyScript -Mode Jtag -Position 1 -CablePort 'auto' -RemoteBitFile 'C:\r\work\d.bit'
+$probeScript = New-ImpactProbeScript -CableArgument $snTarget
+Assert ($probeScript -match 'setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"') 'the formal probe must pin the cable by serial'
+Assert ($probeScript -match 'readIdcode -p 1') 'the formal probe must read the IDCODE'
+$jtagVerifyScript = New-ImpactVerifyScript -Mode Jtag -Position 1 -CableArgument $snTarget -RemoteBitFile 'C:\r\work\d.bit'
 Assert ($jtagVerifyScript -match 'assignFile -p 1 -file') 'Jtag verify must assign the bitstream before verifying'
 Assert ($jtagVerifyScript -match 'verify -p 1 -sram') 'Jtag verify must verify the SRAM configuration'
-$isfVerifyScript = New-ImpactVerifyScript -Mode Isf -Position 2 -CablePort 'auto' -RemoteBitFile 'C:\r\work\d.bit'
+$isfVerifyScript = New-ImpactVerifyScript -Mode Isf -Position 2 -CableArgument $snTarget -RemoteBitFile 'C:\r\work\d.bit'
 Assert ($isfVerifyScript -match 'verify -p 2 -spi') 'ISF verify script malformed'
+
+# --- hardware transaction: preflight and write in one remote script ----------
+$txn = New-HardwareTransactionScript -ExpectedPart 'xc3s50an' -ExpectedIdcodeHex '0x02610093' -Position 1
+Assert ($txn -match 'impact -batch probe\.cmd < nul') 'the transaction must run the read-only preflight'
+Assert ($txn -match 'impact -batch program\.cmd < nul') 'the transaction must run the write'
+Assert ($txn.IndexOf('impact -batch probe.cmd') -lt $txn.IndexOf('impact -batch program.cmd')) 'the preflight must come first'
+$between = $txn.Substring($txn.IndexOf('impact -batch probe.cmd'), $txn.IndexOf('impact -batch program.cmd') - $txn.IndexOf('impact -batch probe.cmd'))
+# comments are excluded: the rem line says "no sleep, no round trip" on purpose
+$betweenCommands = (($between -split "`r?`n") | Where-Object { $_ -notmatch '^\s*rem' }) -join "`n"
+Assert ($betweenCommands -notmatch '(?i)ping|sleep|timeout|ssh|sftp') 'no sleep or round trip may sit between the preflight and the write'
+Assert ($txn -match 'findstr /i /c:"Digilent Plugin: opening device"') 'the transaction must require the cable to open'
+Assert ($txn -match 'findstr /i /c:"Added Device xc3s50an"') 'the transaction must require the expected device'
+Assert ($txn -match 'findstr /i /c:"02610093"') 'the transaction must require the expected IDCODE'
+Assert ($txn -match '(?m)^:preflight_failed\r?$') 'the transaction must have a preflight failure path'
+Assert ($txn -match 'PREFLIGHT_OK') 'the transaction must record that the preflight verified the chain'
+Assert ($txn -match 'goto preflight') 'the transaction must retry the preflight inside itself'
+Assert ((New-HardwareTransactionScript -ExpectedPart 'xc3s50an' -ExpectedIdcodeHex $null -Position 1) -notmatch 'findstr /i /c:"02610093"') 'no IDCODE check may be invented when the BSDL is unavailable'
 Write-Host 'PASS: probe/program parsers and the generated iMPACT batch commands.'
 
 # --- probe: cable + chain + device match ------------------------------------
@@ -858,7 +929,9 @@ Assert ($timeoutSummary -match 'TIMEOUT') 'timeout not documented in the summary
 $script:ProgProgram = 'interrupted'
 $script:ImpactSteps.Clear()
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'PROGRAM_STATE_UNKNOWN'
-Assert (@($script:ImpactSteps | Where-Object { $_ -eq 'program' }).Count -eq 1) 'program must not be retried automatically'
+# A dropped session must not re-run the transaction: one attempt only.
+Assert (@($script:ImpactSteps | Where-Object { $_ -eq 'hardware_transaction' }).Count -eq 1) 'the hardware transaction must not be retried after a dropped session'
+Assert (@($script:ImpactSteps | Where-Object { $_ -eq 'program' }).Count -eq 0) 'no further write may start after an interrupted transaction'
 $interruptSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'program-') + '/summary.txt')
 Assert ($interruptSummary -match 'Do NOT re-run program blindly') 'recovery instructions missing'
 $script:ProgProgram = 'ok'
@@ -910,7 +983,37 @@ Assert ($violJson.nonVolatileWriteDetected -eq $true) 'the non-volatile write mu
 Assert ((Get-TextSafe "$violRun/summary.txt") -match 'non-volatile flash was modified') 'the mode violation must be explained'
 $script:ProgProgram = 'ok'
 
-# --- bitstream file checks --------------------------------------------------
+# --- pinned cable: identity, scripts and mismatch detection -----------------
+New-Fixture 'fixturecable' @{ programming = [ordered]@{ cableType = 'digilent'; cableSerial = '210241672559'; cableFrequencyHz = 10000000; position = 1 } }
+$script:ImpactSteps.Clear()
+$pinRun = Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
+$pinJson = Get-Content "$($pinRun.RunDir)/run.json" -Raw | ConvertFrom-Json
+Assert ($pinJson.cableType -eq 'digilent') 'the pinned cable type must be recorded'
+Assert ($pinJson.cableSerial -eq '210241672559') 'the pinned cable serial must be recorded'
+Assert ($pinJson.cableFrequencyHz -eq 10000000) 'the measured cable frequency must be recorded'
+Assert ($pinJson.cableTarget -match 'DEVICE=SN:210241672559 FREQUENCY=10000000') 'the cable target must be explicit'
+$pinProbe = Get-TextSafe "$($pinRun.RunDir)/generated/probe.cmd"
+$pinProgram = Get-TextSafe "$($pinRun.RunDir)/generated/program.cmd"
+Assert ($pinProbe -match 'setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"') 'the preflight must pin the cable'
+Assert ($pinProgram -match 'setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"') 'the write must pin the same cable as the preflight'
+Assert ($pinProbe -notmatch '\-p auto' -and $pinProgram -notmatch '\-p auto') 'the formal path must never auto-detect'
+$pinSummary = Get-TextSafe "$($pinRun.RunDir)/summary.txt"
+foreach ($needle in @('Cable provider : Digilent', 'Cable serial   : 210241672559', 'Cable target   : explicit', 'Cable frequency: 10000000 Hz (measured)')) {
+    Assert ($pinSummary.Contains($needle)) "the cable identity block is missing: $needle"
+}
+# A transcript that names another cable must fail: we pinned a serial on purpose.
+$script:ProgProgram = 'otherserial'
+Expect-Failure { Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'CABLE MISMATCH'
+$misRun = Get-LatestProgrammerRun 'fixturecable' 'program-'
+Assert (((Get-Content "$misRun/run.json" -Raw | ConvertFrom-Json).cableSerialMismatch) -eq $true) 'the serial mismatch must be recorded'
+Assert ((Get-TextSafe "$misRun/summary.txt") -match 'MISMATCH -> FAIL') 'the mismatch must be visible in the summary'
+# An Adept open failure must never be reported as a successful write.
+$script:ProgProgram = 'openfail'
+Expect-Failure { Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
+Assert (((Get-Content ((Get-LatestProgrammerRun 'fixturecable' 'program-') + '/run.json') -Raw | ConvertFrom-Json).programmingCompleted) -eq 'FAIL') 'a failed Adept open must be FAIL'
+$script:ProgProgram = 'ok'
+Write-Host 'PASS: the formal path pins the cable by serial and fails on a cable mismatch.'
+
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile (Join-Path $root 'missing.bit') -ConfirmHardwareWrite } 'bitstream not found'
 $emptyBit = Join-Path $root 'empty.bit'
 [IO.File]::WriteAllBytes($emptyBit, [byte[]]@())
@@ -927,21 +1030,41 @@ Assert ($diagAuto -match '(?m)^identify\r?$') 'diag probe script must identify t
 Assert ($diagAuto -match 'readIdcode -p 1') 'diag probe script must read the IDCODE'
 Assert ($diagAuto -match '(?m)^closeCable\r?$') 'diag probe script must close the cable'
 Assert ($diagAuto -notmatch 'assignFile|program|erase') 'probe-diag must stay read only'
-$diagSn = New-DiagProbeScript -CableArgument '-target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY:10000000"'
+$diagSn = New-DiagProbeScript -CableArgument '-target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"'
 Assert ($diagSn -match 'DEVICE=SN:210241672559') 'the explicit-SN variant must carry the measured serial'
-$diagWorker = New-DiagWorkerWithSn -Iterations 7
+$diagWorker = New-DiagWorker -Iterations 7 -TargetSerial '210241672559'
 Assert ($diagWorker -match 'for /L %%i in \(1,1,7\)') 'the worker must run the requested number of iterations'
-Assert ($diagWorker -match 'iteration,time,launch,sessionname,ftdi_pnp') 'the worker CSV header must record the launch context'
+Assert ($diagWorker -match 'iteration,time,launch,sessionname,target_pnp') 'the worker CSV header must record the launch context'
 Assert ($diagWorker -match 'echo DONE>>results.csv') 'the worker must mark completion'
-Assert ($diagWorker -match 'VID_0403') 'the worker must record the Windows PnP presence'
+# 8.1: the PnP check must match the target serial, not any FTDI device
+Assert ($diagWorker -match "VID_0403&PID_6014") 'the PnP check must narrow to the target VID/PID'
+Assert ($diagWorker -match 'findstr /i "210241672559"') 'the PnP check must match the target serial'
+Assert ($diagWorker -match 'TARGET_PNP_PRESENT') 'the PnP result must be reported per target'
+Assert ($diagWorker -notmatch 'VID_0403%%" get DeviceID 2>nul \| findstr /i "0403"') 'the old over-broad PnP check must be gone'
+# 8.2: DmgrOpenEx must outrank the bare "Opening device" line
+Assert ($diagWorker -match 'failed to open device \(DmgrOpenEx') 'the worker must detect the Adept open failure'
+$workerOpenIdx = $diagWorker.IndexOf('DIGILENT_OPEN_FAILED')
+$workerOpenLineIdx = $diagWorker.LastIndexOf('Digilent Plugin: opening device')
+Assert ($workerOpenIdx -lt $workerOpenLineIdx) 'DIGILENT_OPEN_FAILED must be decided before the bare opening line'
+# 8.3: real measured delay, not ping
+Assert ($diagWorker -match 'cscript //nologo delay.vbs') 'the worker must use the measured delay helper'
+Assert ($diagWorker -match 'requested_delay_ms,actual_delay_ms') 'the worker must record requested and actual delay'
+Assert ($diagWorker -notmatch 'ping -n') 'ping must not be used to fake a delay'
+Assert ((New-DiagDelayHelper) -match 'WScript.Sleep') 'the delay helper must really sleep'
 Assert ($diagWorker -match 'tasklist /fi "imagename eq impact.exe"') 'the worker must look for leftover impact.exe processes'
 Assert ($diagWorker -match 'impact -batch probe_%TAG%\.cmd') 'the worker must run the read-only probe scripts'
-# The cable identity is read from our own transcripts; an empty artifact tree must
-# yield nulls instead of invented values.
-$diagIdentity = Get-KnownCableIdentity -ArtifactRoot (Join-Path $root 'no-such-artifacts')
-Assert ($null -eq $diagIdentity.Serial -and $null -eq $diagIdentity.FrequencyHz) 'no cable identity may be invented'
+Assert ((Get-AdeptErrorFacts 'ERROR:iMPACT - Digilent Plugin: failed to open device (DmgrOpenEx, erc = 3072).').ErcName -eq 'ercConnectionFailed') 'erc 3072 must be named ercConnectionFailed'
+Assert ($null -eq (Get-AdeptErrorFacts 'INFO:iMPACT - nothing here').Erc) 'no erc may be invented'
+# The cable identity comes from the project config first and our own transcripts
+# second; an empty artifact tree with no config must yield nulls, never a default.
+$diagIdentity = Get-CableIdentity -ArtifactRoot (Join-Path $root 'no-such-artifacts')
+Assert ([string]::IsNullOrEmpty($diagIdentity.Serial) -and [string]::IsNullOrEmpty($diagIdentity.FrequencyHz)) "no cable identity may be invented (got serial='$($diagIdentity.Serial)' freq='$($diagIdentity.FrequencyHz)')"
+$diagIdentity2 = Get-CableIdentity -ArtifactRoot (Join-Path $root 'no-such-artifacts') -ConfiguredSerial '210241672559' -ConfiguredFrequencyHz 10000000
+Assert ($diagIdentity2.Serial -eq '210241672559' -and $diagIdentity2.FrequencyHz -eq 10000000) 'the configured cable identity must be used'
+Assert ($diagIdentity2.Source -match 'project.json') 'the identity source must be recorded'
 Write-Host 'PASS: probe-diag generates read-only layered diagnostics and invents nothing.'
 
 Write-Host ''
 Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'
 Write-Host "Test evidence retained: $root"
+

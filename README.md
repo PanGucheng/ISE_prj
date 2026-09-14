@@ -221,7 +221,56 @@ pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.
 
 **副产品**：FPGA 直接配置的转录会打印器件状态寄存器，工具把它解析出来（`run.json` 的 `configurationStatus`）并在摘要里显示，例如真机读到的 `MODE pins M[2:0] = 011`（内部 Master SPI 启动模式）、`DONEIN input from Done Pin = 1`、`CRC error = 0`、`VSEL pin 0/1/2 = 1/1/1`。这为「ISF 启动所需的 `M[2:0]=011`」提供了**来自硬件的证据**，而不是只靠跳线猜测。
 
-**两次 iMPACT 调用之间的 USB 抖动**：fpga-vm 的 USB 透传存在间歇性——某次 iMPACT 能打开下载线，紧接着的下一次可能报 `Digilent Plugin: no JTAG device was found`。**「下载线从未打开」意味着一个字节都没写**，因此工具允许对 preflight 与 program 步骤重试（`programming.cableRetryAttempts`，默认 3）；一旦转录里出现任何写入迹象，或出现 `TIMEOUT`/`PROGRAM_STATE_UNKNOWN`，**绝不重试**。所有脚本都以 `closeCable` 收尾。
+### 正式烧录固定下载线（不再 `-p auto`）
+
+```json
+"programming": {
+  "cableType": "digilent",
+  "cableSerial": "210241672559",
+  "cableFrequencyHz": 10000000,
+  "position": 1
+}
+```
+
+生成的 `setCable` 一律是显式目标：
+
+```
+setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"
+```
+
+- **`cableFrequencyHz` 必须来自真实转录**（本机 52 条成功转录一致给出 `JTAG Clock Frequency: 10000000 Hz`）。配置缺失时工具**直接报错停止**，`probe-diag` 也只会打印 `explicit SN test skipped: NO_MEASURED_CABLE_FREQUENCY`——**任何情况下都不默认 10000000**。
+- **`-p auto` 只保留在 `probe-diag`**（诊断用）。正式 `probe` / `program` 不会再自动扫描下载线。
+- 每次 program 的摘要都输出 cable identity：`Cable provider / Cable serial / Cable target / Cable frequency`，并附上**转录里实际出现的序列号**；若与配置不符 → `CABLE MISMATCH` 判 FAIL。
+
+### 一次硬件事务：preflight 与写入之间没有空闲窗口
+
+本机只做**静态**检查（工程配置、bitstream 头、SHA-256、期望器件、已确认的下载线序列号、`-ConfirmHardwareWrite`），然后**一次性上传**全部脚本与 bitstream，由远端**一个** `hardware_transaction.cmd` 完成：
+
+```
+hardware_transaction.cmd
+  ├─ phase 1  impact -batch probe.cmd      （只读 preflight）
+  │    要求同一组成功标记：Digilent 打开下载线 + Added Device <part> + <IDCODE>
+  │    不通过 → goto preflight_retry（同一事务内立即重试，最多 4 次）
+  │              仍不通过 → run.status=PREFLIGHT_FAILED，program.cmd 绝不执行
+  └─ phase 2  impact -batch program.cmd    （紧接着，无 sleep / 无 SSH / 无 SFTP / 无本地解析）
+```
+
+实测动机：**下载线刚被打开过时可以稳定重开，静置几秒后再打开则容易出现
+`failed to open device (DmgrOpenEx, erc = 3072)`（= `ercConnectionFailed`）**。因此
+- 两个 iMPACT 调用之间**没有任何往返或等待**；
+- 重试发生在**同一个远端事务内部**，且退避是 **150 ms 而不是几秒**；
+- 只有「转录里完全没有写入迹象」时才允许重试（`programming.cableRetryAttempts`，默认 3）；一旦出现 `Programming device` / `Programming Flash` / `Completed downloading` / `Programmed successfully` / `Verifying` / `TIMEOUT` / SSH 中断，**绝不重试**；
+- 事务用 `exit /b 2`（preflight 失败）与 `exit /b 3`（环境失败）表达**预期结果**，工具据 `run.status` 判定，不会误当成 `PROGRAM_STATE_UNKNOWN`。
+
+### 下载线失败必须分层报告
+
+```
+DIGILENT_ENUM_FAILED   iMPACT 的 Digilent 插件报 "no JTAG device was found"
+DIGILENT_OPEN_FAILED   枚举到了但 Adept 打不开：failed to open device (DmgrOpenEx, erc = 3072)
+CABLE_UNAVAILABLE      iMPACT 回退到 Platform Cable/并口后仍失败
+```
+
+**「Windows 里设备存在」不能证明「Adept 能枚举/打开它」**：实测在失败前后 `wmic Win32_PnPEntity` 都显示 `USB\VID_0403&PID_6014\210241672559 Status=OK`。因此摘要明确写出这一层区别，不再声称「下载线对虚拟机不可见」。
 
 **JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 12 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 12 MHz 时钟才能发声）。
 
