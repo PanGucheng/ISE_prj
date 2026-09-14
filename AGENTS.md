@@ -28,6 +28,16 @@
 - 汇报工程、构建编号、执行阶段、通过/失败、关键错误和结果位置。失败时保留原始日志，说明下一步。
 - `xc3s50an_smoke` 是已跑通的工具链测试，采用 xc3s50an-4-tqg144 和合成测试约束；不得把其自动分配的引脚或时钟假设直接套用于实际板卡。该工程 README.md 记录已完成构建与时序覆盖限制。
 
+## 仿真与验收
+
+- 修改 RTL 或 Testbench 后的主验收入口是 `pwsh -File .\ise.ps1 verify -Project <名称>`：依次执行配置检查、静态检查、synth 综合、project.json 中全部 enabled 仿真、implement 门禁判定，并写出 `artifacts/verify-<id>/verification.json` 与控制台报告；任一项 FAIL 时退出码非零。
+- 单个仿真用 `pwsh -File .\ise.ps1 sim -Project <名称> -Test <名称>`。用例定义在 project.json 的 `simulations` 段（`name/top/sources/generics/timeoutSeconds/passPattern/failPattern`，可加 `enabled`）；testbench 绝不加入综合 `sources`。
+- sim 的判据是日志出现 `passPattern`：退出码 0 不算通过，既无 PASS 也无 FAIL 视为 FAIL；generic 覆盖只在 fuse 阶段生效，每次参数组合重新 fuse；超时会终止本地 SSH 会话并判 FAIL。
+- `pwsh -File .\ise.ps1 report -Project <名称> (-RunId <id> | -Latest) [-Json]` 只读取已有 artifacts，不重新构建；`timing` 在有人实际阅读 timing.twr 之前只能是 `NOT_RUN`/`NEEDS_REVIEW`，不得据此声称时序通过。
+- implement 是否应当被阻止由 project.json 的 `verification.expectImplementationBlocked` 决定（当前为 `true`）。verify 以此判定 EXPECTED BLOCK 是否 PASS，工具内不写工程名特例。
+- `board-check` 目前只在缺少 `board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED`；不得猜测引脚，不得自动设置 `constraintsReviewed=true`，本轮不实现烧录。
+- 工具自测 `pwsh -NoProfile -File .\tools\test-tools.ps1` 覆盖失败路径（fuse 失败、超时、无 PASS 模式、failPattern、门禁两个方向、report 缺文件、旧工程兼容），使用隔离目录与模拟远端，不代表真实综合或真实仿真。
+
 ## 凭据与操作范围
 
 - 复用 `ssh fpga-vm` 的本机密钥配置。不要要求用户重复提供密码，不向工程或日志写入密码、私钥内容。

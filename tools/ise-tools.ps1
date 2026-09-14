@@ -6,6 +6,36 @@ function Write-Utf8($Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding($false)))
 }
 function Write-Json($Path, $Value) { Write-Utf8 $Path ($Value | ConvertTo-Json -Depth 12) }
+# Read a text file, returning $null instead of throwing when it is absent.
+function Get-TextSafe([string]$Path) {
+    if ($Path -and (Test-Path -LiteralPath $Path -PathType Leaf)) { return [IO.File]::ReadAllText($Path) }
+    return $null
+}
+# Read a small integer out of a file written by CMD (e.g. an *.exitcode file).
+function Get-IntSafe([string]$Path) {
+    $text = Get-TextSafe $Path
+    if ($null -eq $text) { return $null }
+    $text = $text.Trim()
+    if ($text -match '^-?\d+$') { return [int]$text }
+    return $null
+}
+# Build run ids (yyyyMMdd-HHmmss-xxxxxxxx) newest first. sim-/verify- runs are excluded.
+# Sorted by creation time, not by name: two runs can share the same second and
+# then only the random suffix would decide the order.
+function Get-BuildRunIds([string]$Name) {
+    Assert-Name $Name
+    $dir = "$root\projects\$Name\artifacts"
+    if (-not (Test-Path -LiteralPath $dir)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -Directory |
+        Where-Object { $_.Name -match '^\d{8}-\d{6}-[a-f0-9]{8}$' } |
+        Sort-Object -Property @{ Expression = 'CreationTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $true } |
+        ForEach-Object { $_.Name })
+}
+function Get-LatestBuildRunId([string]$Name) {
+    $ids = @(Get-BuildRunIds $Name)
+    if ($ids.Count -eq 0) { return $null }
+    return $ids[0]
+}
 function Assert-Name([string]$Name) {
     if ($Name -notmatch '^[A-Za-z][A-Za-z0-9_-]{0,47}$') { throw 'Project name must start with a letter and contain only ASCII letters, digits, _ or - (max 48).' }
 }
@@ -18,6 +48,31 @@ function Invoke-Ssh([string]$RemoteCommand) {
 function Invoke-Sftp([string[]]$Lines) {
     $result = ($Lines -join "`n") | & sftp -b - -o BatchMode=yes -o ConnectTimeout=10 $script:RemoteHost 2>&1
     if ($LASTEXITCODE -ne 0) { throw "SFTP failed: $($result -join "`n")" }
+}
+# Same as Invoke-Ssh but bounded by a wall-clock timeout. On expiry the local ssh
+# process tree is killed and a 'TIMEOUT: ...' error is thrown, so callers can tell
+# a hung remote command apart from a normal failure.
+function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
+    if ($TimeoutSeconds -lt 1) { throw 'Invoke-SshTimed needs a positive timeout.' }
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = 'ssh'
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    foreach ($a in @('-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', $script:RemoteHost, $RemoteCommand)) {
+        $psi.ArgumentList.Add($a)
+    }
+    $proc = [Diagnostics.Process]::Start($psi)
+    $outTask = $proc.StandardOutput.ReadToEndAsync()
+    $errTask = $proc.StandardError.ReadToEndAsync()
+    if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $proc.Kill($true) } catch { }
+        try { $proc.WaitForExit(5000) } catch { }
+        throw "TIMEOUT: remote command exceeded $TimeoutSeconds s and the local SSH session was terminated."
+    }
+    $text = ($outTask.Result + $errTask.Result)
+    if ($proc.ExitCode -ne 0) { throw "SSH exit $($proc.ExitCode) : $text" }
+    return $text
 }
 function New-IseProject([string]$Name) {
     Assert-Name $Name
@@ -153,6 +208,7 @@ function Invoke-Build([string]$Name, [string]$Target) {
     $status = Get-Content -LiteralPath "$run\results\run.status" -Raw
     if ($status.Trim() -ne 'COMPLETE') { throw "Build did not complete: $run" }
     Write-Host "PASS: tool flow completed. Timing assessment is separate. Results: $run\results"
+    return $id
 }
 function Receive-Build([string]$Name, [string]$Id) {
     Assert-Name $Name
@@ -177,3 +233,11 @@ function Receive-Build([string]$Name, [string]$Id) {
     Write-Host ($summary -join "`n")
     if ($state -match 'FAILED') { throw "Remote build failed. Logs: $results" }
 }
+
+#-----------------------------------------------------------------------------
+# Additional entry points. Loaded last so that everything above (and the
+# $script: settings) is available to them.
+#-----------------------------------------------------------------------------
+. "$PSScriptRoot\ise-sim.ps1"
+. "$PSScriptRoot\ise-report.ps1"
+. "$PSScriptRoot\ise-verify.ps1"

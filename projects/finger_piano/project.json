@@ -16,5 +16,58 @@
   "ucf": "constraints/finger_piano.ucf",
   "constraintsReviewed": false,
   "optimization": "Speed",
-  "optimizationLevel": 1
+  "optimizationLevel": 1,
+  "simulations": [
+    {
+      "name": "note_encoder",
+      "top": "tb_note_encoder",
+      "sources": ["sim/tb_note_encoder.v"],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_NOTE_ENCODER: PASS",
+      "failPattern": "TB_NOTE_ENCODER: FAIL"
+    },
+    {
+      "name": "tone_generator",
+      "top": "tb_tone_generator",
+      "sources": ["sim/tb_tone_generator.v"],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_TONE_GENERATOR: PASS",
+      "failPattern": "TB_TONE_GENERATOR: FAIL"
+    },
+    {
+      "name": "top_default",
+      "top": "tb_finger_piano_top",
+      "sources": ["sim/tb_finger_piano_top.v"],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_FINGER_PIANO_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
+    },
+    {
+      "name": "top_active_low",
+      "top": "tb_finger_piano_top",
+      "sources": ["sim/tb_finger_piano_top.v"],
+      "generics": {"TB_KEY_ACTIVE_HIGH": "0"},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_FINGER_PIANO_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
+    },
+    {
+      "name": "top_filter_bypass",
+      "top": "tb_finger_piano_top",
+      "sources": ["sim/tb_finger_piano_top.v"],
+      "generics": {"TB_KEY_FILTER_ENABLE": "0"},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_FINGER_PIANO_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
+    }
+  ],
+  "verification": {
+    "expectImplementationBlocked": true,
+    "clockName": "clk",
+    "resetNames": ["rst_n", "rst_n_sync"],
+    "forbiddenEdgeSignals": ["clk_2m", "audio_out"]
+  }
 }

@@ -126,6 +126,16 @@ projects/finger_piano/
 
 ## 9. 仿真步骤
 
+**首选方式（已固化进工具，不需要手工拼 fuse/prj/SFTP）**：本工程的五个仿真用例都写在 `project.json` 的 `simulations` 段里，直接用工具入口：
+
+```powershell
+pwsh -File .\ise.ps1 sim    -Project finger_piano -Test top_default   # 单个用例
+pwsh -File .\ise.ps1 sim    -Project finger_piano                     # 全部 enabled 用例
+pwsh -File .\ise.ps1 verify -Project finger_piano                     # 综合+静态+全部仿真+implement 门禁
+```
+
+每个用例在 `artifacts/sim-<时间戳>-<随机>/` 下留 `run.json`/`sim.json`/`summary.txt`/`results/`；判据是日志出现 `passPattern`（退出码 0 不算通过，无 PASS 无 FAIL 也判 FAIL）。下面 9.1/9.2 的手工步骤保留作为原理参考与排障手段。
+
 `sim/` 下三个 testbench 都可独立运行，判据是最后打印的 `PASS` 行。
 
 ### 9.1 ISE 内置 ISim（图形界面）
@@ -195,11 +205,18 @@ tb_top_bp.exe -tclbatch run_all.tcl -log ..\out\sim_top_bp.isim.log
 
 ## 10. ISE 综合与实现（本工具流程）
 
-在仓库根目录执行：
+改完 RTL/Testbench 的主要验收入口是 `verify`（综合 + 静态检查 + 全部仿真 + implement 门禁，并写出 `artifacts/verify-<id>/verification.json`）：
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 check  -Project finger_piano -Stage synth
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_piano -Stage synth
+pwsh -File .\ise.ps1 verify -Project finger_piano
+```
+
+只做综合时用下面两条；时序不会由工具自动认定，`report` 在有人实际阅读 timing.twr 之前只会给 `NOT_RUN`/`NEEDS_REVIEW`：
+
+```powershell
+pwsh -File .\ise.ps1 report -Project finger_piano -Latest
+pwsh -File .\ise.ps1 check  -Project finger_piano -Stage synth
+pwsh -File .\ise.ps1 build  -Project finger_piano -Stage synth
 ```
 
 实现与 bitstream 需要先完成第 8 节的前置清单：
@@ -230,6 +247,35 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 - **DDS 正弦波**：把 `tone_generator` 的“半周期翻转”替换为相位累加器 + 正弦查找表（可用 `ip/` 下的分布式 ROM 或 Block RAM）；`SYS_CLK_HZ` 与相位增量仍由同一参数推导。
 
 ## 13. 验证记录
+
+### 第三轮：工具链验收入口 sim / verify / report（2026-09-14）
+
+本轮**没有改动任何 RTL 或 Testbench**，只把此前人工验证过的 `fuse + tclbatch` 流程固化成工具入口（`sim`/`verify`/`report`，`board-check` 预留），并把本工程的五个仿真用例写进 `project.json`。
+
+**工具侧要点**（详见根 `README.md` 的「仿真与验收」与 `AGENTS.md`）：
+
+- `sim` 固化了的 ISim 陷阱：必须先 `call settings32.bat`、必须用 `-tclbatch run_all.tcl`、`--generic_top` 只属于 fuse、退出码 0 不算 PASS（必须有 `passPattern`，命中 `failPattern` 或无任何模式都判 FAIL）、每次运行前清旧 exe 与旧退码/状态文件、每轮独立目录。
+- 包装脚本刻意命名为 `sim_fuse.cmd` / `sim_run.cmd`：CMD 解析裸命令名先搜当前目录，若叫 `fuse.cmd` 会遮蔽 `settings32.bat` 加到 PATH 的 `fuse.exe` 并递归调用自己（本轮真实踩到，表现为 exit 255、退码文件全缺失）。
+- `verify` 用 `project.json` 的 `verification.expectImplementationBlocked` 判断 implement 门禁是否为「预期阻断」，不写工程名特例；本工程 `constraintsReviewed=false`，因此被阻断记 PASS。
+- `report` 只读已有 artifacts：综合段解析工具流程、XST 退出码、ERROR/WARNING、latch、multi-source、寄存器/IO、`design.ngc`；时序段在无 `timing.twr` 时为 `NOT_RUN`，有报告时为 `NEEDS_REVIEW`，**永不自动给 Timing PASS**。
+
+**真实验收结果（远端 fpga-vm / ISE 14.7）**
+
+五个用例逐个经 `sim -Test <名称>` 运行，全部 PASS（fuse 退出码 0、仿真退出码 0、`run.status=COMPLETE`、命中 passPattern）：
+
+| 用例 | 仿真 run id | 结果 |
+|---|---|---|
+| `note_encoder` | `sim-20260914-154659-d1e02767` | PASS |
+| `tone_generator` | `sim-20260914-154705-464301be` | PASS |
+| `top_default` | `sim-20260914-154712-ca95a53d` | PASS |
+| `top_active_low`（`TB_KEY_ACTIVE_HIGH=0`） | `sim-20260914-154719-62344adc` | PASS |
+| `top_filter_bypass`（`TB_KEY_FILTER_ENABLE=0`） | `sim-20260914-154726-0ecf43c3` | PASS |
+
+`verify -Project finger_piano` 整体 **PASS**（verify id `verify-20260914-154737-5b713369`，Stage `PRE_BOARD`）：静态检查 PASS、综合 run `20260914-154737-9dbd12b2` 为 0 errors / 0 warnings / 0 latches（231 个触发器、20 个 I/O）、五个仿真 PASS、implement 门禁「预期阻断且确实阻断」PASS。`verification.json` 在 `artifacts/verify-20260914-154737-5b713369/`。
+
+`report` 对三类 run 都验证过：构建 run `20260914-154737-9dbd12b2`（errors 0 / warnings 0 / registers 231 / IOs 20 / ngc true / timing NOT_RUN）、仿真 run `sim-20260914-154806-54659009`（PASS）、验证 run `verify-20260914-154737-5b713369`（overall PASS / stage PRE_BOARD）；`-Latest` 与 `-Json` 均正常。
+
+工具自测 `tools/test-tools.ps1` 已扩展并连续三次通过，覆盖：模板保护、配置校验、缺文件、路径逃逸、UCF 门禁、结果取回、旧文件不复用、构建失败与中断、run 隔离、仿真名不存在/TB 缺失/非法 generic、fuse 失败、超时、退出码 0 但无 PASS、failPattern、generic 进入 fuse、report 缺文件与时序不得称 PASS、verify 两个方向的门禁、静态检查正负例、无 simulations 段的旧工程兼容。
 
 ### 第二轮修订：文档计算修正 + 滤波旁路验证（2026-09-14）
 
