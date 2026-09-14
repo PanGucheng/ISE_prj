@@ -71,8 +71,8 @@ $script:Scenario = 'pass'   # pass | fusefail | simfail | no-pattern | fail-patt
 $script:Mode = 'success'    # success | failure | disconnect (build flow)
 $script:SynthWarnings = 0   # XST warning count written into the mock synthesis report
 $script:ProgProbe = 'ok'     # ok | nocable | mismatch | twoDevices
-$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail | cable | flash
-$script:ProgVerify = 'ok'    # ok | fail | notapplicable | noreport | cable | mismatch
+$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail | cable | flash | verified | verifyfail | status
+$script:ProgVerify = 'ok'    # legacy mock (the program flow no longer runs a verify step)
 $script:ProbeDevice = 'xc3s50an'
 $script:ProbeIdcode = '02610093'
 $script:Remote = $null
@@ -255,6 +255,34 @@ function Invoke-SshTimed([string]$RemoteCommand, [int]$TimeoutSeconds) {
                         "INFO:iMPACT - Address 0x00000000 is in sector 0.`n" +
                         "'1': Programming Flash...done.`n" +
                         "'1': Programming completed successfully.`n")
+                } elseif ($script:ProgProgram -eq 'verified') {
+                    # Real ISF transcript shape: the in-step flash verify passes.
+                    Write-Utf8 "$results/program.log" ("'1': Programming Flash...done.`n" +
+                        "'1': Programming completed successfully.`n" +
+                        "'1': Verifying device...done.`n" +
+                        "'1': Verification completed successfully.`n" +
+                        "'1': Programmed successfully.`n")
+                } elseif ($script:ProgProgram -eq 'verifyfail') {
+                    Write-Utf8 "$results/program.log" ("'1': Programming completed successfully.`n" +
+                        "'1': Verifying device...Verify failed on page 0.`n" +
+                        "'1': Verification Terminated...done.`n")
+                } elseif ($script:ProgProgram -eq 'status') {
+                    # Real -onlyFpga transcript shape: FPGA configured, status register
+                    # reports the MODE pin straps and the DONE pin.
+                    Write-Utf8 "$results/program.log" ("'1': Programming device...`n" +
+                        "'1': Reading status register contents...`n" +
+                        "CRC error                                                                  :    0`n" +
+                        "DCM Locked                                                                 :    1`n" +
+                        "status of GWE                                                              :    1`n" +
+                        "value of MODE pin M0                                                       :    1`n" +
+                        "value of MODE pin M1                                                       :    1`n" +
+                        "value of MODE pin M2                                                       :    0`n" +
+                        "value of CFG_RDY (INIT_B)                                                  :    1`n" +
+                        "DONEIN input from Done Pin                                                 :    1`n" +
+                        "SYNC word not found                                                        :    0`n" +
+                        "INFO:iMPACT:579 - '1': Completed downloading bit file to device.`n" +
+                        "INFO:iMPACT:188 - '1': Programming completed successfully.`n" +
+                        "'1': Programmed successfully.`n")
                 } else {
                     Write-Utf8 "$results/program.log" "INFO:iMPACT - programming device '1'`nProgramming operation completed successfully`n"
                 }
@@ -682,25 +710,28 @@ Assert ((Test-BitPartMatchesDevice -BitPartRaw $null -ExpectedPart 'xc3s50an' -E
 Assert ((Test-BitPartMatchesDevice -BitPartRaw '3s50antq144' -ExpectedPart 'xc3s50an' -ExpectedPackage 'tqg144') -eq $false) 'a different package string must not be treated as a match (no invented package-equivalence rule)'
 
 # --- generated batch scripts (commands verified against the real install) ---
-$jtagScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
+# Device with internal configuration flash (Spartan-3AN): the same `program`
+# command means "write the ISF" unless -onlyFpga selects the FPGA fabric.
+$jtagScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto' -DeviceHasInternalConfigFlash
 Assert ($jtagScript -match '(?m)^setMode -bs\r?$') 'JTAG script must start with setMode'
 Assert ($jtagScript -match 'assignFile -p 1 -file') 'JTAG script missing assignFile'
-Assert ($jtagScript -match 'program -p 1 -v') 'JTAG script must request verification'
-Assert ($jtagScript -notmatch 'spi') 'JTAG script must not use SPI options'
-$isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
-Assert ($isfScript -match 'assignFileToAttachedFlash -p 2 -file') 'ISF script must assign to the attached flash'
-Assert ($isfScript -match 'program -p 2 -spi') 'ISF script must use -spi'
-# Measured: `program` has no -sram switch and on a Spartan-3AN an unqualified
-# `program` writes the internal ISF, so the script must not pretend otherwise.
-Assert ($jtagScript -match 'program -p 1 -v') 'Jtag script must request verification'
-Assert ($jtagScript -notmatch 'onlyFpga') 'Jtag script must not use -onlyFpga (it needs a .msk mask file and fails)'
+Assert ($jtagScript -match 'program -p 1 -onlyFpga') 'JTAG script must select the FPGA fabric with -onlyFpga'
+Assert ($jtagScript -notmatch 'program -p 1 -v') 'JTAG script must NOT add -v (an FPGA readback verify needs a .msk mask file)'
+Assert ($jtagScript -match '(?m)^closeCable\r?$') 'JTAG script must close the cable'
+$isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto' -DeviceHasInternalConfigFlash
+Assert ($isfScript -match 'assignFile -p 2 -file') 'ISF script must assign the bitstream to the device'
+Assert ($isfScript -match 'program -p 2 -v') 'ISF script must program with the in-step flash verify'
+Assert ($isfScript -notmatch 'assignFileToAttachedFlash') 'the internal ISF is not an "attached" flash (that command answers "No attached device found")'
+Assert ($isfScript -notmatch '\-spi') 'the internal ISF flow does not use -spi'
+Assert ($isfScript -notmatch 'onlyFpga') 'ISF mode must not use -onlyFpga'
+# Device without internal flash: a plain program is the volatile configuration.
+$plainScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
+Assert ($plainScript -match 'program -p 1 -v') 'a flash-less device keeps the verified program'
+Assert ($plainScript -notmatch 'onlyFpga') 'a flash-less device must not use -onlyFpga'
 $jtagVerifyScript = New-ImpactVerifyScript -Mode Jtag -Position 1 -CablePort 'auto' -RemoteBitFile 'C:\r\work\d.bit'
-# A bare `verify -p N` has no reference image; measured output was
-# "'1': Verifying device...Verify failed on page 0."
 Assert ($jtagVerifyScript -match 'assignFile -p 1 -file') 'Jtag verify must assign the bitstream before verifying'
 Assert ($jtagVerifyScript -match 'verify -p 1 -sram') 'Jtag verify must verify the SRAM configuration'
 $isfVerifyScript = New-ImpactVerifyScript -Mode Isf -Position 2 -CablePort 'auto' -RemoteBitFile 'C:\r\work\d.bit'
-Assert ($isfVerifyScript -match 'assignFileToAttachedFlash -p 2 -file') 'ISF verify must assign the flash image first'
 Assert ($isfVerifyScript -match 'verify -p 2 -spi') 'ISF verify script malformed'
 Write-Host 'PASS: probe/program parsers and the generated iMPACT batch commands.'
 
@@ -752,16 +783,19 @@ Assert ($jtagRun.Statuses.cableDetected -eq 'PASS') 'cable status missing'
 Assert ($jtagRun.Statuses.jtagChainDetected -eq 'PASS') 'chain status missing'
 Assert ($jtagRun.Statuses.deviceMatched -eq 'PASS') 'device match status missing'
 Assert ($jtagRun.Statuses.programmingCompleted -eq 'PASS') 'JTAG programming should pass'
-Assert ($jtagRun.Statuses.programmingVerified -eq 'VERIFIED') 'verify should report VERIFIED'
+Assert ($jtagRun.Statuses.programmingVerified -eq 'NOT_APPLICABLE') 'a Jtag run has no standalone verify (an FPGA readback verify needs a .msk)'
 Assert ($jtagRun.Statuses.userDesignFunctional -eq 'NOT_TESTED') 'user design must stay NOT_TESTED'
+Assert (-not ($script:ImpactSteps -contains 'verify')) 'no separate verify step may run'
 $jtagSummary = Get-TextSafe "$($jtagRun.RunDir)/summary.txt"
 Assert ($jtagSummary -notmatch 'BOARD PASS') 'programming success must never print BOARD PASS'
 Assert ($jtagSummary -match 'does not need the design clock') 'the TCK vs user clock note is missing'
+Assert ($jtagSummary -match 'VOLATILE configuration') 'the Jtag summary must state that the configuration is volatile'
 $jtagJson = Get-Content "$($jtagRun.RunDir)/run.json" -Raw | ConvertFrom-Json
 Assert ($jtagJson.operation -eq 'program' -and $jtagJson.result -eq 'PASS') 'run.json program result wrong'
 Assert ($jtagJson.bitFileSha256 -eq (Get-FileHash -LiteralPath $bitPath -Algorithm SHA256).Hash) 'bitFileSha256 wrong'
 Assert ($jtagJson.confirmHardwareWrite -eq $true) 'confirmation not recorded'
-Assert ((Get-TextSafe "$($jtagRun.RunDir)/generated/program.cmd") -match 'assignFile -p 1 -file') 'Jtag program.cmd wrong'
+Assert ($jtagJson.modeIsNonVolatile -eq $false) 'a Jtag run is volatile'
+Assert ((Get-TextSafe "$($jtagRun.RunDir)/generated/program.cmd") -match 'program -p 1 -onlyFpga') 'Jtag program.cmd must use -onlyFpga'
 
 # --- program Isf (persistent) ----------------------------------------------
 $script:ImpactSteps.Clear()
@@ -772,27 +806,38 @@ Assert ($isfSummary -match 'M\[2:0\] = 011') 'ISF boot requirement M[2:0] missin
 Assert ($isfSummary -match 'VCCAUX = 3.3 V') 'ISF boot requirement VCCAUX missing'
 Assert ($isfSummary -match 'NON-VOLATILE') 'ISF persistence not stated'
 $isfCmd = Get-TextSafe "$($isfRun.RunDir)/generated/program.cmd"
-Assert ($isfCmd -match 'assignFileToAttachedFlash') 'ISF program.cmd missing the attach command'
-Assert ($isfCmd -match 'program -p 1 -spi') 'ISF program.cmd missing -spi'
-Assert ((Get-Content "$($isfRun.RunDir)/run.json" -Raw | ConvertFrom-Json).mode -eq 'Isf') 'ISF mode not recorded'
-Write-Host 'PASS: Jtag program is marked volatile, Isf program is marked persistent with its boot requirements.'
+Assert ($isfCmd -match 'assignFile -p 1 -file') 'ISF program.cmd must assign the bitstream to the device'
+Assert ($isfCmd -match 'program -p 1 -v') 'ISF program.cmd must use the in-step flash verify'
+Assert ($isfCmd -notmatch 'attach') 'the internal ISF is not an attached flash'
+$isfJson = Get-Content "$($isfRun.RunDir)/run.json" -Raw | ConvertFrom-Json
+Assert ($isfJson.mode -eq 'Isf') 'ISF mode not recorded'
+Assert ($isfJson.modeIsNonVolatile -eq $true) 'an ISF run is non-volatile'
+Write-Host 'PASS: Jtag program is volatile via -onlyFpga, Isf program is persistent with its boot requirements.'
 
 # --- multiple devices need an explicit position ----------------------------
 $script:ProgProbe = 'twoDevices'
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'Multiple JTAG devices detected; specify -Position'
 $script:ProgProbe = 'ok'
 
-# --- verify outcomes --------------------------------------------------------
-$script:ProgVerify = 'notapplicable'
-$notApplicable = Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
-Assert ($notApplicable.Statuses.programmingVerified -eq 'NOT_APPLICABLE') 'not-applicable verify not reported'
-Assert ($notApplicable.Statuses.programmingCompleted -eq 'PASS') 'programming itself should still be PASS'
-$script:ProgVerify = 'noreport'
-Assert ((Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite).Statuses.programmingVerified -eq 'NOT_REPORTED') 'unreported verify not flagged'
-$script:ProgVerify = 'fail'
+# --- verification evidence comes from the program transcript -----------------
+# measured ISF shape: the in-step flash verify passes
+$script:ProgProgram = 'verified'
+$verifiedRun = Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite
+Assert ($verifiedRun.Statuses.programmingVerified -eq 'VERIFIED') 'the in-step ISF verify must report VERIFIED'
+$script:ProgProgram = 'verifyfail'
 Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
-$script:ProgVerify = 'ok'
-Write-Host 'PASS: verify is always attempted and its outcome is reported honestly (VERIFIED/NOT_APPLICABLE/NOT_REPORTED/FAIL).'
+Assert (((Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json).programmingVerified) -eq 'FAIL') '"Verify failed on page 0" must be FAIL'
+# measured -onlyFpga shape: no verify text, but the status register is evidence
+$script:ProgProgram = 'status'
+$statusRun = Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
+Assert ($statusRun.Statuses.programmingVerified -eq 'CONFIG_STATUS_OK') 'a DONE=1/CRC=0 status register must be reported as CONFIG_STATUS_OK'
+$statusJson = Get-Content "$($statusRun.RunDir)/run.json" -Raw | ConvertFrom-Json
+Assert ($statusJson.configurationStatus.modePins -eq '011') "MODE pin strap not read back, got $($statusJson.configurationStatus.modePins)"
+Assert ($statusJson.configurationStatus.donePin -eq 1) 'DONE pin not read back'
+Assert ($statusJson.configurationStatus.crcError -eq 0) 'CRC error bit not read back'
+Assert ((Get-TextSafe "$($statusRun.RunDir)/summary.txt") -match 'MODE pins M\[2:0\]\s+= 011') 'the MODE strap must be printed in the summary'
+$script:ProgProgram = 'ok'
+Write-Host 'PASS: verification evidence is taken from the program transcript and reported honestly.'
 
 # --- timeout and connection loss -------------------------------------------
 $script:ProgProgram = 'timeout'
@@ -828,34 +873,23 @@ $cableSummary = Get-TextSafe "$cableRun/summary.txt"
 Assert ($cableSummary -match 'Cable autodetection failed') 'the cable failure must be quoted in the summary'
 $script:ProgProgram = 'ok'
 
-# --- verify that cannot open the cable must be FAIL ------------------------
-$script:ProgVerify = 'cable'
-Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
-Assert (((Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json).programmingVerified) -eq 'FAIL') 'a verify step with no cable must be FAIL'
-$script:ProgVerify = 'ok'
-
-# --- an in-band verify mismatch must be FAIL, not NOT_REPORTED -------------
-$script:ProgVerify = 'mismatch'
-Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
-Assert (((Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json).programmingVerified) -eq 'FAIL') '"Verify failed on page 0" must be FAIL'
-$script:ProgVerify = 'ok'
-
-# --- Jtag mode on a device WITHOUT internal config flash: a flash write is a
-# --- hard mode violation; on a Spartan-3AN it is the documented behaviour -----
+# --- flash programming during a Jtag run is a hard MODE VIOLATION ------------
+# -onlyFpga is what selects the FPGA fabric. If the transcript still shows the
+# internal flash being written, the mode's promise was broken for ANY device.
 $script:ProgProgram = 'flash'
-$anRun = Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite
-Assert ($anRun.Statuses.programmingCompleted -eq 'PASS') 'the measured Spartan-3AN flow should be reported as a successful write'
-$anJson = Get-Content ((Get-LatestProgrammerRun 'fixture' 'program-') + '/run.json') -Raw | ConvertFrom-Json
-Assert ($anJson.modeIsNonVolatile -eq $true) 'a Spartan-3AN Jtag run must be recorded as non-volatile'
-Assert ($anJson.hasInternalConfigFlash -eq $true) 'the internal config flash must be recorded'
-$anSummary = Get-TextSafe ((Get-LatestProgrammerRun 'fixture' 'program-') + '/summary.txt')
-Assert ($anSummary -match 'NON-VOLATILE WRITE') 'the non-volatile nature must be stated loudly'
-Assert ($anSummary -match 'M\[2:0\] = 011') 'the boot requirement must be stated'
+Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'MODE VIOLATION'
+$anRun = Get-LatestProgrammerRun 'fixture' 'program-'
+$anJson = Get-Content "$anRun/run.json" -Raw | ConvertFrom-Json
+Assert ($anJson.programmingCompleted -eq 'FAIL') 'flash programming during a Jtag run must not be a PASS'
+Assert ($anJson.nonVolatileWriteDetected -eq $true) 'the non-volatile write must be recorded'
+Assert ((Get-TextSafe "$anRun/summary.txt") -match 'non-volatile flash was modified') 'the mode violation must be explained'
 
 New-Fixture 'fixture3a' @{ device = 'xc3s700a-4-fg484' }
 $script:ProbeDevice = 'xc3s700a'
 $script:ProbeIdcode = '0262C093'
 Expect-Failure { Invoke-Program -ProjectName 'fixture3a' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'MODE VIOLATION'
+# a device without internal configuration flash cannot use -Mode Isf
+Expect-Failure { Invoke-Program -ProjectName 'fixture3a' -Mode Isf -BitFile $bitPath -ConfirmHardwareWrite } 'has none'
 $script:ProbeDevice = 'xc3s50an'
 $script:ProbeIdcode = '02610093'
 $violRun = Get-LatestProgrammerRun 'fixture3a' 'program-'

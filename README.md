@@ -208,16 +208,20 @@ pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.
 
 | 模式 | 含义 | 掉电后 | iMPACT 命令 |
 |---|---|---|---|
-| `-Mode Jtag` | 通过 JTAG 配置 FPGA | **掉电丢失**（但见下方 Spartan-3AN 实测） | `assignFile -p N -file x.bit` + `program -p N -v` |
-| `-Mode Isf` | 通过 JTAG 编程 Spartan-3AN **内部 In-System Flash** | **NON-VOLATILE**，上电自动配置 | `assignFileToAttachedFlash -p N -file x.bit` + `program -p N -spi`，随后 `verify -p N -spi` |
+| `-Mode Jtag` | 通过 JTAG 配置 FPGA 本体 | **VOLATILE**，掉电丢失 | `assignFile -p N -file x.bit` + `program -p N -onlyFpga` |
+| `-Mode Isf` | 编程 Spartan-3AN **内部 In-System Flash（ISF）** | **NON-VOLATILE**，上电自动配置 | `assignFile -p N -file x.bit` + `program -p N -v` |
 
-**实测（2026-09-14，真机 XC3S50AN）：在 ISE 14.7 的 Boundary Scan 批处理流程里，Spartan-3AN 上的 `assignFile -p N -file x.bit` + `program` 写的就是内部 ISF（非易失）。** 转录证据：`SPI access core not detected` → 下载 `spartan3a/data/xc3s50an_spi.cor` → `Address 0x00000000 is in sector 0` / `0x0000D587 is in page 207` → `'1': Programming Flash...done` → `'1': Programmed successfully` → `Checking done pin....done`。同一器件上：
+**这里的关键（全部由真机实测得到，2026-09-14，XC3S50AN）**：同一个 `assignFile` + `program`，加不加 `-onlyFpga` 是**两件完全不同的事**：
 
-- `program -p N -v -sram` → `ERROR:Portability:90 - Switch "-sram" is not allowed.`（**program 没有 SRAM 选项**）；
-- `program -p N -v -onlyFpga` → `ERROR:Bitstream:2 - The input file ".../design.msk" does not exist`（属于另一条需要 mask 文件的流程，不是纯 SRAM 配置）；
-- `setTargetDevice -p N`（不带 `-attached`）之后再 `assignFile` + `program` → 依旧 `Programming Flash`。
+- **不加 `-onlyFpga`** → iMPACT 写**内部 ISF**（转录出现 `SPI access core not detected`、下载 `spartan3a/data/xc3s50an_spi.cor`、`Address ... is in sector/page ...`、`'1': Programming Flash...done`）。这就是 `-Mode Isf` 的路径。
+- **加 `-onlyFpga`** → iMPACT 只配置 **FPGA 本体**（转录为 `'1': Programming device...` → `'1': Completed downloading bit file to device` → `'1': Programming completed successfully` → `Checking done pin....done`），**全程没有 SPI core、没有 Programming Flash、没有 sector/page**。这就是 `-Mode Jtag` 的路径。
+- **`-onlyFpga` 与 `-v` 不能同时用**：FPGA 回读校验需要 BitGen `-m` 生成的 mask 文件，否则 `ERROR:Bitstream:2 - The input file ".../design.msk" does not exist`。因此 Jtag 模式**默认不加 `-v`**，Isf 模式**保留 `-v`**（它是 ISF 的 in-step 校验）。
+- **`assignFileToAttachedFlash` / `program -spi` 不适用**：那条路是给**外挂** SPI/BPI PROM 用的（Xilinx 所谓 indirect SPI programming），对 3AN 会报 `ERROR:iMPACT - No attached device found at position '1'`。内部 ISF 不需要它。
+- **不跑独立 `verify`**：实测 `verify -p 1` 与 `verify -p 1 -sram` 都会回 `'1': Verifying device...Verify failed on page 0.`——哪怕紧接在一次 iMPACT 自己已 `Verification completed successfully` 的写入之后。所以工具的校验结论取自 **program 转录本身**（`Verification completed successfully` → `VERIFIED`；出现 `Verify failed` → `FAIL`；仅 FPGA 配置且 `DONEIN=1 / CRC error=0` → `CONFIG_STATUS_OK`）。
 
-结论：**该器件经这条批处理流程不存在「只写 SRAM 的易失配置」**，`verify` 反而支持 `-sram`（只读校验）。因此工具按器件真实语义措辞：目标器件属于 `xc3s<N>an` 系列时，`-Mode Jtag` 会打印醒目的 `NON-VOLATILE WRITE` 说明，并在 `run.json` 记录 `hasInternalConfigFlash` / `modeIsNonVolatile`，**绝不会再声称「掉电丢失」**；只有在没有内部配置 Flash 的器件上，Jtag 模式才保留 VOLATILE 措辞，且此时转录里出现 Flash 编程迹象会直接判 FAIL（`MODE VIOLATION`）。
+**副产品**：FPGA 直接配置的转录会打印器件状态寄存器，工具把它解析出来（`run.json` 的 `configurationStatus`）并在摘要里显示，例如真机读到的 `MODE pins M[2:0] = 011`（内部 Master SPI 启动模式）、`DONEIN input from Done Pin = 1`、`CRC error = 0`、`VSEL pin 0/1/2 = 1/1/1`。这为「ISF 启动所需的 `M[2:0]=011`」提供了**来自硬件的证据**，而不是只靠跳线猜测。
+
+**两次 iMPACT 调用之间的 USB 抖动**：fpga-vm 的 USB 透传存在间歇性——某次 iMPACT 能打开下载线，紧接着的下一次可能报 `Digilent Plugin: no JTAG device was found`。**「下载线从未打开」意味着一个字节都没写**，因此工具允许对 preflight 与 program 步骤重试（`programming.cableRetryAttempts`，默认 3）；一旦转录里出现任何写入迹象，或出现 `TIMEOUT`/`PROGRAM_STATE_UNKNOWN`，**绝不重试**。所有脚本都以 `closeCable` 收尾。
 
 **JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 12 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 12 MHz 时钟才能发声）。
 

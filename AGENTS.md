@@ -42,13 +42,16 @@
 
 - `probe` 只读：枚举下载线、识别 JTAG 链、读 IDCODE 并与 project.json 的器件核对。下载线不可见时输出 `CABLE_NOT_FOUND` 与 “USB/JTAG cable is not visible inside fpga-vm”，**不得修改 VM 配置或自动 attach USB**，也不得伪造 PASS。
 - `program` 是硬件写操作，**默认只预览**（PREVIEW ONLY：打印 cable/chain/device/position/bitstream/mode 后结束，不生成写脚本、不执行 program）。必须由用户明确要求并带 `-ConfirmHardwareWrite` 才真正写入。
-- 两种模式含义不同、不得混用，**且措辞必须跟随器件真实语义**：`-Mode Jtag` = 通过 JTAG 配置 FPGA（对无内部配置 Flash 的器件是 VOLATILE）；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置）。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`（JTAG 无法证明板上跳线）。
-- **实测结论（ISE 14.7 + XC3S50AN，2026-09-14）**：在 Boundary Scan 批处理流程里，Spartan-3AN 上 `assignFile` + `program` 写的就是内部 ISF（转录出现 `SPI access core`、`Programming Flash`、扇区/页地址）。`program` 没有 `-sram` 选项（`Switch "-sram" is not allowed`），`-onlyFpga` 属于需要 `.msk` mask 文件的另一条流程（实测报 `ERROR:Bitstream:2 ... design.msk does not exist`），`setTargetDevice -p N` 也不改变该行为。因此**不得声称 `-Mode Jtag` 在这类器件上是易失配置**：工具按 `xc3s<N>an` 识别并打印 `NON-VOLATILE WRITE`、在 run.json 记录 `hasInternalConfigFlash`/`modeIsNonVolatile`；只有在无内部配置 Flash 的器件上才使用 VOLATILE 措辞，且那时转录里出现 Flash 编程迹象必须判 FAIL（`MODE VIOLATION`）。
+- 两种模式含义不同、不得混用：`-Mode Jtag` = 通过 JTAG 配置 FPGA 本体（VOLATILE），`program -p N -onlyFpga`；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置），`program -p N -v`。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`。
+- **实测结论（ISE 14.7 + XC3S50AN，2026-09-14）**：同一个 `assignFile` + `program` 因 `-onlyFpga` 而含义不同——不加它是写**内部 ISF**（转录出现 `SPI access core`、`Programming Flash`、sector/page），加它是**只配置 FPGA 本体**（`Programming device` → `Completed downloading bit file to device`，无任何 SPI/Flash 行）。因此：Jtag 模式必须带 `-onlyFpga` 且**默认不加 `-v`**（FPGA 回读校验需要 BitGen `-m` 的 `.msk`，否则报 `ERROR:Bitstream:2 ... design.msk does not exist`）；Isf 模式用 `-v` 作为 in-step 校验。`assignFileToAttachedFlash`/`-spi` 属于**外挂** PROM 的 indirect SPI 流程，对内部 ISF 会报 `No attached device found at position '1'`，不得使用。
+- **不跑独立 `verify`**：实测 `verify -p N` 与 `verify -p N -sram` 均回 `Verify failed on page 0`（即使紧接在一次 iMPACT 已自行 `Verification completed successfully` 的写入之后），其结论不可信。校验结论一律取自 program 转录：`Verification completed successfully` → `VERIFIED`；出现 `Verify failed` → `FAIL`；FPGA 配置且 `DONEIN=1`/`CRC error=0` → `CONFIG_STATUS_OK`。转录里的器件状态寄存器（`M[2:0]`、`DONEIN`、`CRC error`、`VSEL`）必须解析并在摘要中显示。
+- Jtag 模式的转录里若出现任何内部 Flash 编程迹象，判 FAIL 并标注 `MODE VIOLATION`（易失语义被破坏、非易失 Flash 已被改动）。
+- 下载线从未打开（`no JTAG device was found` / `Cable autodetection failed`）意味着**一个字节都没写**，因此允许对 preflight 与 program 步骤重试（`programming.cableRetryAttempts`，默认 3，上限 10）；一旦转录出现任何写入迹象或出现 `TIMEOUT`/`PROGRAM_STATE_UNKNOWN`，**绝不重试**。所有脚本以 `closeCable` 收尾。
 - JTAG/ISF 编程用的是下载线的 TCK，与用户时钟无关；**烧录成功不等于设计工作正常**，`userDesignFunctional` 永远输出 `NOT_TESTED`，禁止打印 `BOARD PASS`。
 - 每次 program 前必须自动 preflight（等价 probe + bit 文件存在且非空 + 器件匹配）；不假定 position=1，多器件未指定 `-Position` 时报 `ERROR: Multiple JTAG devices detected; specify -Position.`。
-- verify 默认开启、禁止默认关闭；iMPACT 表示不适用时报 `NOT_APPLICABLE`，无结论时报 `NOT_REPORTED`，不得伪造 verify 通过。
+- 不运行独立的 `verify` 步骤（其结论不可信，见上）；`programmingVerified` 只能取自 program 转录的证据：有校验结论就如实报 `VERIFIED`/`FAIL`，只有 FPGA 配置状态可依据时报 `CONFIG_STATUS_OK`，PASS 但无任何校验证据时报 `NOT_APPLICABLE`，不得伪造 verify 通过。
 - Jtag/Isf 使用不同超时；超时标 `TIMEOUT`、保留日志、非零退出且**不自动重烧**。SSH 在写入中断开 → `PROGRAM_STATE_UNKNOWN`，不得自动重试，先重新 `probe`、查远端 `run.status`、取回原日志再决定。
-- iMPACT 退出码不可靠（同一次失败可能返回 0），判定一律解析转录日志；`setMode` 必须优先，`blankCheck` 等不得乱序调用。iMPACT **不会**把「打不开下载线」写成 `ERROR:`（只打印 `no JTAG device was found` / `Cable autodetection failed`，而状态文件仍为 `COMPLETE`），必须显式识别，否则会误报成「未确认的成功」；裸 `verify -p N` 未先 `assignFile` 时必然 `Verify failed on page 0`，verify 脚本必须先指定同一份 bitstream，且 `Verify failed` 一律判 FAIL。
+- iMPACT 退出码不可靠（同一次失败可能返回 0），判定一律解析转录日志；`setMode` 必须优先，`blankCheck` 等不得乱序调用。iMPACT **不会**把「打不开下载线」写成 `ERROR:`（只打印 `no JTAG device was found` / `Cable autodetection failed`，而状态文件仍为 `COMPLETE`），必须显式识别，否则会误报成「未确认的成功」。
 - 工具只写远端受管目录，不改 ISE 安装；`constraintsReviewed` 始终保持人工确认，不得为了让工具产生 bitstream 而自动置 true。
 
 ## 凭据与操作范围

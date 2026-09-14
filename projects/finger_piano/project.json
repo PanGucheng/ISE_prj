@@ -85,6 +85,7 @@
     "probeTimeoutSeconds": 120,
     "jtagTimeoutSeconds": 300,
     "isfTimeoutSeconds": 600,
-    "verifyTimeoutSeconds": 300
+    "verifyTimeoutSeconds": 300,
+    "cableRetryAttempts": 3
   }
 }
