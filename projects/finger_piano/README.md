@@ -70,7 +70,7 @@ projects/finger_piano/
 
 | 宏 | 默认 | 含义 |
 |---|---|---|
-| `` `SYS_CLK_HZ `` | `2000000` | **外部有源晶振频率 = 2 MHz（已确认）**；所有时序常量都由它推导 |
+| `` `SYS_CLK_HZ `` | `12000000` | **外部有源晶振频率 = 12 MHz（接 P57，2026-09-14 确认）**；所有时序常量都由它推导 |
 | `` `KEY_STABLE_MS `` | `10` | 按键数字稳定滤波时间（ms），默认 10 ms |
 | `` `KEY_FILTER_ENABLE `` | `1` | `1` 开启滤波；`0` 关闭（纯直通，零资源） |
 | `` `KEY_ACTIVE_HIGH `` | `1` | `1`=按下为高；`0`=按下为低（外部比较器输出极性） |
@@ -78,57 +78,59 @@ projects/finger_piano/
 | `` `FP_TONE_CNT_WIDTH `` | `24` | 音频半周期计数器位宽 |
 
 - **禁止**把具体频率写进其它模块：其他 RTL 只通过 `parameter SYS_CLK_HZ = `SYS_CLK_HZ` 取默认值，并由顶层参数向下覆盖。改频后 `frequency_table.md` 的表格需按同公式重算（见该文件）。
-- UCF 中 `TIMESPEC PERIOD` 的 ns 值必须与 `` `SYS_CLK_HZ `` 一致：`PERIOD_ns = 1000 / SYS_CLK_MHz`。本工程 2 MHz → **`PERIOD = 500 ns`**（该值仍只以注释形式写在 UCF 模板里，clk 的 `LOC` 未确认前不得填写）。
+- UCF 中 `TIMESPEC PERIOD` 的 ns 值必须与 `` `SYS_CLK_HZ `` 一致：`PERIOD_ns = 1000 / SYS_CLK_MHz`。本工程 12 MHz → **`PERIOD = 83.33 ns`**，已写入 `constraints/finger_piano.ucf`。
 - 仿真时不需要改动本文件：testbench 用参数覆盖（`#(.SYS_CLK_HZ(...))`）把系统时钟降到 1 MHz 以缩短仿真时间。
 
 ## 5. 与课程资料“2 MHz 分频”的对应关系
 
 > 课程资料使用 2 MHz 时基分频作为基础实现提示。本工程为避免由普通逻辑产生新的内部时钟域，统一采用外部有源晶振作为唯一系统时钟，并通过同步计数器或 clock-enable 实现等效分频。若实际系统晶振可整数分频得到 2 MHz，可产生 `ce_2m` 单周期时钟使能，但不将其作为独立时钟驱动时序逻辑。
 
-**本工程的最新情况**：板上外部有源晶振已确认为 **2 MHz**，即系统时钟本身就是课程资料里的那个 2 MHz 时基，因此本工程**不需要任何分频，也不需要 `ce_2m`**：`tone_generator` 直接对 2 MHz 计数得到七音半周期（见 `frequency_table.md`）。仍然禁止出现 `clk_2m` 之类的第二时钟域。
+**本工程的最新情况**：板上 P57 已确认接 **12 MHz** 有源晶振，即系统时钟就是 12 MHz，因此本工程**不需要任何分频，也不需要 `ce_2m`**：`tone_generator` 直接对 12 MHz 计数得到七音半周期（见 `frequency_table.md`）。仍然禁止出现 `clk_2m` 之类的第二时钟域。（若将来确实需要 2 MHz 时基，12/2 = 6 为整数，只允许以单周期使能 `ce_2m` 的形式生成。）
 
 即：**不允许**出现 `always @(posedge clk_2m)` 这类第二时钟域，也不允许把 `audio_out` 当时钟。本阶段没有实现 `ce_2m`（`tone_generator` 直接从 `SYS_CLK_HZ` 计数，功能等价且不需要中间时基）；阶段二若需要 2 MHz 时基，只允许以单周期使能 `ce_2m` 的形式接入。
 
 ## 6. 频率精度
 
-七个音符的半周期计数值、理论输出频率和误差见 `frequency_table.md`。在默认占位的 50 MHz 下，全部音符误差绝对值 ≤ 0.011%，远优于 1% 的课程要求；误差来源是半周期计数的整数取整，与晶振自身精度无关（晶振误差另计）。
+七个音符的半周期计数值、理论输出频率和误差见 `frequency_table.md`。在当前的 **12 MHz** 下，全部音符误差绝对值 ≤ 0.0103%，远优于 1% 的课程要求；误差来源是半周期计数的整数取整，与晶振自身精度无关（晶振误差另计）。
 
-## 7. UCF 填写指南（`constraints/finger_piano.ucf`）
+## 7. UCF 引脚约束（`constraints/finger_piano.ucf`）
 
-模板文件目前**全部是注释**：没有 `LOC`、没有 `IOSTANDARD`、没有 `TIMESPEC`，因为实际 TQ144 最小系统板原理图尚未提供。**不得凭空填引脚。** 需要填写的条目：
+**已按用户确认的板卡信息填写完毕**（2026-09-14）：系统时钟 P57（12 MHz 有源晶振）、可用 I/O 为 P1–P40、I/O 电压 3.3 V（LVCMOS33）。当前分配：
 
-| 待填 | UCF 对象名 | 备注 |
+| 信号 | 引脚 | 说明 |
 |---|---|---|
-| 系统时钟 | `NET "clk"` | LOC + IOSTANDARD；必须是全局时钟引脚（`GCLK`） |
-| 复位 | `NET "rst_n"` | LOC + IOSTANDARD；确认低有效、外部有上拉/RC |
-| 7 路按键 | `NET "key_in<0>"` … `NET "key_in<6>"` | 逐位 LOC；注意总线位序与传感器通道的对应 |
-| 音频输出 | `NET "audio_out"` | LOC；接 LM386 输入 |
-| 调试输出 | `NET "key_debug<0..6>"`、`NET "note_debug<0..2>"` | 未使用的必须删除端口，否则必须在最终 bitstream 前补 LOC |
-| 时钟周期 | `TIMESPEC "TS_clk" = PERIOD "clk_group" X ns HIGH 50%` | `X = 1000 / SYS_CLK_HZ(MHz)`，与实际晶振一致；配合 `NET "clk" TNM_NET = "clk_group";` |
+| `clk` | **P57** | 全局时钟输入；实测 ISE 走 `IBUFG → BUFGMUX`，0 errors / 0 warnings |
+| `rst_n` | P3 | 低有效，外部上拉/RC |
+| `key_in<0>`…`key_in<6>` | P4、P5、P6、P7、P8、P10、P11 | 唱名 1…7；`key_in<0>` 最高优先级 |
+| `audio_out` | P12 | 接 LM386 输入 |
+| `key_debug<0>`…`key_debug<6>` | P13、P15、P16、P18、P19、P20、P21 | 滤波后的按键状态 |
+| `note_debug<0>`…`note_debug<2>` | P24、P25、P27 | 当前音符编码 |
+| 时钟周期 | `TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%` | 12 MHz；改频后必须同步修改 |
+
+**刻意避开**的引脚：P1=TMS、P2=TDI（保留给 JTAG，占用会导致无法烧录）、P9/P17/P26/P34=GND、P14/P23=VCCO_3、P40=VCCO_2、P22=VCCINT、P36=VCCAUX、P33/P35=IPAD113/114（仅输入）。
 
 命名规则：Verilog 向量端口在 UCF 中写成 `名字<下标>`，例如 `key_in<0>`。
 
-## 8. 允许把 `constraintsReviewed` 改为 `true` 的前置条件
+## 8. `constraintsReviewed=true` 的前置条件（本工程已满足）
 
-`constraintsReviewed=true` 是人工确认，不是工具时序结论。**只有同时满足以下全部条件**才允许修改 `project.json`：
+`constraintsReviewed=true` 是人工确认，不是工具时序结论。以下 8 项已由用户在 2026-09-14 确认，因此 `project.json` 中该字段已置 `true`：
 
 ```
-[ ] clk LOC 已按原理图核对
-[ ] clk IOSTANDARD 已核对（并与所在 I/O Bank 电压一致）
-[ ] rst_n LOC 与电气条件（上拉/RC/极性）已核对
-[ ] key_in[0..6] LOC 全部核对，位序与传感器通道一致
-[ ] audio_out LOC 已核对
-[ ] 所有保留的 debug 顶层端口（key_debug[6:0]、note_debug[2:0]）LOC 已核对，
-    或已从最终上板顶层中删除
-[ ] I/O Bank 电压与全部 IOSTANDARD 匹配
-[ ] UCF 中 PERIOD 与实际有源晶振频率一致，且与 src/finger_piano_cfg.vh 相同
+[x] clk LOC 已核对（P57，接 12 MHz 有源晶振）
+[x] clk IOSTANDARD 已核对（LVCMOS33，3.3 V）
+[x] rst_n LOC 与电气条件（P3，低有效）已核对
+[x] key_in[0..6] LOC 全部核对（P4/P5/P6/P7/P8/P10/P11）
+[x] audio_out LOC 已核对（P12）
+[x] 所有保留的 debug 顶层端口 LOC 已核对（P13–P21、P24/P25/P27）
+[x] I/O Bank 电压与全部 IOSTANDARD 匹配（3.3 V）
+[x] UCF 中 PERIOD 与实际有源晶振频率一致（83.33 ns ↔ 12 MHz）
 ```
 
-在此之前 `pwsh -File .\ise.ps1 check -Project finger_piano -Stage implement` **按设计失败**，这是预期行为，不是缺陷。debug 端口共 10 根，绝不允许在最终 bitstream 中处于“未约束、由工具自动分配”的状态。
+若以后更换晶振或改板，必须重新执行本节核对并把 `constraintsReviewed` 置回 `false`。debug 端口共 10 根，绝不允许在最终 bitstream 中处于“未约束、由工具自动分配”的状态。
 
 ## 9. 仿真步骤
 
-**首选方式（已固化进工具，不需要手工拼 fuse/prj/SFTP）**：本工程的五个仿真用例都写在 `project.json` 的 `simulations` 段里，直接用工具入口：
+**首选方式（已固化进工具，不需要手工拼 fuse/prj/SFTP）**：本工程的六个仿真用例都写在 `project.json` 的 `simulations` 段里，直接用工具入口：
 
 ```powershell
 pwsh -File .\ise.ps1 sim    -Project finger_piano -Test top_default   # 单个用例
@@ -240,7 +242,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 ## 12. 已知限制与阶段二扩展点
 
-**本阶段明确不实现**：ADC、DDS、显示屏/数码管、PWM 音量、和弦、UART、DCM/PLL、自动演奏器（小星星只是 testbench 输入序列）。**未做板卡验证**：没有引脚约束、没有烧录、没有实测频率。
+**本阶段明确不实现**：ADC、DDS、显示屏/数码管、PWM 音量、和弦、UART、DCM/PLL、自动演奏器（小星星只是 testbench 输入序列）。**板卡验证状态**：引脚约束已按用户确认的板卡信息填写（P57 12 MHz / P3 / P4–P11 / P12 / P13–P21 / P24–P27，LVCMOS33），实现与 bitstream 已生成，但**仍未真正烧录、未上板、未实测频率**——`program` 至今只跑过只读 preflight（未加 `-ConfirmHardwareWrite`），`userDesignFunctional` 保持 `NOT_TESTED`。
 
 后续扩展的接入位置：
 
@@ -250,7 +252,44 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 ## 13. 验证记录
 
-### 第五轮：时钟确认为 2 MHz + JTAG/ISF 烧录工具（2026-09-14）
+### 第六轮：时钟改为 12 MHz + 引脚约束确认 + 实现/bitstream（2026-09-14）
+
+**这是本工程第一次产生真实引脚约束与 bitstream**，但**仍然没有烧录、没有上板**。
+
+**1. 时钟由 2 MHz 改为 12 MHz。** 用户确认板上 P57 接的是 **12 MHz 有源晶振**（此前记录的 2 MHz 作废）。`` `SYS_CLK_HZ `` 由 `2000000` 改为 **`12000000`**；`frequency_table.md` 第 2/4/5 节与自检值全部按 12 MHz 重算，新增 `tone_generator_12m` 用例（`TB_SYS_CLK_HZ=12000000`）在真实 12 MHz 下实测半周期：
+
+| 音符 | 频率表 N | 12 MHz 实测 N | f_out (Hz) | 误差 |
+|---|---|---|---|---|
+| C4 | 22936 | 22936 | 261.5975 | −0.0086% |
+| D4 | 20429 | 20429 | 293.7001 | +0.0103% |
+| E4 | 18204 | 18204 | 329.5979 | −0.0097% |
+| F4 | 17182 | 17182 | 349.2027 | −0.0078% |
+| G4 | 15306 | 15306 | 392.0031 | +0.0034% |
+| A4 | 13636 | 13636 | 440.0117 | +0.0027% |
+| B4 | 12148 | 12148 | 493.9085 | +0.0058% |
+
+与「按实数频率取整」的预期值（22934/20431/18202/17181/15307/13636/12149）相比有 0~2 个计数差异（只有 A4 完全相同），原因仍是 RTL 用 0.1 Hz 整数频率表配合「先加半个除数再截断」；两种取值误差都 ≤ 0.02%，表格以 **RTL 实际算法**为准。
+
+滤波与位宽：12 MHz × 10 ms → `STABLE_CYCLES = (12000000/1000)*10 = 120000`（17 位够），`FP_FILTER_CNT_WIDTH = 24` 裕量很大；24 位下 `KEY_STABLE_MS` 上限约 **1398 ms**。UCF 的 `PERIOD` 由 500 ns 改为 **83.33 ns**（不再只是注释）。
+
+**2. 引脚约束按用户确认填写，`constraintsReviewed` 置 `true`。** 用户确认：P57 为 12 MHz 有源晶振、可用 I/O 为 P1–P40、I/O 电压 3.3 V。因此按第 7 节表格写入 `constraints/finger_piano.ucf`（clk P57、rst_n P3、key_in P4/P5/P6/P7/P8/P10/P11、audio_out P12、key_debug P13/P15/P16/P18/P19/P20/P21、note_debug P24/P25/P27，全部 `LVCMOS33`，另有 `TNM_NET "clk_group"` + `TS_clk = PERIOD 83.33 ns`），并把 `project.json` 的 `constraintsReviewed` 由 `false` 改为 **`true`**——这是**用户确认驱动**的修改，不是为让工具产出 bitstream 而绕过门禁。刻意避开 P1=TMS / P2=TDI（保留给 JTAG）、P9/P17/P26/P34=GND、P14/P23=VCCO_3、P40/VCCO_2、P22=VCCINT、P36=VCCAUX、P33/P35=IPAD（仅输入）。
+
+**3. 本轮真实结果（远端 fpga-vm / ISE 14.7）**
+
+- `check -Stage synth` → PASS；`build -Stage synth` → run `20260914-204359-76ed80cc`，`synthesis.srp` **0 errors / 0 warnings / 0 latches**，232 个触发器、20 个 I/O。
+- 六个仿真用例全部 PASS（verify 内 20:45 一轮与 20:44 单独一轮均 PASS）：
+  `note_encoder`、`tone_generator`、**`tone_generator_12m`**、`top_default`、`top_active_low`、`top_filter_bypass`。
+- `verify -Project finger_piano` → **Overall PASS**，`verify-20260914-204501-bde0e8a6`，Stage **`IMPLEMENT_ALLOWED`**：静态检查 PASS（UCF 的 LOC/TIMESPEC 在已评审工程中只报 INFO）、综合 0/0、六个仿真 PASS、implement 门禁 `implement gate open (UCF present and constraintsReviewed=true)` PASS。
+- `check -Stage implement` → PASS（门禁放开后不再是按设计的阻断）。
+- `build -Stage bitstream` → run **`20260914-204555-24cabc5e`**，`run.status=COMPLETE`，MAP/PAR 均 `0 error / 0 warning`，bitgen `DRC detected 0 errors and 0 warnings`，产物 `results/design.bit`（54 738 字节）。
+- **时序（本人已阅读 `timing.twr`，不是工具自动结论）**：`TS_clk = PERIOD TIMEGRP "clk_group" 83.33 ns` → **0 timing errors**，最差 setup/hold slack **70.697 ns**，脉冲宽度 slack 80.126 ns，报告结尾为 `All constraints were met.` / `Timing errors: 0  Score: 0`。**但**：UCF 未写任何 `OFFSET IN/OUT`（板级按键建立/保持与音频输出延迟没有板卡数据），所以 `Unconstrained OFFSET IN BEFORE` / `OFFSET OUT AFTER` / `Unconstrained path analysis` 三段是“无约束可查”，只能说明**没有违反任何已写约束**，不能解释为板级 I/O 时序已认证。工具 `summary.txt` 仍按规则输出 `Timing: NEEDS_REVIEW`。
+- 器件与器件名核对：`routed.pad` 中 `P57 clk IBUF IO_L09P_2/GCLK0 INPUT LVCMOS33`、`P3 rst_n`、`P4/P5/P6/P7/P8/P10/P11` 七个按键、`P12 audio_out`、`P13/P15/P16/P18/P19/P20/P21` 与 `P24/P25/P27` 全部 `LOCATED`；P1/P2 未被占用（仍是 TMS/TDI）。
+- **`program` 仍然只跑了只读 preflight，没有写入硬件**：20:48 与 20:50 两次 `program -Mode Jtag` 都因 `CABLE_NOT_FOUND` 在 preflight 就停下（`program-20260914-204807-6fd72080`，输出 `nothing was written`），此时连写脚本都不会生成；同一时段 `probe-20260914-204823-414a4508` / `probe-20260914-205006-a9df9206` 也都是 `CABLE_NOT_FOUND`。原因仍是 fpga-vm 的 USB 透传不稳定（当天 20:26/20:29 曾 `probe` PASS），属环境问题，与工具/板卡无关。`design.bit` 已具备、`constraintsReviewed=true`，随时可以烧录，但**是否真正写入由用户决定**。
+- **顺带修掉一个真实缺口**：本工程的 `design.bit` 头部是 bitgen 的紧凑格式（`b` 字段 = `3s50antqg144`），旧解析器只认 `Target Device:` 文本头，因此 preflight 一直显示 `NOT_PARSED`，等于少了一层「bitstream 器件 ≠ JTAG 器件」的交叉检查。现已支持该格式并做严格比较（只允许 `xc` 前缀等价，不发明 package 等价规则，速度等级缺失就如实写 `not in header`）；现在输出 `bitstream target : xc3s50antqg144 (header: BITGEN) match: YES`。已补单元测试（真实头形状、跨器件必须 NO、字段缺失必须 UNDETERMINED）。
+
+**4. 本轮仍未做**：真正烧录、上板按键实测、示波器/频率计实测音高。`program` 的状态模型依旧以 `userDesignFunctional = NOT_TESTED` 收尾，工具任何路径都不会打印 `BOARD PASS`。
+
+### 第五轮：时钟确认为 2 MHz + JTAG/ISF 烧录工具（2026-09-14）（**该频率判断已被第六轮取代：实际为 12 MHz**）
 
 **时钟**：外部有源晶振已确认为 **2 MHz**。`src/finger_piano_cfg.vh` 的 `` `SYS_CLK_HZ `` 由占位的 50 000 000 改为 **2 000 000**；`frequency_table.md` 用 RTL 等价脚本（`[int64]` + `[math]::Floor`）重算，并新增 `tone_generator_2m` 用例在真实 2 MHz 下**实测**半周期：
 
@@ -403,7 +442,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 - **同步 + 滤波窗口判据**（7 个音符逐一验证，不写死“恰好第 1000 周期”）：按键后第 999 个周期 `note_debug` 仍为 0（`window-low(999 cycles) must still be silent`），第 1008 个周期已经有效（`window-high(1008 cycles) must be valid`）。
 - **毛刺拒绝**：300 周期脉冲（< 1000 周期稳定门限）之后 `note_debug`、`key_debug`、`audio_out` 均无变化。
-- **七个音符频率**（1 MHz 仿真时钟下实测半周期计数，再与实数标称频率比较）：C4 1911 → 261.6431 Hz（+0.0088%）、D4 1702 → 293.7720 Hz（+0.0347%）、E4 1517 → 329.5979 Hz（−0.0097%）、F4 1432 → 349.1620 Hz（−0.0195%）、G4 1276 → 391.8495 Hz（−0.0358%）、A4 1136 → 440.1408 Hz（+0.0320%）、B4 1012 → 494.0711 Hz（+0.0387%）；最大误差 **0.0387% < 1%**。50 MHz 实际时钟下的理论误差见 `frequency_table.md`（≤0.011%）。
+- **七个音符频率**（1 MHz 仿真时钟下实测半周期计数，再与实数标称频率比较）：C4 1911 → 261.6431 Hz（+0.0088%）、D4 1702 → 293.7720 Hz（+0.0347%）、E4 1517 → 329.5979 Hz（−0.0097%）、F4 1432 → 349.1620 Hz（−0.0195%）、G4 1276 → 391.8495 Hz（−0.0358%）、A4 1136 → 440.1408 Hz（+0.0320%）、B4 1012 → 494.0711 Hz（+0.0387%）；最大误差 **0.0387% < 1%**。占位 50 MHz 时钟下的理论误差见 `frequency_table.md`（≤0.011%；现行 12 MHz 为 ≤0.0103%）。
 - **小星星序列**：14 个音全部按 `note_debug` 逐一核对，且每个音之后都观察到 `note_debug` 回到 0；其中 **6 个重复音符**（1、5、6、4、3、2）确认经历了 `key_stable` 的 `1 -> 0 -> 1`，即确实是两次独立按键，而不是被数字滤波并成一次长按。
 - **输入极性**：`KEY_ACTIVE_HIGH` 为 1 与 0 两种配置下检查数与结论完全一致（均 129 checks / 0 errors）。
 - 运行位置：远端 `C:\Users\PanGucheng\ise-builds\_sim\finger_piano\sim-20260914-144318`；本机日志副本 `tools/.work/sim-finger-piano-20260914-144318/received/`（`tools/.work` 已被 `.gitignore` 排除，不进入版本库）。

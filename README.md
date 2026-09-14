@@ -211,7 +211,7 @@ pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.
 | `-Mode Jtag` | 通过 JTAG 直接配置 FPGA 逻辑（SRAM） | **VOLATILE**，配置丢失 | `assignFile -p N -file x.bit` + `program -p N -v` |
 | `-Mode Isf` | 通过 JTAG 编程 Spartan-3AN **内部 In-System Flash** | **NON-VOLATILE**，上电自动配置 | `assignFileToAttachedFlash -p N -file x.bit` + `program -p N -spi`，随后 `verify -p N -spi` |
 
-**JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 2 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 2 MHz 时钟才能发声）。
+**JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 12 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 12 MHz 时钟才能发声）。
 
 ### iMPACT batch 命令是实测得到的，不是猜的
 
@@ -260,7 +260,7 @@ Result          PASS | FAIL
 
 - 强制 preflight：每次 `program` 先自动做一次与 `probe` 等价的只读检查（iMPACT 可执行、下载线、链、目标 position、器件系列匹配、bit 文件存在且非空）。
 - `-Position`：**不假定 position=1**。链上恰好一个器件才自动选 1；多于一个器件而未指定 → `ERROR: Multiple JTAG devices detected; specify -Position.`。
-- bit 文件：从 `.bit` 文本头尽量解析 `Target Device/Package/Speed` 并与 JTAG 实物对照；**解析不出来就明确写 `NOT_PARSED` 并依赖 iMPACT 自身的器件兼容检查**，不自行发明解析规则。
+- bit 文件：解析 `.bit` 头部并与 JTAG 实物对照，支持两种真实格式——iMPACT/promgen 的文本头（`Target Device/Package/Speed`）与 **bitgen 实际写出的紧凑头**（`<a|b|c|d><长度高字节><长度低字节><数据>0x00`，`a`=设计名、`b`=器件、`c`=日期、`d`=时间；例如真实 `design.bit` 的 `b` 字段为 `3s50antqg144`，归一化为 `xc3s50antqg144`）。比较时只做「去掉 `xc` 前缀 / 补齐 `xc` 前缀」的等价，**不发明**软件包等价规则（`tq144` 不等于 `tqg144`）；bitgen 头里没有速度等级，工具就报 `speed not in header`，**不猜**。两种头都解析不出来时明确写 `NOT_PARSED` 并依赖 iMPACT 自身的器件兼容检查。
 - 无 `-ConfirmHardwareWrite` → `PREVIEW ONLY`：打印 cable / chain / device / position / bitstream / mode 后立即结束，**不下载写脚本、不执行 program**（连 `program.cmd` 都不会生成）。
 - 超时：`Jtag` 与 `Isf` 用不同超时（默认 300 s / 600 s，probe 120 s，verify 300 s，可在 project.json 的 `programming` 段覆盖）。超时 → 非零退出、保留日志、标记 `TIMEOUT`，**不自动重烧**。
 - SSH 在写入过程中断开 → `PROGRAM_STATE_UNKNOWN`：因为无法确定第一次写操作进行到哪一步，工具**不会自动重试**，并要求先重新 `probe`、查看远端 `run.status`、取回原日志，再决定是否重烧。
@@ -301,12 +301,14 @@ Persistent boot requirements:
 }
 ```
 
-### 本轮真实硬件观察（未做任何写入）
+### 真实硬件观察（未做任何写入）
 
 - 16:19 手工探测时，Digilent JTAG-HS2 **可见**（`found 1 device(s)`），但 `identify` 报 iMPACT 的硬件配置错误（链未识别）。
 - 16:27 / 16:28 通过工具再探测两次，Digilent 插件报 `no JTAG device was found`，即**下载线在两次之间从 fpga-vm 中消失**（USB 透传/硬件状态问题，非工具差异；用同一份脚本手工复跑得到同样结果）。
-- 工具如实报告 `CABLE_NOT_FOUND` + `JTAG chain NOT_RUN` + `Result FAIL`，并未修改 VM 配置、未自动 attach USB。
-- **本轮没有执行任何 `program` 写入**；`Mode Isf` 的端到端烧录流程仍需要在真实上电板卡上做一次验证。
+- **20:26 / 20:29 `probe` 真实 PASS**：`Cable PASS`、`JTAG chain PASS`、Position 1 = `xc3s50an`、`IDCODE 0x02610093`、`Match YES`（run `probe-20260914-202618-d161523e`、`probe-20260914-202941-bbbebd63`）。
+- **20:48 起下载线又不可见**（`probe-20260914-204823-414a4508`、`probe-20260914-205006-a9df9206` 均为 `CABLE_NOT_FOUND`），同一时段 `program -Mode Jtag` 的 preflight 因此判失败并明确输出 `nothing was written`。这与上面的 USB 透传不稳定一致，属环境问题。
+- **至今没有执行过任何 `program` 写入**：`program` 在 `-ConfirmHardwareWrite` 之外只做 PREVIEW（本次 preflight 未过时甚至连 PREVIEW 段落都不会生成写脚本）；`Mode Isf` 的端到端烧录流程仍需在真实上电板卡上验证。
+- 真实 `design.bit`（finger_piano，54 738 字节）验证了 bitgen 头解析：`bitstream target : xc3s50antqg144 (header: BITGEN; package not in header; speed not in header)   match: YES`。
 
 ## 排错与验证范围
 
@@ -320,4 +322,4 @@ Persistent boot requirements:
 
 工具自测命令为 `pwsh -NoProfile -File .\tools\test-tools.ps1`，使用隔离目录和模拟 SSH/ISE 验证编排错误处理，不代表真实综合通过。真实传输及远端批处理启动验证使用 `doctor -TransferTest`，只调用 ISE 帮助命令，不综合、不烧录。
 
-另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，外部 2 MHz 有源晶振为唯一时钟）。其实施计划见 `doc/手指钢琴ISE工程实施计划.md`，工程结构、模块说明、UCF 填写清单、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）与三个 testbench 的远端 ISim 仿真（六组用例：默认、极性两种取值、滤波旁路、2 MHz 频率算术，全部 PASS），但**尚未填写引脚约束、未做 implement/bitstream、未上板、未实测频率**；速度等级与 TQ144 引脚仍待用户提供。
+另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，板上 P57 的 **12 MHz** 有源晶振为唯一时钟）。其实施计划见 `doc/手指钢琴ISE工程实施计划.md`，工程结构、模块说明、引脚分配、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）、三个 testbench 的六个远端 ISim 用例（默认、极性两种取值、滤波旁路、12 MHz 频率算术，全部 PASS）、静态检查、**带真实引脚约束（P57/P3/P4–P11/P12/P13–P21/P24–P27，LVCMOS33）的实现与 bitstream 生成**（run `20260914-204555-24cabc5e`，MAP/PAR/bitgen 均 0 errors / 0 warnings，`design.bit` 54 738 字节）；`TS_clk = PERIOD 83.33 ns` 实测 **0 timing errors、最差 slack 70.697 ns**（该结论来自本人阅读 `timing.twr`；UCF 没有 `OFFSET IN/OUT`，因此板级 I/O 时序未认证，工具 `summary.txt` 仍为 `NEEDS_REVIEW`）。**尚未真正烧录、未上板、未实测音高**（`program` 只跑过 PREVIEW ONLY）；芯片速度等级仍为占位 `-4`，待用户按丝印确认。

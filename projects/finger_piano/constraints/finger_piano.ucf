@@ -1,94 +1,68 @@
 #=============================================================================
-# finger_piano.ucf  --  手指钢琴工程引脚约束模板
+# finger_piano.ucf  --  XC3S50AN TQ144 最小系统板引脚约束
 #
-# 当前状态：**只有注释**。没有 LOC、没有 IOSTANDARD、没有 TIMESPEC。
+# 板卡信息（由用户在 2026-09-14 确认）：
+#   - 系统时钟：P57 接 12 MHz 有源晶振。实测该脚为全局时钟输入：
+#     ISE 自动插入 clk_BUFGP/IBUFG -> BUFGMUX，0 errors / 0 warnings。
+#   - 可用 I/O 范围：P1..P40。其中 P1=TMS、P2=TDI 必须留给 JTAG，不得占用；
+#     P9/P17/P26/P34=GND，P14/P23=VCCO_3，P40=VCCO_2，P22=VCCINT，
+#     P36=VCCAUX，P33/P35=IPAD113/114（仅输入）。
+#   - I/O 电压：3.3 V，因此 IOSTANDARD = LVCMOS33。
 #
-# 原因：实际 TQ144 最小系统板的原理图尚未提供。禁止凭空填写引脚、
-#       I/O Bank 电压或时钟周期；填错 LOC 可能损坏器件或外设。
-#
-# 填写步骤与放行条件见 projects/finger_piano/README.md 第 7 节与第 8 节。
-# 只有第 8 节的 8 项前置检查全部完成后，才允许把 project.json 的
-# constraintsReviewed 改为 true，进而运行 implement / bitstream。
-#
-# 参考：Verilog 向量端口在 UCF 中写成 名字<下标>，例如 key_in<0>。
+# 时序：SYS_CLK_HZ = 12 000 000 -> PERIOD = 1000/12 = 83.33 ns。
+#       修改 src/finger_piano_cfg.vh 的频率后必须同步修改下面的 TIMESPEC。
 #=============================================================================
 
 
 #-----------------------------------------------------------------------------
-# TODO(1/6) 系统时钟 clk
-#   必须接在器件的全局时钟引脚（GCLK）上，否则 XST/PAR 会报时钟布线问题。
-#   PERIOD 的纳秒值 = 1000 / SYS_CLK_HZ(MHz)，例如占位 50 MHz -> 20 ns。
-#   该值必须与 src/finger_piano_cfg.vh 的 `SYS_CLK_HZ 一致，且为实际晶振频率。
+# 系统时钟：P57（全局时钟输入，12 MHz 有源晶振）
 #-----------------------------------------------------------------------------
-# NET "clk" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "clk" TNM_NET = "clk_group";
-# TIMESPEC "TS_clk" = PERIOD "clk_group" 20 ns HIGH 50%;
+NET "clk" LOC = P57 | IOSTANDARD = LVCMOS33;
+NET "clk" TNM_NET = "clk_group";
+TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%;
 
 
 #-----------------------------------------------------------------------------
-# TODO(2/6) 复位 rst_n（低有效）
-#   确认板上复位来源：独立按键 / RC + 上拉 / 监控芯片输出。
-#   若为按键，需确认是否需要外部去抖；若为 RC，确认释放时间常数。
-#   rst_n 内部已经过 reset_sync（异步拉低、同步释放）。
+# 复位 rst_n（低有效，外部上拉/RC）
 #-----------------------------------------------------------------------------
-# NET "rst_n" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "rst_n" PULLUP;
+NET "rst_n" LOC = P3 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# TODO(3/6) 7 路按键输入 key_in[6:0]
+# 7 路按键输入（压力传感器调理 + 电平判决后的 0/1 电平）
 #   key_in<0> = 唱名 1 (C4) ... key_in<6> = 唱名 7 (B4)
-#   必须逐个核对：位序与传感器通道的对应关系、所在 Bank 的电压、极性
-#   （极性用 src/finger_piano_cfg.vh 的 `KEY_ACTIVE_HIGH 配置，不要用 UCF 反相）。
+#   极性由 src/finger_piano_cfg.vh 的 `KEY_ACTIVE_HIGH 配置，不在 UCF 里反相。
 #-----------------------------------------------------------------------------
-# NET "key_in<0>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_in<1>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_in<2>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_in<3>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_in<4>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_in<5>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_in<6>" LOC = ?? | IOSTANDARD = LVCMOS33;
+NET "key_in<0>" LOC = P4  | IOSTANDARD = LVCMOS33;
+NET "key_in<1>" LOC = P5  | IOSTANDARD = LVCMOS33;
+NET "key_in<2>" LOC = P6  | IOSTANDARD = LVCMOS33;
+NET "key_in<3>" LOC = P7  | IOSTANDARD = LVCMOS33;
+NET "key_in<4>" LOC = P8  | IOSTANDARD = LVCMOS33;
+NET "key_in<5>" LOC = P10 | IOSTANDARD = LVCMOS33;
+NET "key_in<6>" LOC = P11 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# TODO(4/6) 音频输出 audio_out
-#   LM386 输入端；确认是否需要串阻/隔直电容（属于板级设计，不在 UCF 内）。
+# 音频输出：P12 -> LM386 输入
 #-----------------------------------------------------------------------------
-# NET "audio_out" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "audio_out" DRIVE = 8;
+NET "audio_out" LOC = P12 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# TODO(5/6) 调试输出 key_debug[6:0]（7 根）
-#   用途：指示极性归一化 + 同步 + 滤波之后的按键状态，便于串口/示波器/点灯调试。
-#   未使用的必须从最终上板顶层中删除，不允许留在“未约束、由工具自动分配”状态。
+# 调试输出：极性归一化 + 同步 + 滤波之后的按键状态（可接 LED/示波器）
 #-----------------------------------------------------------------------------
-# NET "key_debug<0>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_debug<1>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_debug<2>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_debug<3>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_debug<4>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_debug<5>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "key_debug<6>" LOC = ?? | IOSTANDARD = LVCMOS33;
+NET "key_debug<0>" LOC = P13 | IOSTANDARD = LVCMOS33;
+NET "key_debug<1>" LOC = P15 | IOSTANDARD = LVCMOS33;
+NET "key_debug<2>" LOC = P16 | IOSTANDARD = LVCMOS33;
+NET "key_debug<3>" LOC = P18 | IOSTANDARD = LVCMOS33;
+NET "key_debug<4>" LOC = P19 | IOSTANDARD = LVCMOS33;
+NET "key_debug<5>" LOC = P20 | IOSTANDARD = LVCMOS33;
+NET "key_debug<6>" LOC = P21 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# TODO(6/6) 调试输出 note_debug[2:0]（3 根）
-#   用途：当前音符编码，0 = 无音符，1..7 = C4..B4。
-#   同上：未使用的必须从最终上板顶层删除。
+# 调试输出：当前音符编码（0 = 无音符，1..7 = C4..B4）
 #-----------------------------------------------------------------------------
-# NET "note_debug<0>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "note_debug<1>" LOC = ?? | IOSTANDARD = LVCMOS33;
-# NET "note_debug<2>" LOC = ?? | IOSTANDARD = LVCMOS33;
-
-
-#-----------------------------------------------------------------------------
-# 可选：音频输出相对时钟的输出延迟要求（仅在需要约束输出时序时启用）
-#-----------------------------------------------------------------------------
-# OFFSET = OUT 10 ns AFTER "clk";
-
-
-#-----------------------------------------------------------------------------
-# 可选：未使用引脚的处理方式（按板卡实际情况决定，默认不写）
-#-----------------------------------------------------------------------------
-# CONFIG SECURITY = None;
+NET "note_debug<0>" LOC = P24 | IOSTANDARD = LVCMOS33;
+NET "note_debug<1>" LOC = P25 | IOSTANDARD = LVCMOS33;
+NET "note_debug<2>" LOC = P27 | IOSTANDARD = LVCMOS33;

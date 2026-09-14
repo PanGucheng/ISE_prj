@@ -14,7 +14,7 @@
   "defines": [],
   "netlists": [],
   "ucf": "constraints/finger_piano.ucf",
-  "constraintsReviewed": false,
+  "constraintsReviewed": true,
   "optimization": "Speed",
   "optimizationLevel": 1,
   "simulations": [
@@ -37,10 +37,10 @@
       "failPattern": "TB_TONE_GENERATOR: FAIL"
     },
     {
-      "name": "tone_generator_2m",
+      "name": "tone_generator_12m",
       "top": "tb_tone_generator",
       "sources": ["sim/tb_tone_generator.v"],
-      "generics": {"TB_SYS_CLK_HZ": "2000000"},
+      "generics": {"TB_SYS_CLK_HZ": "12000000"},
       "timeoutSeconds": 120,
       "passPattern": "TB_TONE_GENERATOR: PASS",
       "failPattern": "TB_TONE_GENERATOR: FAIL"
@@ -74,7 +74,7 @@
     }
   ],
   "verification": {
-    "expectImplementationBlocked": true,
+    "expectImplementationBlocked": false,
     "failOnSynthesisWarnings": true,
     "clockName": "clk",
     "resetNames": ["rst_n", "rst_n_sync"],
