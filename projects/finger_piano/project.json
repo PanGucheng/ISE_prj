@@ -66,6 +66,7 @@
   ],
   "verification": {
     "expectImplementationBlocked": true,
+    "failOnSynthesisWarnings": true,
     "clockName": "clk",
     "resetNames": ["rst_n", "rst_n_sync"],
     "forbiddenEdgeSignals": ["clk_2m", "audio_out"]

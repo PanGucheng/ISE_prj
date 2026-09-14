@@ -107,6 +107,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 fetch -Project demo -Run
   ],
   "verification": {
     "expectImplementationBlocked": true,
+    "failOnSynthesisWarnings": true,
     "clockName": "clk",
     "resetNames": ["rst_n", "rst_n_sync"],
     "forbiddenEdgeSignals": ["clk_2m", "audio_out"]
@@ -118,6 +119,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 fetch -Project demo -Run
 - `generics` 即 `fuse --generic_top "名字=值"`，只在编译（elaboration）阶段生效，因此每个参数组合都会重新 fuse。
 - `passPattern`/`failPattern` 用字面量子串匹配转录日志；两者都是纯文本，不参与任何 shell 拼接。
 - `verification.expectImplementationBlocked` 决定 implement 门禁的期望值：`true` 时「被阻止」才算 PASS，未来 UCF 补齐后改成 `false`，工具内没有工程名特例。
+- `verification.failOnSynthesisWarnings`（可选）为 `true` 时，XST warning 数 > 0 会让 verify 的 synthesis 与 overall 判 FAIL；**不配置时保持旧行为**（只报告 warning 数，不影响结论）。`report` 永远是纯事实输出，不受该策略影响。
 - `verification.clockName`/`resetNames` 定义唯一时钟域；`forbiddenEdgeSignals` 是**绝不允许出现在 `posedge`/`negedge` 上的信号**（不是「不允许出现」——`audio_out` 仍是合法输出网）。
 
 ### sim
@@ -138,7 +140,7 @@ pwsh -File .\ise.ps1 sim -Project finger_piano                      # 全部 ena
 3. `--generic_top` 属于 fuse，不传给运行阶段。
 4. **退出码 0 不算通过**：日志必须出现 `passPattern`；出现 `failPattern` 判 FAIL；两者都没有（INCONCLUSIVE）也判 FAIL。
 5. 每次运行前清掉旧的 `*.exitcode`/`*.status` 与旧 exe，且每轮使用新目录，不复用上一轮产物。
-6. 超时：`timeoutSeconds`（默认 120 s，fuse 阶段固定上限 300 s）超时后终止本地 SSH 会话、尽力 kill 远程 exe、写回 `TIMEOUT` 并判 FAIL。
+6. 超时：`timeoutSeconds`（默认 120 s）超时后终止本地 SSH 会话、尽力 kill 远程 exe、写回 `TIMEOUT` 并判 FAIL；fuse 阶段超时为 `max(300, timeoutSeconds)`，即至少 300 s。
 
 退出码：全部选中用例 PASS 才为 0；任一 FAIL 抛错退出 1（日志与 `sim.json` 保留）。
 
@@ -172,7 +174,12 @@ pwsh -File .\ise.ps1 report -Project finger_piano -Latest
 pwsh -File .\ise.ps1 report -Project finger_piano -Latest -Json
 ```
 
-只读取已有 artifacts，**不重新构建**。对构建 run 解析：工具流程状态、XST 退出码、ERROR/WARNING 数、latch 推断数、multi-source、寄存器数、I/O 数、`design.ngc` 是否存在；同时把机器可读结果写成该 run 目录下的 `report.json`（`-Json` 会额外打印到标准输出）。`RunId` 以 `sim-`/`verify-` 开头时改为汇报该仿真/验证 run；缺失 `sim.json`/`verification.json` 时明确输出 `NOT_AVAILABLE` 并以非零退出。
+只读取已有 artifacts，**不重新构建**。对构建 run 先逐项判定产物是否齐全：`results/` 目录、`synthesis.srp`、`synth.exitcode`、`run.status`、`design.ngc`（implement/bitstream run 还要求 `translate/map/par/timing/bitgen` 的退码与 `design.ngd`、`mapped.ncd`、`routed.ncd`、`timing.twr`、`design.bit`）。
+
+- 工具流程 **COMPLETE 但关键产物缺失**（或 `results/`、`run.status` 缺失）→ 判 `NOT_AVAILABLE`，在控制台与 `report.json.artifacts.missingFiles` 里列出缺什么，并**以非零退出**；
+- 工具流程本身 **FAILED** → 判 `AVAILABLE` + `synthesis: FAIL`（缺失文件是失败证据，不是数据缺失），退出码仍为 0，事实照常输出。
+
+随后解析：工具流程状态、XST 退出码、ERROR/WARNING 数、latch 推断数、multi-source、寄存器数、I/O 数、`design.ngc` 是否存在；同时把机器可读结果写成该 run 目录下的 `report.json`（`-Json` 会额外打印到标准输出）。`RunId` 以 `sim-`/`verify-` 开头时改为汇报该仿真/验证 run；缺失 `sim.json`/`verification.json` 时明确输出 `NOT_AVAILABLE` 并以非零退出。
 
 时序原则：`timing.twr` 不存在 → `NOT_RUN`；存在 → `NEEDS_REVIEW`，**report 永远不会自己给出 Timing PASS**；未约束路径与失败约束必须人工阅读 `timing.twr`。
 

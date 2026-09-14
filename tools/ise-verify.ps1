@@ -265,6 +265,22 @@ function Invoke-Verification {
         }
     }
 
+    # Optional policy from project.json: verification.failOnSynthesisWarnings.
+    # When it is not configured the historical behaviour is kept (warnings are
+    # reported but do not fail verification).
+    $failOnWarnings = $false
+    if ($p) {
+        $vFlag = $p.Config.PSObject.Properties['verification']
+        if ($vFlag -and $vFlag.Value -and $vFlag.Value.PSObject.Properties['failOnSynthesisWarnings']) {
+            $failOnWarnings = [bool]$vFlag.Value.failOnSynthesisWarnings
+        }
+    }
+    $warningsBlocking = ($failOnWarnings -and $synthFacts -and $null -ne $synthFacts.Warnings -and $synthFacts.Warnings -gt 0)
+    if ($warningsBlocking) {
+        $synthResult = 'FAIL'
+        $notes.Add("synthesis: $($synthFacts.Warnings) warning(s) and verification.failOnSynthesisWarnings=true")
+    }
+
     # 4. simulations ---------------------------------------------------------
     $simResults = New-Object System.Collections.Generic.List[object]
     $simulationResult = 'NOT_CONFIGURED'
@@ -349,6 +365,8 @@ function Invoke-Verification {
             io         = $(if ($synthFacts) { $synthFacts.Io } else { $null })
             ngcExists  = $(if ($synthFacts) { $synthFacts.NgcExists } else { $false })
             exitCode   = $(if ($synthFacts) { $synthFacts.ExitCode } else { $null })
+            failOnWarnings    = $failOnWarnings
+            warningsBlocking  = $warningsBlocking
         }
         simulationResult = $simulationResult
         simulations   = @($simResults | ForEach-Object {
@@ -400,6 +418,7 @@ function Invoke-Verification {
     Show-ResultLine 'XST exit' $(if ($synthFacts -and $null -ne $synthFacts.ExitCode) { [string]$synthFacts.ExitCode } else { 'NOT_AVAILABLE' })
     Show-ResultLine 'errors' $(if ($synthFacts -and $null -ne $synthFacts.Errors) { [string]$synthFacts.Errors } else { 'NOT_AVAILABLE' })
     Show-ResultLine 'warnings' $(if ($synthFacts -and $null -ne $synthFacts.Warnings) { [string]$synthFacts.Warnings } else { 'NOT_AVAILABLE' })
+    Show-ResultLine 'warnings policy' $(if ($failOnWarnings) { 'blocking (failOnSynthesisWarnings=true)' } else { 'reported only' })
     Show-ResultLine 'latches' $(if ($synthFacts) { [string]$synthFacts.Latches } else { 'NOT_AVAILABLE' })
     Show-ResultLine 'result' $synthResult
     Write-Host ''
@@ -434,6 +453,7 @@ function Invoke-Verification {
         "Configuration: $configResult"
         "Static checks: $($static.Result) (errors=$(@($static.Errors).Count), warnings=$(@($static.Warnings).Count))"
         "Synthesis: $synthResult (run=$synthRunId)"
+        "Synthesis warnings: $(if ($synthFacts) { $synthFacts.Warnings } else { 'n/a' }) (failOnSynthesisWarnings=$failOnWarnings)"
         "Simulation: $simulationResult"
         "Implementation gate: $($gate.Result) (expectedBlocked=$($gate.ExpectedBlocked), actualBlocked=$($gate.ActualBlocked))"
         'Timing: NOT_RUN/NEEDS_REVIEW (verify never certifies timing)'

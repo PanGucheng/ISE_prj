@@ -69,6 +69,7 @@ endmodule
 #=============================================================================
 $script:Scenario = 'pass'   # pass | fusefail | simfail | no-pattern | fail-pattern | timeout
 $script:Mode = 'success'    # success | failure | disconnect (build flow)
+$script:SynthWarnings = 0   # XST warning count written into the mock synthesis report
 $script:Remote = $null
 
 function Get-RemoteRun([string]$RemotePath) {
@@ -111,13 +112,11 @@ function Invoke-Ssh([string]$RemoteCommand) {
                 Write-Utf8 "$script:Remote/out/run.status" 'COMPLETE'
                 Write-Utf8 "$script:Remote/out/design.ngc" 'MOCK OUTPUT, NOT A REAL NETLIST'
                 Write-Utf8 "$script:Remote/out/synth.exitcode" '0'
-                Write-Utf8 "$script:Remote/out/synthesis.srp" @'
-MOCK SYNTHESIS REPORT (unit test fixture, not a real XST run)
-Number of errors   :    0 (   0 filtered)
-Number of warnings :    0 (   0 filtered)
-# Registers                                            : 231
-# IOs                              : 20
-'@
+                Write-Utf8 "$script:Remote/out/synthesis.srp" ("MOCK SYNTHESIS REPORT (unit test fixture, not a real XST run)`n" +
+                    "Number of errors   :    0 (   0 filtered)`n" +
+                    "Number of warnings :    $($script:SynthWarnings) (   0 filtered)`n" +
+                    "# Registers                                            : 231`n" +
+                    "# IOs                              : 20`n")
             }
             'failure' { Write-Utf8 "$script:Remote/out/run.status" "RUNNING:synth`nFAILED"; throw 'SSH exit 1: simulated tool failure' }
             'disconnect' { Write-Utf8 "$script:Remote/out/run.status" 'RUNNING:synth'; throw 'SSH exit 255: simulated interruption' }
@@ -334,6 +333,36 @@ New-Item -ItemType Directory -Force -Path $emptyRun | Out-Null
 Write-Utf8 "$emptyRun/run.json" (([ordered]@{ project = 'fixture'; runId = '20260101-000000-abcdef02'; stage = 'synth'; status = 'prepared' } | ConvertTo-Json))
 Expect-Failure { Invoke-Report -ProjectName 'fixture' -RunId '20260101-000000-abcdef02' } 'NOT_AVAILABLE'
 Expect-Failure { Invoke-Report -ProjectName 'fixture' -RunId '20260101-000000-abcdef03' } 'not found'
+
+# results/ exists but synthesis.srp is missing -> NOT_AVAILABLE, listing the gap
+$partialRun = Join-Path "$root/projects/fixture/artifacts" '20260101-000000-abcdef04'
+New-Item -ItemType Directory -Force -Path "$partialRun/results" | Out-Null
+(Get-Item -LiteralPath $partialRun).CreationTimeUtc = [datetime]'2026-01-01T00:00:04Z'
+Write-Utf8 "$partialRun/run.json" (([ordered]@{ project = 'fixture'; runId = '20260101-000000-abcdef04'; stage = 'synth'; status = 'COMPLETE' } | ConvertTo-Json))
+Write-Utf8 "$partialRun/results/run.status" 'COMPLETE'
+Write-Utf8 "$partialRun/results/synth.exitcode" '0'
+Write-Utf8 "$partialRun/results/design.ngc" 'MOCK OUTPUT, NOT A REAL NETLIST'
+Expect-Failure { Invoke-Report -ProjectName 'fixture' -RunId '20260101-000000-abcdef04' } 'NOT_AVAILABLE'
+$partialReport = Get-Content "$partialRun/report.json" -Raw | ConvertFrom-Json
+Assert ($partialReport.dataStatus -eq 'NOT_AVAILABLE') 'missing synthesis.srp must make dataStatus NOT_AVAILABLE'
+Assert ($partialReport.artifacts.synthesisSrp -eq $false) 'synthesis.srp presence not distinguished'
+Assert ($partialReport.artifacts.synthExitcode -eq $true) 'synth.exitcode presence not distinguished'
+Assert ($partialReport.artifacts.runStatus -eq $true) 'run.status presence not distinguished'
+Assert ($partialReport.artifacts.designNgc -eq $true) 'design.ngc presence not distinguished'
+Assert (@($partialReport.artifacts.missingFiles) -contains 'synthesis.srp') 'the missing file is not listed'
+
+# a run whose tool flow actually FAILED stays AVAILABLE and reports FAIL (its
+# missing artifacts are failure evidence, not missing evidence)
+$failedRun = Join-Path "$root/projects/fixture/artifacts" '20260101-000000-abcdef05'
+New-Item -ItemType Directory -Force -Path "$failedRun/results" | Out-Null
+(Get-Item -LiteralPath $failedRun).CreationTimeUtc = [datetime]'2026-01-01T00:00:05Z'
+Write-Utf8 "$failedRun/run.json" (([ordered]@{ project = 'fixture'; runId = '20260101-000000-abcdef05'; stage = 'synth'; status = 'FAILED' } | ConvertTo-Json))
+Write-Utf8 "$failedRun/results/run.status" "RUNNING:synth`nFAILED"
+Invoke-Report -ProjectName 'fixture' -RunId '20260101-000000-abcdef05' | Out-Null
+$failedReport = Get-Content "$failedRun/report.json" -Raw | ConvertFrom-Json
+Assert ($failedReport.dataStatus -eq 'AVAILABLE') 'a failed tool flow must stay AVAILABLE'
+Assert ($failedReport.synthesis.result -eq 'FAIL') 'a failed tool flow must report synthesis FAIL'
+Assert (@($failedReport.artifacts.missingFiles).Count -gt 0) 'missing artifacts of a failed flow should be listed'
 $newestId = (Get-BuildRunIds 'fixture')[0]
 Invoke-Report -ProjectName 'fixture' -Latest | Out-Null
 Assert (Test-Path "$root/projects/fixture/artifacts/$newestId/report.json") '-Latest did not report the newest build run'
@@ -392,6 +421,25 @@ Write-FixtureConfig 'fixture' @{ constraintsReviewed = $true; verification = [or
 $vOpen = Invoke-Verification -ProjectName 'fixture'
 Assert ($vOpen.result -eq 'PASS') "expected PASS once implement is allowed, got $($vOpen.result)"
 Assert ($vOpen.stage -eq 'IMPLEMENT_ALLOWED') "stage expected IMPLEMENT_ALLOWED, got $($vOpen.stage)"
+
+# verification.failOnSynthesisWarnings = true -> warnings block the result
+$script:SynthWarnings = 3
+Write-FixtureConfig 'fixture' @{ constraintsReviewed = $false; verification = [ordered]@{ expectImplementationBlocked = $true; failOnSynthesisWarnings = $true; clockName = 'clk'; resetNames = @('rst_n', 'rst_n_sync'); forbiddenEdgeSignals = @('clk_2m', 'audio_out') } }
+Expect-Failure { Invoke-Verification -ProjectName 'fixture' } 'Verification FAILED'
+$vWarnBlocking = Get-LatestVerification 'fixture'
+Assert ($vWarnBlocking.result -eq 'FAIL') 'warnings must fail verification when failOnSynthesisWarnings=true'
+Assert ($vWarnBlocking.synthesis.warnings -eq 3) "warning count not parsed, got $($vWarnBlocking.synthesis.warnings)"
+Assert ($vWarnBlocking.synthesis.warningsBlocking -eq $true) 'warningsBlocking not flagged'
+Assert ($vWarnBlocking.synthesis.result -eq 'FAIL') 'synthesis result not FAIL under the warning policy'
+
+# the flag is optional: without it the historical behaviour is kept
+Write-FixtureConfig 'fixture' @{ constraintsReviewed = $false; verification = [ordered]@{ expectImplementationBlocked = $true; clockName = 'clk'; resetNames = @('rst_n', 'rst_n_sync'); forbiddenEdgeSignals = @('clk_2m', 'audio_out') } }
+$vWarnIgnored = Invoke-Verification -ProjectName 'fixture'
+Assert ($vWarnIgnored.result -eq 'PASS') 'warnings must not fail verification when the flag is absent'
+Assert ($vWarnIgnored.synthesis.warnings -eq 3) 'warning count should still be reported'
+Assert ($vWarnIgnored.synthesis.failOnWarnings -eq $false) 'failOnWarnings default should be false'
+Assert ($vWarnIgnored.synthesis.warningsBlocking -eq $false) 'warningsBlocking should be false without the flag'
+$script:SynthWarnings = 0
 Write-FixtureConfig 'fixture' @{}
 Write-Host 'PASS: verify aggregates synthesis, static checks and simulations, and honours expectImplementationBlocked in both directions.'
 

@@ -100,6 +100,45 @@ function Get-TimingFacts {
 #-----------------------------------------------------------------------------
 # Facts for one build run
 #-----------------------------------------------------------------------------
+# Per-file presence for one build run, plus the stage-specific list of files that
+# must exist before the run can be called complete. "results/ exists" alone is not
+# enough: a half-fetched run must be reported as NOT_AVAILABLE, not as a FAIL.
+function Get-BuildArtifactFacts {
+    param([Parameter(Mandatory)][string]$ResultsDir, [string]$Stage = 'synth')
+
+    $has = {
+        param([string]$Name)
+        Test-Path -LiteralPath (Join-Path $ResultsDir $Name) -PathType Leaf
+    }
+    $present = [ordered]@{
+        resultsDir    = (Test-Path -LiteralPath $ResultsDir -PathType Container)
+        synthesisSrp  = (& $has 'synthesis.srp')
+        synthExitcode = (& $has 'synth.exitcode')
+        runStatus     = (& $has 'run.status')
+        designNgc     = (& $has 'design.ngc')
+    }
+
+    # A run always starts from a fresh directory and runs the stages in order, so
+    # implement/bitstream runs contain the synth artifacts as well.
+    $required = New-Object System.Collections.Generic.List[string]
+    foreach ($n in @('run.status', 'synth.exitcode', 'synthesis.srp', 'design.ngc')) { $required.Add($n) }
+    if ($Stage -eq 'implement' -or $Stage -eq 'bitstream') {
+        foreach ($n in @('translate.exitcode', 'map.exitcode', 'par.exitcode', 'timing.exitcode', 'design.ngd', 'mapped.ncd', 'routed.ncd', 'timing.twr')) { $required.Add($n) }
+    }
+    if ($Stage -eq 'bitstream') {
+        foreach ($n in @('bitgen.exitcode', 'design.bit')) { $required.Add($n) }
+    }
+    $requiredList = $required.ToArray()
+    $missing = @($requiredList | Where-Object { -not (& $has $_) })
+
+    return [pscustomobject]@{
+        Present  = $present
+        Required = $requiredList
+        Missing  = $missing
+        Complete = ($missing.Count -eq 0)
+    }
+}
+
 function Get-BuildRunFacts {
     param([Parameter(Mandatory)][string]$ProjectName, [Parameter(Mandatory)][string]$RunId)
     Assert-Name $ProjectName
@@ -116,8 +155,9 @@ function Get-BuildRunFacts {
     $stage = 'unknown'
     if ($meta -and $meta.stage) { $stage = [string]$meta.stage }
 
+    $artifacts = Get-BuildArtifactFacts -ResultsDir $results -Stage $stage
     $srpText = Get-TextSafe (Join-Path $results 'synthesis.srp')
-    $ngc = Test-Path -LiteralPath (Join-Path $results 'design.ngc') -PathType Leaf
+    $ngc = $artifacts.Present.designNgc
     $statusText = Get-TextSafe (Join-Path $results 'run.status')
     $exitCode = Get-IntSafe (Join-Path $results 'synth.exitcode')
     $twrExists = Test-Path -LiteralPath (Join-Path $results 'timing.twr') -PathType Leaf
@@ -126,13 +166,27 @@ function Get-BuildRunFacts {
     $synthesis = Get-SynthesisFacts -ReportText $srpText -NgcExists $ngc -ExitCode $exitCode -ToolFlow $statusText
     $timing = Get-TimingFacts -TwrText $twrText -TwrExists $twrExists
 
-    $resultsAvailable = (Test-Path -LiteralPath $results -PathType Container)
+    $flow = 'NOT_AVAILABLE'
+    if ($null -ne $statusText) { $flow = $statusText.Trim() }
+
+    # NOT_AVAILABLE = the evidence itself is missing (never fetched / half fetched).
+    # A run whose tool flow FAILED is a FAIL, not NOT_AVAILABLE: its missing files
+    # are the failure evidence and are listed in Artifacts.Missing.
+    $dataStatus = 'AVAILABLE'
+    if (-not $artifacts.Present.resultsDir -or -not $artifacts.Present.runStatus) {
+        $dataStatus = 'NOT_AVAILABLE'
+    } elseif ($flow -eq 'COMPLETE' -and -not $artifacts.Complete) {
+        $dataStatus = 'NOT_AVAILABLE'
+    }
+
     return [pscustomobject]@{
         RunId            = $RunId
         RunDir           = $runDir
         Stage            = $stage
-        ResultsAvailable = $resultsAvailable
-        Status           = $(if ($null -eq $statusText) { 'NOT_AVAILABLE' } else { $statusText.Trim() })
+        ResultsAvailable = $artifacts.Present.resultsDir
+        Artifacts        = $artifacts
+        DataStatus       = $dataStatus
+        Status           = $flow
         Synthesis        = $synthesis
         Timing           = $timing
     }
@@ -234,13 +288,25 @@ function Invoke-Report {
 
     # Build run
     $build = Get-BuildRunFacts $ProjectName $RunId
+    $missingText = $(if (@($build.Artifacts.Missing).Count -eq 0) { '(none)' } else { (@($build.Artifacts.Missing) -join ', ') })
     $report = [ordered]@{
         project          = $ProjectName
         runId            = $build.RunId
         kind             = 'build'
         stage            = $build.Stage
         toolFlow         = $build.Status
+        dataStatus       = $build.DataStatus
         resultsAvailable = $build.ResultsAvailable
+        artifacts        = [ordered]@{
+            resultsDir      = $build.Artifacts.Present.resultsDir
+            synthesisSrp    = $build.Artifacts.Present.synthesisSrp
+            synthExitcode   = $build.Artifacts.Present.synthExitcode
+            runStatus       = $build.Artifacts.Present.runStatus
+            designNgc       = $build.Artifacts.Present.designNgc
+            requiredFiles   = @($build.Artifacts.Required)
+            missingFiles    = @($build.Artifacts.Missing)
+            complete        = $build.Artifacts.Complete
+        }
         synthesis        = [ordered]@{
             result        = $build.Synthesis.Result
             reportAvailable = $build.Synthesis.ReportAvailable
@@ -269,6 +335,14 @@ function Invoke-Report {
     Write-Host "Project : $ProjectName"
     Write-Host "Run     : $($build.RunId)   Stage: $($build.Stage)"
     Write-Host '=================================================='
+    Write-Host 'Artifacts'
+    Write-Host ('  results/                 : ' + $build.Artifacts.Present.resultsDir)
+    Write-Host ('  synthesis.srp            : ' + $build.Artifacts.Present.synthesisSrp)
+    Write-Host ('  synth.exitcode           : ' + $build.Artifacts.Present.synthExitcode)
+    Write-Host ('  run.status               : ' + $build.Artifacts.Present.runStatus)
+    Write-Host ('  design.ngc               : ' + $build.Artifacts.Present.designNgc)
+    Write-Host ('  missing for stage        : ' + $missingText)
+    Write-Host ('  data status              : ' + $build.DataStatus)
     Write-Host 'Tool flow'
     Write-Host ('  run.status               : ' + $build.Status)
     Write-Host ('  results available        : ' + $build.ResultsAvailable)
@@ -291,5 +365,8 @@ function Invoke-Report {
     Write-Host ("report.json : " + (Join-Path $build.RunDir 'report.json'))
     if ($Json) { $report | ConvertTo-Json -Depth 12 }
 
+    if ($build.DataStatus -eq 'NOT_AVAILABLE') {
+        throw "report: artifacts for $($build.RunId) are NOT_AVAILABLE (missing: $missingText)."
+    }
     if (-not $build.ResultsAvailable) { throw "report: results for $($build.RunId) are NOT_AVAILABLE." }
 }

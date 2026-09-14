@@ -17,7 +17,7 @@
 |---|---|
 | 器件 | `xc3s50an-4-tqg144`（`-4` 暂定，README/project.json 标注 TODO 待按丝印核实） |
 | `SYS_CLK_HZ` 占位 | `50_000_000`，唯一真值源 `src/finger_piano_cfg.vh` |
-| 验证深度 | `build -Stage synth` 成功 + 远端 `fuse`/ISim 编译并运行三个 TB（含 `KEY_ACTIVE_HIGH` = 1/0 与 `KEY_FILTER_ENABLE` = 1/0 共四组用例） |
+| 验证深度 | `build -Stage synth` 成功 + 远端 `fuse`/ISim 编译并运行 3 个 Testbench，共 5 组仿真运行（含 `KEY_ACTIVE_HIGH` = 1/0 与 `KEY_FILTER_ENABLE` = 1/0） |
 | GitHub | `PanGucheng/ISE_prj`，仓库根 `D:\ISE_prj`，**当前为 public（公开）** |
 | 交付工程约束 | `constraintsReviewed` 固定 `false`；UCF 无任何 `LOC`/`IOSTANDARD`/`TIMESPEC` |
 | 复位方案 | 实现 `reset_sync.v`（异步拉低、同步释放），内部统一用 `rst_n_sync` |

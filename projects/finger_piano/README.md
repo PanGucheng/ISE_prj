@@ -248,6 +248,21 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 ## 13. 验证记录
 
+### 第四轮：report 缺文件判定收紧 + 综合 warning 策略（2026-09-14）
+
+本轮**未改 RTL/Testbench**，只收紧工具判定并补测试与措辞：
+
+1. **`report` 不再只看 `results/` 是否存在**。现在逐项判定 `results/`、`synthesis.srp`、`synth.exitcode`、`run.status`、`design.ngc`（implement/bitstream 另加各阶段退码与网表/时序文件）。工具流程 `COMPLETE` 但关键产物缺失（或 `results/`、`run.status` 缺失）→ 明确报 `NOT_AVAILABLE`、列出 `missingFiles` 并**非零退出**；工具流程本身 `FAILED` → 仍为 `AVAILABLE` + `synthesis FAIL`（缺失文件是失败证据），不会误判成数据缺失。
+2. **新增可选策略 `verification.failOnSynthesisWarnings`**（本工程设为 `true`）：为 `true` 时 XST warning 数 > 0 会让 verify 的 synthesis 与 overall 判 FAIL；不配置时保持旧行为（只报告 warning）。`report` 始终是纯事实输出，不受该策略影响。
+3. 文档措辞修正：实施计划中的「共四组用例」改为「3 个 Testbench，共 5 组仿真运行」；根 README 中的「fuse 阶段固定上限 300 s」改为「fuse 阶段超时为 `max(300, timeoutSeconds)`，即至少 300 s」。
+4. 新增三条自测：results 存在但 `synthesis.srp` 缺失 → `NOT_AVAILABLE`；`failOnSynthesisWarnings=true` 且 warnings>0 → verify FAIL；未配置该项 → 旧行为（warnings 不影响结论）。`tools/test-tools.ps1` 连续 3 次全绿。
+
+**本轮真实验收**
+
+- `verify -Project finger_piano` → **Overall PASS**（verify id `verify-20260914-160313-e852db47`，Stage `PRE_BOARD`）：综合 run `20260914-160313-3e018090` 为 0 errors / **0 warnings**，日志显示 `warnings policy: blocking (failOnSynthesisWarnings=true)`，5 个仿真 PASS，implement 门禁 EXPECTED BLOCK=PASS。
+- `report -Project finger_piano -Latest` → run `20260914-160313-3e018090`：产物五项全 True、`missing for stage: (none)`、`data status: AVAILABLE`、registers 231 / IOs 20 / `result PASS`、timing `NOT_RUN`。
+- 用历史失败 run `20260914-144156-edb3def6`（宏漏反引号那次）复核实测：`design.ngc` 缺失被列为 `missing for stage: design.ngc`，但 `data status` 仍为 `AVAILABLE`、`result FAIL`（XST exit 6 / errors 13）——与 `NOT_AVAILABLE` 的区分符合预期。
+
 ### 第三轮：工具链验收入口 sim / verify / report（2026-09-14）
 
 本轮**没有改动任何 RTL 或 Testbench**，只把此前人工验证过的 `fuse + tclbatch` 流程固化成工具入口（`sim`/`verify`/`report`，`board-check` 预留），并把本工程的五个仿真用例写进 `project.json`。
