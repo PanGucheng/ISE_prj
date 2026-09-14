@@ -16,10 +16,13 @@ module key_sync #(
     input  wire             clk,
     input  wire             rst_n_sync,   // 内部同步复位（低有效，来自 reset_sync）
     input  wire [WIDTH-1:0] async_in,     // 异步输入（已完成极性归一化）
+    (* ASYNC_REG = "TRUE" *)              // 与第一级同属性，保持同步链相邻
     output reg  [WIDTH-1:0] sync_out      // 同步后的输出
 );
 
-    reg [WIDTH-1:0] meta;   // 第一级：可能亚稳
+    // ASYNC_REG 提示 XST/PAR 把这条同步链的两级触发器放在相邻位置，
+    // 缩短亚稳态传播窗口。（纯属性，不改变逻辑与端口。）
+    (* ASYNC_REG = "TRUE" *) reg [WIDTH-1:0] meta;   // 第一级：可能亚稳
 
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin

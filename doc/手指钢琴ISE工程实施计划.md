@@ -1,9 +1,15 @@
 # 手指钢琴 ISE 工程 + GitHub 仓库 实施计划（v2）
 
-- 状态：已批准，正在实施
+- 状态：第一阶段软件工程已完成并验证，等待实际板级参数
 - 目标器件：Xilinx Spartan-3AN `xc3s50an-4-tqg144`（`-4` 为暂定值，待按芯片丝印核对）
 - 工具链：本机 PowerShell 7 编辑 → SSH/SFTP → Win7 `fpga-vm` 上的 ISE 14.7
 - 本文件合并了评审文档《Agent 修改建议_手指钢琴ISE工程.md》的全部必须项与建议项
+
+### 当前状态边界（务必区分“已验证”与“未做”）
+
+已验证：RTL 综合（XST 0 errors / 0 warnings）、三个 testbench 的远端 ISim 仿真（含极性两种取值与滤波旁路）、静态合规检查、`check -Stage implement` 按设计被阻止。修订记录见 `projects/finger_piano/README.md` 第 13 节。
+
+**尚未完成**：尚未 implement、尚未生成正式 bitstream、尚未进行板卡烧录、尚未进行实际频率测量。任何“通过”结论都不包含以上四项。
 
 ## 0. 已确认决策
 
@@ -11,10 +17,11 @@
 |---|---|
 | 器件 | `xc3s50an-4-tqg144`（`-4` 暂定，README/project.json 标注 TODO 待按丝印核实） |
 | `SYS_CLK_HZ` 占位 | `50_000_000`，唯一真值源 `src/finger_piano_cfg.vh` |
-| 验证深度 | `build -Stage synth` 成功 + 远端 `fuse`/ISim 编译并运行三个 TB |
-| GitHub | `PanGucheng/ISE_prj` 私有，仓库根 `D:\ISE_prj` |
+| 验证深度 | `build -Stage synth` 成功 + 远端 `fuse`/ISim 编译并运行三个 TB（含 `KEY_ACTIVE_HIGH` = 1/0 与 `KEY_FILTER_ENABLE` = 1/0 共四组用例） |
+| GitHub | `PanGucheng/ISE_prj`，仓库根 `D:\ISE_prj`，**当前为 public（公开）** |
 | 交付工程约束 | `constraintsReviewed` 固定 `false`；UCF 无任何 `LOC`/`IOSTANDARD`/`TIMESPEC` |
 | 复位方案 | 实现 `reset_sync.v`（异步拉低、同步释放），内部统一用 `rst_n_sync` |
+| 同步链属性 | `reset_sync.v` / `key_sync.v` 的 CDC 两级触发器带 `(* ASYNC_REG = "TRUE" *)`（XST 0 警告确认兼容） |
 
 ### 相对初版的差异（增量，不改总体架构）
 
@@ -51,6 +58,8 @@ projects/finger_piano/
 
 根 `README.md` 追加一行指向新工程。不改 `tools/ise-tools.ps1`、不改 `AGENTS.md`。
 
+**交付文件计数口径**：`projects/finger_piano/` 目录内共 **14 个 tracked 文件**（`project.json`、7 个 `src/`、3 个 `sim/`、1 个 `constraints/`、`README.md`、`frequency_table.md`）；加上本仓库 `doc/` 下的这份实施计划，**项目相关交付文件合计 15 个**。仓库根的 `README.md`、`AGENTS.md`、`ise.ps1`、`tools/`、`templates/`、`projects/xc3s50an_smoke/` 属于工具链与既有测试工程，不计入这 15 个（仓库 tracked 文件总数为 26）。
+
 ## 2. 配置真值源与 project.json
 
 `src/finger_piano_cfg.vh`（含 include guard）——全项目唯一出现具体频率的地方：
@@ -73,8 +82,8 @@ projects/finger_piano/
 
 ## 3. RTL 规格（全部 Verilog-2001；仅 `clk` 单时钟域）
 
-- **`reset_sync.v`**：`clk, rst_n → rst_n_sync`。`always @(posedge clk or negedge rst_n)` 内两级移位，复位全 0，输出低有效内部复位。异步拉低、同步释放。
-- **`key_sync.v`** `#(parameter WIDTH = 7)`：`meta → sync_out` 两级触发器（用 `rst_n_sync`），消除亚稳态。
+- **`reset_sync.v`**：`clk, rst_n → rst_n_sync`。`always @(posedge clk or negedge rst_n)` 内两级移位，复位全 0，输出低有效内部复位。异步拉低、同步释放。两级寄存器带 `(* ASYNC_REG = "TRUE" *)`（纯属性，不改变逻辑与端口，已确认 XST 0 警告）。
+- **`key_sync.v`** `#(parameter WIDTH = 7)`：`meta → sync_out` 两级触发器（用 `rst_n_sync`），消除亚稳态。`meta` 带 `(* ASYNC_REG = "TRUE" *)`。
 - **`key_filter.v`** `#(SYS_CLK_HZ, STABLE_MS, ENABLE, WIDTH = 7)`：`localparam integer STABLE_CYCLES = (SYS_CLK_HZ/1000)*STABLE_MS`（钳到 ≥1）；标准 Verilog-2001 generate：模块内先 `genvar i;`，再 `generate if (ENABLE != 0) begin : GEN_FILTER ... for (...) begin : GEN_KEY_FILTER`，循环体内各自声明 `reg [FP_FILTER_CNT_WIDTH-1:0] cnt; reg stable_q;`，`assign key_stable[i] = stable_q;`；输入与稳定值不同则计数，到 `STABLE_CYCLES-1` 更新并清零，相同则清零。`else` 分支 `assign key_stable = key_sync_in;`（关闭时零计数器、零资源）。
 - **`note_encoder.v`**：纯组合、无 clk、无宏。`always @(*)` 的 `if/else if` 链按 **1>2>3>4>5>6>7**，末分支 `3'd0`；全条件覆盖 → 无锁存器。
 - **`tone_generator.v`** `#(SYS_CLK_HZ)`：同步计数器 + terminal count，无门控时钟。频率表用 0.1 Hz 整数：2616/2937/3296/3492/3920/4400/4939；7 条内联 `localparam integer HP_x = (SYS_CLK_HZ*10 + F) / (2*F);`；组合 `case` 选 `half_target` 并钳 ≥1；复位/`note_code==0` → `audio_out=0`、计数清零；音符变化 → 相位重启；否则 terminal count 翻转 `audio_out`。
@@ -88,7 +97,7 @@ projects/finger_piano/
 
 - **`tb_note_encoder.v`**：`0000000→0`、7 个单键→1..7、全按→1、`2+3`→2、`6+7`→6、`3+5+7`→3；输出 `TB_NOTE_ENCODER: PASS/FAIL`。
 - **`tb_tone_generator.v`**：`TB_SYS_CLK_HZ = 1_000_000`；测相邻 `audio_out` 边沿间周期数 `N`，`f = TB_SYS_CLK_HZ/(2N)` 与实数标称比，`|误差| < 1%`；验证静音与相位重启。
-- **`tb_finger_piano_top.v`**：`TB_SYS_CLK_HZ = 1_000_000`、`TB_STABLE_MS = 1`、`TB_KEY_ACTIVE_HIGH = 1`（可用 `--generic_top` 覆盖）；窗口式滤波判据（999 周期仍无效、1008 周期已有效，`SYNC_MARGIN = 8`）；毛刺 300 周期被拒绝；小星星 `1 1 5 5 6 6 5  4 4 3 3 2 2 1`，每音约 20 ms 等效、音符间 ≥2 ms 等效释放并断言重复音符之间 `1→0→1`。
+- **`tb_finger_piano_top.v`**：`TB_SYS_CLK_HZ = 1_000_000`、`TB_STABLE_MS = 1`、`TB_KEY_ACTIVE_HIGH = 1`、`TB_KEY_FILTER_ENABLE = 1`（三者均可用 `--generic_top` 覆盖）；窗口式滤波判据（999 周期仍无效、1008 周期已有效，`SYNC_MARGIN = 8`）；毛刺 300 周期被拒绝；小星星 `1 1 5 5 6 6 5  4 4 3 3 2 2 1`，每音约 20 ms 等效、音符间 ≥2 ms 等效释放并断言重复音符之间 `1→0→1`。当 `TB_KEY_FILTER_ENABLE = 0`（滤波旁路）时只跑最小用例：复位状态 → 按一个键 → 经两级同步后 `note_debug` 正确 → 松键恢复 0，且都要求在 `SYNC_MARGIN` 个周期内完成（以此证明旁路路径没有 10 ms 稳定延迟）。
 
 ## 6. 文档规格
 
@@ -119,8 +128,8 @@ projects/finger_piano/
 1. `git init -b main` → 提交既有工作区。
 2. 新工程完成并通过验证后提交第二个 commit。
 3. 推送前检查 `git ls-files` 无密钥/密码文件。
-4. `gh repo create ISE_prj --private --source=. --remote=origin --push`。
-5. 验证 `visibility=private`、默认分支 main、远端 HEAD 与本地一致、`git status` 干净。
+4. `gh repo create ISE_prj --private --source=. --remote=origin --push`（创建时用私有；仓库随后由用户手动改为 **public**）。
+5. 验证仓库可见性（当前 **public**）、默认分支 main、远端 HEAD 与本地一致、`git status` 干净。
 
 ## 9. 边界情况与失败模式
 
@@ -145,22 +154,31 @@ ADC、DDS、显示屏、数码管、PWM 音量、和弦、UART、自动演奏器
 ## 12. 验收清单
 
 ```
-[ ] ISE 工程可创建、可打开；Device = xc3s50an-4-tqg144（-4 待丝印核对）
-[ ] RTL 为 Verilog-2001；不存在 `for (genvar ...)`；顶层无伪参数 KEY_WIDTH
-[ ] KEY_ACTIVE_HIGH 已参数化，极性只在顶层归一化一次
-[ ] key_sync 两级同步；key_filter 可开可关，关闭时综合为直通路径
-[ ] note_encoder 优先级 1 > 2 > … > 7 正确
-[ ] tone_generator 七音理论误差 < 1%；无键 audio_out=0；音符切换相位重启
-[ ] 只有唯一 clk 时钟域；无门控时钟、无 clk_2m
-[ ] reset_sync 实现异步拉低/同步释放，内部统一用 rst_n_sync
-[ ] 三个 TB 均可编译；顶层 TB 用窗口式判据并覆盖同步器延迟
-[ ] 小星星重复音符之间存在真实释放（key_stable 经历 1→0→1）
-[ ] 综合退出码 0，无 ERROR、无 latch
-[ ] UCF 无任何虚构 LOC/IOSTANDARD/TIMESPEC；constraintsReviewed 仍为 false
-[ ] check -Stage implement 按设计被阻止
-[ ] README 写明 2 MHz 课程要求与本工程单时钟实现的对应关系
-[ ] README/UCF 写明 debug 顶层端口的最终约束策略
-[ ] 私有仓库已推送，git status 干净，远端 HEAD 与本地一致
+[x] ISE 工程可创建、可打开；Device = xc3s50an-4-tqg144（-4 待丝印核对）
+[x] RTL 为 Verilog-2001；不存在 `for (genvar ...)`；顶层无伪参数 KEY_WIDTH
+[x] KEY_ACTIVE_HIGH 已参数化，极性只在顶层归一化一次
+[x] key_sync 两级同步；key_filter 可开可关，关闭时综合为直通路径（旁路模式已仿真验证）
+[x] note_encoder 优先级 1 > 2 > … > 7 正确
+[x] tone_generator 七音理论误差 < 1%；无键 audio_out=0；音符切换相位重启
+[x] 只有唯一 clk 时钟域；无门控时钟、无 clk_2m
+[x] reset_sync 实现异步拉低/同步释放，内部统一用 rst_n_sync
+[x] 三个 TB 均可编译；顶层 TB 用窗口式判据并覆盖同步器延迟
+[x] 小星星重复音符之间存在真实释放（key_stable 经历 1→0→1）
+[x] 综合退出码 0，无 ERROR、无 latch
+[x] UCF 无任何虚构 LOC/IOSTANDARD/TIMESPEC；constraintsReviewed 仍为 false
+[x] check -Stage implement 按设计被阻止
+[x] README 写明 2 MHz 课程要求与本工程单时钟实现的对应关系
+[x] README/UCF 写明 debug 顶层端口的最终约束策略
+[x] 仓库已推送（当前 public），git status 干净，远端 HEAD 与本地一致
+[x] frequency_table.md 的 PowerShell 重算脚本显式 Floor，50 MHz 七个 N 与 RTL 完全一致
+[x] 滤波计数器容量公式含 /1000，19 位足够 / 24 位裕量 / 50 MHz 上限约 335 ms 均核对
+[x] KEY_FILTER_ENABLE=0 旁路最小验证 PASS
+
+尚未完成（等待实际板级参数，不计入本轮）：
+[ ] implement（需要真实引脚 + constraintsReviewed=true）
+[ ] 正式 bitstream
+[ ] 板卡烧录
+[ ] 实际频率测量
 ```
 
 ## 13. 假设

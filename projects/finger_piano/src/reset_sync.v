@@ -15,8 +15,10 @@ module reset_sync (
     output wire rst_n_sync    // 内部低有效复位（同步释放）
 );
 
-    reg rst_meta;      // 第一级：异步拉低
-    reg rst_sync_q;    // 第二级：同步释放
+    // ASYNC_REG 提示 XST/PAR 把这条同步链的两级触发器放在相邻位置，
+    // 缩短亚稳态传播窗口。（纯属性，不改变逻辑与端口。）
+    (* ASYNC_REG = "TRUE" *) reg rst_meta;      // 第一级：异步拉低
+    (* ASYNC_REG = "TRUE" *) reg rst_sync_q;    // 第二级：同步释放
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

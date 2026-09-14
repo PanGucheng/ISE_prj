@@ -59,7 +59,7 @@ projects/finger_piano/
 ```
 
 1. **极性归一化**：`assign key_normalized = KEY_ACTIVE_HIGH ? key_in : ~key_in;`（全工程唯一反相处）。
-2. **`key_sync`**：两级触发器，消除外部输入相对 `clk` 的亚稳态。
+2. **`key_sync`**：两级触发器，消除外部输入相对 `clk` 的亚稳态。两级寄存器都带 `(* ASYNC_REG = "TRUE" *)`（纯属性，只影响 XST/PAR 的摆放，不改变逻辑），`reset_sync` 的两级寄存器同样带该属性。
 3. **`key_filter`**：对每路按键独立计数，输入电平持续偏离当前稳定值达到 `STABLE_CYCLES` 才更新输出；短毛刺被完全拒绝。`KEY_FILTER_ENABLE=0` 时综合为纯直通（`assign`），不产生任何计数器。
 4. **`note_encoder`**：纯组合优先级编码，`key_stable[0]` 最高优先（1 > 2 > 3 > 4 > 5 > 6 > 7），无按键输出 0。
 5. **`tone_generator`**：对 `SYS_CLK_HZ` 做同步计数，半周期到达 terminal count 时翻转 `audio_out`；`note_code==0` 时输出 0 并清零计数；音符变化时相位重启（计数清零、输出清零），使演奏与仿真行为可预测。全程只有 `posedge clk`，没有用任何分频器输出当时钟。
@@ -133,7 +133,7 @@ projects/finger_piano/
 1. 在 ISE Project Navigator 新建工程，器件选 `xc3s50an-4-tqg144`；
 2. 加入 `src/` 下 6 个 `.v`（`.vh` 加到 include 路径：`Project → Properties → Verilog Include Directories` 填 `src`）；
 3. 加入 `sim/` 下要跑的 testbench，顶层设为该 testbench，综合工具选 `ISim`；
-4. 设置仿真参数（如需要）：`tb_finger_piano_top` 的 `TB_SYS_CLK_HZ`/`TB_STABLE_MS`/`TB_KEY_ACTIVE_HIGH`；
+4. 设置仿真参数（如需要）：`tb_finger_piano_top` 的 `TB_SYS_CLK_HZ` / `TB_STABLE_MS` / `TB_KEY_ACTIVE_HIGH` / `TB_KEY_FILTER_ENABLE`（最后一个为 0 时该 TB 自动切换成旁路最小用例）；
 5. Run Behavioral Simulation，在 Tcl Console 查看 `PASS/FAIL` 行。
 
 ### 9.2 ISim 命令行（本工程实际验证使用的方式）
@@ -179,6 +179,15 @@ fuse -prj sim_finger_piano_top.prj -top tb_finger_piano_top -i src -o tb_top_al.
 tb_top_al.exe -tclbatch run_all.tcl -log ..\out\sim_top_al.isim.log
 ```
 
+滤波旁路（`KEY_FILTER_ENABLE=0`）同样要重新 fuse 一次，随后 TB 会自动只跑旁路最小用例：
+
+```cmd
+fuse -prj sim_finger_piano_top.prj -top tb_finger_piano_top -i src -o tb_top_bp.exe --generic_top "TB_KEY_FILTER_ENABLE=0"
+tb_top_bp.exe -tclbatch run_all.tcl -log ..\out\sim_top_bp.isim.log
+```
+
+注意：`--generic_top` 只能覆盖**顶层**参数（这里就是 testbench 自己的参数），所以两个参数都是通过 TB 顶层参数传给 DUT 的。
+
 另外两个注意点：
 
 - Windows CMD 下把退出码紧贴重定向符会引发解析问题（`echo %RC%>f.txt` 里的数字会被当成文件描述符），记录退出码时数字与 `>` 之间要留空格。
@@ -222,7 +231,56 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 ## 13. 验证记录
 
-**本轮（第一阶段）验证结果：**
+### 第二轮修订：文档计算修正 + 滤波旁路验证（2026-09-14）
+
+本轮**未改任何受保护的 RTL 设计**：复位同步、两级输入同步、滤波算法、优先级编码、频率公式、音符切换相位重启、单时钟域架构全部保持不变；改动只有文档、注释、testbench 的验证参数，以及两个模块的 `ASYNC_REG` 属性。
+
+**1. `frequency_table.md` 的重算脚本原本会算错两个音。** 原脚本用 `[int](($sysClkHz * 10 + $dHz) / (2 * $dHz))`；PowerShell 的 `/` 产生浮点结果，而 `[int]` 是「就近舍入（round-half-to-even）」而不是截断。实测在 50 MHz 下会把 **F4 算成 71593（RTL 为 71592）**、**A4 算成 56819（RTL 为 56818）**。现改为 `[int64]` 分子分母 + `[math]::Floor`，并在文档中写明「`+ f_dHz` 是加半个除数，其后必须是向零截断的整数除法」。复算后七个 `N` 与 RTL 完全一致：`95566 / 85121 / 75850 / 71592 / 63776 / 56818 / 50618`；因此第 2 节表格的理论频率与误差**无需修改**（它们本来就是按 RTL 的值算出来的）。
+
+**2. 滤波计数器容量公式漏了 `/1000`。** 原写法 `SYS_CLK_HZ * KEY_STABLE_MS < 2^W` 与 RTL 的 `STABLE_CYCLES = (SYS_CLK_HZ / 1000) * STABLE_MS` 不一致（ms 与 Hz 之间差一个千倍因子）。现统一为
+
+```
+(SYS_CLK_HZ / 1000) * KEY_STABLE_MS  <=  2^FP_FILTER_CNT_WIDTH
+```
+
+`src/finger_piano_cfg.vh` 与 `frequency_table.md` 已同步修正。核对结论：50 MHz / 10 ms → 500000 周期，19 位已足够（2^19 = 524288）；24 位为更高时钟与更长滤波时间留裕量；50 MHz、24 位下 `KEY_STABLE_MS` 上限约 335 ms（2^24 / 50000 = 335.54）。`key_filter.v` 的实际算法未改动。
+
+**3. 新增 `KEY_FILTER_ENABLE = 0` 的旁路最小验证。** `tb_finger_piano_top.v` 增加顶层参数 `TB_KEY_FILTER_ENABLE` 并由它驱动 DUT：`=1` 保持原有完整套件，`=0` 改为最小用例（复位状态 → 按一个键 → 8 个周期内 `note_debug` 正确 → 松键 8 个周期内恢复 0 → 音频恢复静音）。两种宏取值因此都有真实运行证据，而不是只靠代码审阅。
+
+**4. CDC 同步链增加 `(* ASYNC_REG = "TRUE" *)`**（评审建议项，已实测兼容）。`reset_sync.v` 的 `rst_meta`/`rst_sync_q`、`key_sync.v` 的 `meta`/`sync_out` 四个寄存器都带上该属性；XST 报告中出现四行 `Set user-defined property "ASYNC_REG = TRUE" for signal <...>`，且 **0 errors / 0 warnings**，说明属性生效而非被静默忽略。逻辑、端口、时序行为均未改变。
+
+**5. 状态更新**：仓库已由用户手动改为 **public**；第一阶段软件工程（RTL + 综合 + 仿真 + 文档）完成。
+
+**交付计数**：`projects/finger_piano/` 目录内 **14 个 tracked 文件**；加上 `doc/手指钢琴ISE工程实施计划.md`，**项目相关交付文件共 15 个**。
+
+#### 综合（第二轮，最终 run）
+
+- 构建编号：`20260914-151945-182649b0`，`xst` 退出码 0，工具流程 `COMPLETE`。
+- `synthesis.srp`：**0 errors / 0 warnings / 0 infos**、`No errors in compilation`；无 latch 推断、无多驱动告警。
+- 资源：231 个触发器（219 个来自 RTL，另有 7 个 `stable_q` 因扇出被复制 12 次）、20 个 I/O。产物 `artifacts/20260914-151945-182649b0/results/design.ngc`。
+- 本轮中间 run `20260914-151840-67d75cf6`（只给 3 个寄存器加属性、未含 `sync_out`）同样 0 errors / 0 warnings；两个 run 均保留。
+
+#### 仿真（第二轮，五组用例，输入与本次提交的源码一致）
+
+| 用例 | DUT 参数覆盖 | fuse 退出码 | 运行退出码 | 结果 |
+|---|---|---|---|---|
+| `tb_note_encoder` | — | 0 | 0 | PASS（checks=15, errors=0） |
+| `tb_tone_generator` | — | 0 | 0 | PASS（checks=11, errors=0） |
+| `tb_finger_piano_top` | 默认（filter=1, 按下为高） | 0 | 0 | PASS（checks=129, errors=0, sim_time=4527866 ns） |
+| `tb_finger_piano_top` | `TB_KEY_ACTIVE_HIGH=0` | 0 | 0 | PASS（checks=129, errors=0） |
+| `tb_finger_piano_top` | `TB_KEY_FILTER_ENABLE=0` | 0 | 0 | PASS（checks=10, errors=0, sim_time=2236 ns） |
+
+- **filter enabled（完整功能测试）**：窗口判据（999 周期仍静默 / 1008 周期已生效，7 个音逐一）、300 周期毛刺被拒、七音频率实测（最大误差 0.0387% < 1%）、小星星 14 音与 6 个重复音符的 `1→0→1` 释放，全部 PASS。
+- **filter disabled（旁路最小测试）**：用 `--generic_top "TB_KEY_FILTER_ENABLE=0"` 重新 fuse 后 PASS，日志为 `bypass note 1 valid within 8 cycles (cycle 122)`、`bypass note 1 released within 8 cycles (cycle 124)`，证明旁路路径只剩两级同步延迟、没有 10 ms 稳定延迟；复位态与松键后 `audio_out` 均保持 0。
+- 运行位置：远端 `C:\Users\PanGucheng\ise-builds\_sim\finger_piano\20260914-152007`；本机日志副本 `tools/.work/sim-finger-piano-20260914-152007/received/`（`tools/.work` 已被 `.gitignore` 排除）。
+
+#### implement 预期失败（第二轮复核）
+
+`check -Project finger_piano -Stage implement` 仍然按设计失败：`Implementation needs a UCF and constraintsReviewed=true after confirming clocks, pins and timing intent.`。`constraintsReviewed` 保持 `false`，UCF 未添加任何 `LOC`/`IOSTANDARD`/`TIMESPEC`，没有为了“测试 implement”而绕过该机制。
+
+### 第一轮：第一阶段实现（2026-09-14）
+
+**第一轮验证结果：**
 
 #### 综合（ISE 14.7 XST，远端 `fpga-vm` / PanGucheng）
 

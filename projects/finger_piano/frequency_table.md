@@ -16,7 +16,9 @@ f_out = SYS_CLK_HZ / (2 × N)                       （理论输出频率）
 localparam integer HP_C4 = (SYS_CLK_HZ * 10 + 2616) / (2 * 2616);
 ```
 
-即 `+ f_dHz` 实现就近取整（分母 `2 × f_dHz` 的一半就是 `f_dHz`）。
+即 `+ f_dHz` 实现就近取整：`f_dHz` 正好是分母 `2 × f_dHz` 的一半，所以这一步是「**先加半个除数**」。
+
+**关键细节**：加了半个除数之后，**必须做向零截断的整数除法**。Verilog 中两个正整数相除的结果就是截断（等价于 `floor`）；如果用带舍入的除法，结果会与 RTL 不符。实测：PowerShell 的 `[int]` 强制转换采用「就近舍入（round-half-to-even）」，用 `[int]((SYS_CLK_HZ*10 + f_dHz) / (2*f_dHz))` 会把 F4 算成 71593、A4 算成 56819，而 RTL 给的是 71592 和 56818。本文件第 4 节的脚本因此**显式使用 `[math]::Floor`**，以保证与 RTL 的截断语义严格等价。
 
 ### 为什么用 0.1 Hz 整数而不是实数
 
@@ -50,7 +52,7 @@ XST 对 Verilog `real` 常量在可综合表达式中的支持受限且容易告
 ## 4. 改了 SYS_CLK_HZ 之后如何重算本表
 
 1. 修改 `src/finger_piano_cfg.vh` 的 `` `SYS_CLK_HZ ``；
-2. 在仓库根运行下面这段 PowerShell（整数运算与 RTL 完全等价），把输出贴回第 2 节的表格：
+2. 在仓库根运行下面这段 PowerShell，把输出贴回第 2 节的表格。脚本用 `[int64]` 计算分子分母、用 `[math]::Floor` 显式向下取整，与 RTL 的正整数截断除法严格等价（不要改回 `[int](浮点除法)`，那会引入舍入差异）：
 
 ```powershell
 $sysClkHz = 50000000   # 改成实际晶振频率
@@ -61,16 +63,23 @@ $notes = @(
   @{ Name = '7 B4'; Hz = 493.88 }
 )
 $notes | ForEach-Object {
-  $dHz  = [int][math]::Round($_.Hz * 10)
-  $n    = [int](($sysClkHz * 10 + $dHz) / (2 * $dHz))   # 与 RTL 一致：整数除法（截断）
-  $fout = $sysClkHz / (2.0 * $n)
+  $dHz  = [int][math]::Round($_.Hz * 10)     # 0.1 Hz 整数，与 RTL 的频率表一致
+  $num  = [int64]$sysClkHz * 10 + $dHz       # 先加半个除数（f_dHz 就是半个除数）
+  $den  = [int64]2 * $dHz
+  # 与 Verilog 正整数除法等价：显式向零截断（此处各数均为正，floor == truncate）
+  $halfPeriod = [int][math]::Floor($num / [double]$den)
+  $fout = $sysClkHz / (2.0 * $halfPeriod)
   [pscustomobject]@{
-    音符 = $_.Name; dHz = $dHz; N = $n
+    音符       = $_.Name
+    dHz        = $dHz
+    N          = $halfPeriod
     理论输出Hz = [math]::Round($fout, 4)
     误差pct    = [math]::Round((($fout - $_.Hz) / $_.Hz) * 100, 4)
   }
 } | Format-Table -AutoSize
 ```
+
+**自检**：在 50 MHz 下运行后，`N` 一列必须依次为 `95566 85121 75850 71592 63776 56818 50618`，与 `tone_generator.v` 内联的 `localparam` 完全一致。若不一致，说明脚本的取整方式与 RTL 不同，应先修脚本，不要改表格去迁就脚本。
 
 3. 同时更新 UCF 中 `TIMESPEC PERIOD` 的注释值（`1000 / SYS_CLK_MHz` 纳秒）。
 
@@ -79,4 +88,10 @@ $notes | ForEach-Object {
 - **配置上限约 214 MHz 来自 Verilog/XST 的 32 位有符号整数常量表达式 `SYS_CLK_HZ * 10` 的溢出边界**（`2^31 − 1 ≈ 2.147e9`），**不是** `FP_TONE_CNT_WIDTH = 24` 的计数器容量限制。50 MHz 默认配置完全处于安全范围；本项目实际使用的 XC3S50AN 最小系统板不会接近该上限。这是代码常量表达式的边界，不是器件时钟性能声明。
 - **半周期计数器位宽** `FP_TONE_CNT_WIDTH = 24` 支持最大计数值 `2^24 − 1 = 16 777 215`：50 MHz 下最高音符 B4 只需 50618（16 位），即使 200 MHz 也只需约 202 000（18 位），因此 24 位有充足裕量。若系统时钟异常高导致 `N ≥ 2^24`，计数值会被截断——请同步增大该宏。
 - **最小系统时钟**：当 `SYS_CLK_HZ < 2 × f_nom` 时半周期计数会算成 0 或 1，RTL 已把 `half_target` 钳位到最小 1（此时输出为 `clk/2`，已无法表达目标音高，仅作为不产生非法状态的保护）。正常使用要求 `SYS_CLK_HZ` 远大于 2 × 493.88 Hz。
-- **滤波计数器位宽** `FP_FILTER_CNT_WIDTH = 24`：默认 50 MHz、10 ms 需要计数 500 000 个周期，19 位已足够；项目采用 24 位为更高系统时钟和更长滤波时间预留裕量。约束条件为 `SYS_CLK_HZ × KEY_STABLE_MS < 2^24`（50 MHz 下约 335 ms 上限）。
+- **滤波计数器位宽** `FP_FILTER_CNT_WIDTH = 24`：RTL 中的稳定周期数是 `STABLE_CYCLES = (SYS_CLK_HZ / 1000) * STABLE_MS`（**先把 Hz 取整到 kHz，再乘 ms**）。默认 50 MHz、10 ms → `(50000000/1000)*10 = 500000` 个周期，19 位已足够（`2^19 = 524288`）；项目采用 24 位，为更高系统时钟和更长滤波时间预留裕量。容量条件为
+
+  ```
+  (SYS_CLK_HZ / 1000) * KEY_STABLE_MS  <=  2^FP_FILTER_CNT_WIDTH
+  ```
+
+  注意**不能漏掉 `/1000`**：`ms` 与 `Hz` 之间差一个千倍因子，写成 `SYS_CLK_HZ * KEY_STABLE_MS` 会把容量要求放大 1000 倍。50 MHz、24 位下 `KEY_STABLE_MS` 的上限约 **335 ms**（`2^24 / (50000000/1000) = 16777216 / 50000 = 335.54 ms`）。RTL 比较的是 `cnt >= STABLE_CYCLES - 1`，因此 `STABLE_CYCLES <= 2^W` 即为恰好充分条件。

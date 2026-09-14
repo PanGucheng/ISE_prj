@@ -13,8 +13,14 @@
 //   5) input polarity: selected by parameter TB_KEY_ACTIVE_HIGH. Run the same
 //      testbench a second time with fuse --generic_top "TB_KEY_ACTIVE_HIGH=0"
 //      to prove active-low inputs behave identically.
+//   6) filter mode: selected by parameter TB_KEY_FILTER_ENABLE. With
+//      TB_KEY_FILTER_ENABLE = 0 the digital filter is a pure bypass, so this
+//      testbench runs a minimal check instead of the full suite (reset state,
+//      one key press, one release, each within SYNC_MARGIN cycles):
+//        fuse ... --generic_top "TB_KEY_FILTER_ENABLE=0"
 //
-// Window based filter verdict (never assumes "valid exactly at cycle N"):
+// Window based filter verdict (never assumes "valid exactly at cycle N";
+// applies to the KEY_FILTER_ENABLE = 1 mode only):
 //   key_in passes a two stage synchronizer and then the digital filter, so the
 //   reaction time is deterministic but delayed:
 //     - at STABLE_CYCLES - 1 cycles after the press: must still be inactive;
@@ -34,9 +40,10 @@
 
 module tb_finger_piano_top;
 
-    parameter integer TB_SYS_CLK_HZ      = 1000000;   // simulation system clock
-    parameter integer TB_STABLE_MS       = 1;         // simulation stable time (ms)
-    parameter integer TB_KEY_ACTIVE_HIGH = 1;         // 1 = pressed is high
+    parameter integer TB_SYS_CLK_HZ       = 1000000;   // simulation system clock
+    parameter integer TB_STABLE_MS        = 1;         // simulation stable time (ms)
+    parameter integer TB_KEY_ACTIVE_HIGH  = 1;         // 1 = pressed is high
+    parameter integer TB_KEY_FILTER_ENABLE = 1;        // 1 = full suite; 0 = bypass minimal test
 
     localparam integer STABLE_CYCLES = (TB_SYS_CLK_HZ / 1000) * TB_STABLE_MS;  // 1000
     localparam integer SYNC_MARGIN   = 8;      // 2 sync FF + filter FF + scheduling
@@ -69,7 +76,7 @@ module tb_finger_piano_top;
     finger_piano_top #(
         .SYS_CLK_HZ        (TB_SYS_CLK_HZ),
         .KEY_STABLE_MS     (TB_STABLE_MS),
-        .KEY_FILTER_ENABLE (1),
+        .KEY_FILTER_ENABLE (TB_KEY_FILTER_ENABLE),
         .KEY_ACTIVE_HIGH   (TB_KEY_ACTIVE_HIGH)
     ) u_dut (
         .clk        (clk),
@@ -432,6 +439,59 @@ module tb_finger_piano_top;
     endtask
 
     //-------------------------------------------------------------------------
+    // Minimal bypass test for KEY_FILTER_ENABLE = 0
+    // With the filter disabled key_filter is a pure "assign key_stable =
+    // key_sync_in", so note_debug must follow the key after the two stage
+    // synchronizer only (a few cycles) - never after the 10 ms stable delay.
+    // Only the essentials are checked here: reset state, one press, one release.
+    // The full window / glitch / melody suite does not apply in this mode.
+    //-------------------------------------------------------------------------
+    task test_filter_bypass;
+        integer ok;
+        begin
+            $display("-- filter bypass test (KEY_FILTER_ENABLE=0, no stable delay expected) --");
+
+            #1;
+            check_note_code(3'd0, "bypass reset note_debug");
+            check_key_debug(7'b0000000, "bypass reset key_debug");
+            check_silence(100, "bypass idle audio_out");
+
+            // Press key 1 (C4): must be valid within SYNC_MARGIN cycles
+            press_key(0);
+            wait_note(3'd1, SYNC_MARGIN, ok);
+            checks = checks + 1;
+            if (!ok) begin
+                errors = errors + 1;
+                $display("FAIL: bypass note 1 not valid within %0d cycles (note_debug=%0d)",
+                         SYNC_MARGIN, note_debug);
+            end else begin
+                $display("  ok: bypass note 1 valid within %0d cycles (cycle %0d)",
+                         SYNC_MARGIN, cycle_count);
+            end
+            #1;
+            check_note_code(3'd1, "bypass note_debug while pressed");
+            check_key_debug(7'b0000001, "bypass key_debug while pressed");
+
+            // Release: must return to 0 within SYNC_MARGIN cycles as well
+            release_key(0);
+            wait_note(3'd0, SYNC_MARGIN, ok);
+            checks = checks + 1;
+            if (!ok) begin
+                errors = errors + 1;
+                $display("FAIL: bypass note 1 did not release within %0d cycles (note_debug=%0d)",
+                         SYNC_MARGIN, note_debug);
+            end else begin
+                $display("  ok: bypass note 1 released within %0d cycles (cycle %0d)",
+                         SYNC_MARGIN, cycle_count);
+            end
+            #1;
+            check_note_code(3'd0, "bypass note_debug after release");
+            check_key_debug(7'b0000000, "bypass key_debug after release");
+            check_silence(100, "bypass audio_out after release");
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
     // Main flow
     //-------------------------------------------------------------------------
     initial begin
@@ -447,8 +507,8 @@ module tb_finger_piano_top;
         melody[9]  = 3'd3;  melody[10] = 3'd3;  melody[11] = 3'd2;
         melody[12] = 3'd2;  melody[13] = 3'd1;
 
-        $display("TB_FINGER_PIANO_TOP: start (SYS_CLK_HZ=%0d, STABLE_MS=%0d, STABLE_CYCLES=%0d, SYNC_MARGIN=%0d, KEY_ACTIVE_HIGH=%0d)",
-                 TB_SYS_CLK_HZ, TB_STABLE_MS, STABLE_CYCLES, SYNC_MARGIN, TB_KEY_ACTIVE_HIGH);
+        $display("TB_FINGER_PIANO_TOP: start (SYS_CLK_HZ=%0d, STABLE_MS=%0d, STABLE_CYCLES=%0d, SYNC_MARGIN=%0d, KEY_FILTER_ENABLE=%0d, KEY_ACTIVE_HIGH=%0d)",
+                 TB_SYS_CLK_HZ, TB_STABLE_MS, STABLE_CYCLES, SYNC_MARGIN, TB_KEY_FILTER_ENABLE, TB_KEY_ACTIVE_HIGH);
 
         // Reset and idle state
         repeat (10) @(posedge clk);
@@ -456,41 +516,48 @@ module tb_finger_piano_top;
         repeat (10) @(posedge clk);
         #1;
 
-        $display("-- reset, no key --");
-        check_note_code(3'd0, "reset note_debug");
-        check_key_debug(7'b0000000, "reset key_debug");
-        check_silence(20000, "idle after reset");
+        if (TB_KEY_FILTER_ENABLE == 0) begin
+            // Filter disabled: key_filter is a pure bypass, so the window / glitch
+            // / melody suite does not apply. Run the minimal bypass test instead.
+            test_filter_bypass;
+        end else begin
+            // Filter enabled: full functional suite
+            $display("-- reset, no key --");
+            check_note_code(3'd0, "reset note_debug");
+            check_key_debug(7'b0000000, "reset key_debug");
+            check_silence(20000, "idle after reset");
 
-        // Single notes 1..7
-        test_single_note(0);
-        test_single_note(1);
-        test_single_note(2);
-        test_single_note(3);
-        test_single_note(4);
-        test_single_note(5);
-        test_single_note(6);
+            // Single notes 1..7
+            test_single_note(0);
+            test_single_note(1);
+            test_single_note(2);
+            test_single_note(3);
+            test_single_note(4);
+            test_single_note(5);
+            test_single_note(6);
 
-        // Glitch rejection
-        test_glitch;
+            // Glitch rejection
+            test_glitch;
 
-        // Twinkle Twinkle
-        play_melody;
+            // Twinkle Twinkle
+            play_melody;
 
-        // Wrap up
-        release_all();
-        wait_cycles(STABLE_CYCLES + SYNC_MARGIN);
-        #1;
-        $display("-- wrap up --");
-        check_note_code(3'd0, "final note_debug");
-        check_key_debug(7'b0000000, "final key_debug");
-        check_silence(5000, "final audio_out");
+            // Wrap up
+            release_all();
+            wait_cycles(STABLE_CYCLES + SYNC_MARGIN);
+            #1;
+            $display("-- wrap up --");
+            check_note_code(3'd0, "final note_debug");
+            check_key_debug(7'b0000000, "final key_debug");
+            check_silence(5000, "final audio_out");
+        end
 
         if (errors == 0) begin
-            $display("TB_FINGER_PIANO_TOP: PASS (checks=%0d, errors=0, polarity=%0d, sim_time=%0t)",
-                     checks, TB_KEY_ACTIVE_HIGH, $time);
+            $display("TB_FINGER_PIANO_TOP: PASS (checks=%0d, errors=0, filter=%0d, polarity=%0d, sim_time=%0t)",
+                     checks, TB_KEY_FILTER_ENABLE, TB_KEY_ACTIVE_HIGH, $time);
         end else begin
-            $display("TB_FINGER_PIANO_TOP: FAIL (checks=%0d, errors=%0d, polarity=%0d, sim_time=%0t)",
-                     checks, errors, TB_KEY_ACTIVE_HIGH, $time);
+            $display("TB_FINGER_PIANO_TOP: FAIL (checks=%0d, errors=%0d, filter=%0d, polarity=%0d, sim_time=%0t)",
+                     checks, errors, TB_KEY_FILTER_ENABLE, TB_KEY_ACTIVE_HIGH, $time);
         end
 
         $finish;
