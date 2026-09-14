@@ -627,6 +627,38 @@ $noHeaderBit = Join-Path $root 'noheader.bit'
 [IO.File]::WriteAllBytes($noHeaderBit, [byte[]](1..64))
 Assert ((Get-BitFileFacts $noHeaderBit).HeaderParsed -eq $false) 'an absent bitstream header must be reported as not parsed'
 
+# --- real ISE 14.7 bitgen header shape --------------------------------------
+# Byte-for-byte prefix copied from a real `design.bit` produced by bitgen
+# P.20131013: <letter><len_hi><len_lo><data..0x00>, a=design b=part c=date d=time e=bitcount
+function New-BitgenHeader {
+    param([string]$Design, [string]$Part, [string]$Date = '2026/09/14', [string]$Time = '20:46:12')
+    $ms = New-Object System.IO.MemoryStream
+    $ms.Write([byte[]](0x00, 0x09, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0, 0x0f, 0xf0, 0x00, 0x00, 0x01), 0, 13)
+    foreach ($pair in @(@('a', $Design), @('b', $Part), @('c', $Date), @('d', $Time))) {
+        $data = [Text.Encoding]::ASCII.GetBytes($pair[1] + [char]0)
+        $ms.WriteByte([byte][char]$pair[0])
+        $ms.WriteByte([byte]([int]($data.Length / 256)))
+        $ms.WriteByte([byte]([int]($data.Length % 256)))
+        $ms.Write($data, 0, $data.Length)
+    }
+    $ms.Write([byte[]](0x65, 0x00, 0x00, 0xd5, 0x88), 0, 5)
+    $ms.Write([byte[]](0xff) * 32, 0, 32)
+    return $ms.ToArray()
+}
+$bitgenPath = Join-Path $root 'bitgen-shape.bit'
+[IO.File]::WriteAllBytes($bitgenPath, (New-BitgenHeader -Design 'routed.ncd' -Part '3s50antqg144'))
+$bgFacts = Get-BitFileFacts $bitgenPath
+Assert ($bgFacts.HeaderParsed -eq $true) 'real bitgen header was not parsed'
+Assert ($bgFacts.HeaderFormat -eq 'BITGEN') "bitgen header format mis-detected: $($bgFacts.HeaderFormat)"
+Assert ($bgFacts.DesignName -eq 'routed.ncd') "bitgen design name not parsed: $($bgFacts.DesignName)"
+Assert ($bgFacts.PartRaw -eq '3s50antqg144') "bitgen part field not parsed: $($bgFacts.PartRaw)"
+Assert ($bgFacts.Part -eq 'xc3s50antqg144') "bitgen part not normalised: $($bgFacts.Part)"
+Assert ($null -eq $bgFacts.Speed) 'the bitgen header has no speed grade; it must not be invented'
+Assert ((Test-BitPartMatchesDevice -BitPartRaw $bgFacts.PartRaw -ExpectedPart 'xc3s50an' -ExpectedPackage 'tqg144') -eq $true) 'bitgen part must match the project device'
+Assert ((Test-BitPartMatchesDevice -BitPartRaw '3s200avq100' -ExpectedPart 'xc3s50an' -ExpectedPackage 'tqg144') -eq $false) 'a bitstream for another device must not match'
+Assert ((Test-BitPartMatchesDevice -BitPartRaw $null -ExpectedPart 'xc3s50an' -ExpectedPackage 'tqg144') -eq $null) 'an absent part field must be UNDETERMINED, not a match'
+Assert ((Test-BitPartMatchesDevice -BitPartRaw '3s50antq144' -ExpectedPart 'xc3s50an' -ExpectedPackage 'tqg144') -eq $false) 'a different package string must not be treated as a match (no invented package-equivalence rule)'
+
 # --- generated batch scripts (commands verified against the real install) ---
 $jtagScript = New-ImpactProgramScript -Mode Jtag -Position 1 -RemoteBitFile 'C:\r\work\d.bit' -CablePort 'auto'
 Assert ($jtagScript -match '(?m)^setMode -bs\r?$') 'JTAG script must start with setMode'

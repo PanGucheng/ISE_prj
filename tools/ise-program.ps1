@@ -247,16 +247,67 @@ function Get-ProbeLogFacts {
     }
 }
 
+# iSE bitgen writes a compact binary header before the payload:
+#   <letter><len_hi><len_lo><data bytes ...>0x00
+# with a=design name, b=part, c=date, d=time, e=bit count (the 'e' length field
+# is 4 bytes, so parsing stops after 'd'). Example from a real ISE 14.7 run:
+#   'a' 00 0b "routed.ncd\0" 'b' 00 0d "3s50antqg144\0" 'c' ... 'd' ...
+# Returns a hashtable keyed by the field letter; missing fields are simply absent.
+function Get-BitgenHeaderFields {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    $fields = @{}
+    $expected = @([byte][char]'a', [byte][char]'b', [byte][char]'c', [byte][char]'d')
+    $idx = 0
+    $limit = [Math]::Min(512, $Bytes.Length)
+    $i = 0
+    while ($i -lt ($limit - 3) -and $idx -lt $expected.Count) {
+        if ($Bytes[$i] -eq $expected[$idx]) {
+            $len = ([int]$Bytes[$i + 1] * 256) + [int]$Bytes[$i + 2]
+            if ($len -ge 1 -and $len -le 128 -and ($i + 3 + $len) -le $Bytes.Length) {
+                $text = [Text.Encoding]::ASCII.GetString($Bytes, $i + 3, $len)
+                $text = $text.TrimEnd([char]0).Trim()
+                if ($text) { $fields[[string][char]$expected[$idx]] = $text }
+                $i = $i + 3 + $len
+                $idx++
+                continue
+            }
+        }
+        $i++
+    }
+    return $fields
+}
+
+# The bitgen 'b' field is e.g. "3s50antqg144" for xc3s50an-4-tqg144: no 'xc'
+# prefix, no speed grade. Compare on the part+package text rather than guessing
+# where the package starts.
+function Test-BitPartMatchesDevice {
+    param(
+        [AllowNull()][string]$BitPartRaw,
+        [Parameter(Mandatory)][string]$ExpectedPart,
+        [Parameter(Mandatory)][string]$ExpectedPackage
+    )
+    if ([string]::IsNullOrWhiteSpace($BitPartRaw)) { return $null }
+    $raw = ($BitPartRaw.ToLowerInvariant() -replace '[^a-z0-9]', '')
+    $want = (($ExpectedPart + $ExpectedPackage).ToLowerInvariant() -replace '[^a-z0-9]', '')
+    if ($raw -eq $want) { return $true }
+    if (('xc' + $raw) -eq $want) { return $true }
+    if (($raw -replace '^xc', '') -eq ($want -replace '^xc', '')) { return $true }
+    return $false
+}
+
 function Get-BitFileFacts {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject]@{ Path = $Path; Exists = $false; Size = 0; Sha256 = $null; Part = $null; Package = $null; Speed = $null; HeaderParsed = $false }
+        return [pscustomobject]@{ Path = $Path; Exists = $false; Size = 0; Sha256 = $null; Part = $null; Package = $null; Speed = $null; DesignName = $null; PartRaw = $null; HeaderFormat = 'NONE'; HeaderParsed = $false }
     }
     $item = Get-Item -LiteralPath $Path
     $sha = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
-    # The .bit header is plain text before the binary payload. Parse it tolerantly;
-    # if the fields are absent, say so instead of inventing a rule.
+    # Two header shapes exist in the wild; both are parsed tolerantly. When a
+    # field is absent we say so instead of inventing a device name.
+    #   1. text header  : "Target Device : xc3s50an" (iMPACT/promgen style)
+    #   2. bitgen header: see Get-BitgenHeaderFields
     $part = $null; $package = $null; $speed = $null
+    $designName = $null; $partRaw = $null; $format = 'NONE'
     try {
         $bytes = [IO.File]::ReadAllBytes($Path)
         $headLen = [Math]::Min(4096, $bytes.Length)
@@ -264,10 +315,26 @@ function Get-BitFileFacts {
         if ($head -match '(?im)^\s*Target Device\s*:\s*(\S+)') { $part = $Matches[1].Trim() }
         if ($head -match '(?im)^\s*Target Package\s*:\s*(\S+)') { $package = $Matches[1].Trim() }
         if ($head -match '(?im)^\s*Target Speed\s*:\s*(\S+)') { $speed = $Matches[1].Trim() }
+        if ($part -or $package -or $speed) { $format = 'TEXT' }
+        if ($format -eq 'NONE') {
+            $fields = Get-BitgenHeaderFields -Bytes $bytes
+            if ($fields.ContainsKey('b') -or $fields.ContainsKey('a')) {
+                $format = 'BITGEN'
+                if ($fields.ContainsKey('a')) { $designName = $fields['a'] }
+                if ($fields.ContainsKey('b')) {
+                    $partRaw = $fields['b']
+                    # no 'xc' prefix in the bitgen header; the speed grade is not
+                    # recorded there at all, so Part stays "xc<field>" and Speed
+                    # stays null rather than being guessed.
+                    $part = $(if ($partRaw -match '^\d') { 'xc' + $partRaw } else { $partRaw })
+                }
+            }
+        }
     } catch { }
     return [pscustomobject]@{
         Path = $Path; Exists = $true; Size = $item.Length; Sha256 = $sha
         Part = $part; Package = $package; Speed = $speed
+        DesignName = $designName; PartRaw = $partRaw; HeaderFormat = $format
         HeaderParsed = [bool]($part -or $package -or $speed)
     }
 }
@@ -688,8 +755,9 @@ function Invoke-Program {
 
     # bitstream header cross check (only when the header could be parsed)
     $bitMatch = $null
-    if ($bit.HeaderParsed -and $bit.Part) {
-        $bitMatch = ($bit.Part.ToLowerInvariant() -eq $expected.Part)
+    if ($bit.HeaderParsed) {
+        $bitMatch = Test-BitPartMatchesDevice -BitPartRaw $bit.PartRaw -ExpectedPart $expected.Part -ExpectedPackage $expected.Package
+        if ($null -eq $bitMatch -and $bit.Part) { $bitMatch = Test-BitPartMatchesDevice -BitPartRaw $bit.Part -ExpectedPart $expected.Part -ExpectedPackage $expected.Package }
     }
 
     $preflightOk = ($probeFacts.CableStatus -eq 'PASS') -and ($chainStatus -eq 'PASS') -and ($deviceMatched -eq $true)
@@ -716,7 +784,13 @@ function Invoke-Program {
     }
     $preview.Add(('expected device  : ' + $expected.DeviceString + '  (IDCODE ' + $(if ($bsdlIdcode) { $bsdlIdcode.IdcodeHex } else { 'NOT_AVAILABLE' }) + ')'))
     $preview.Add(('device match     : ' + $statuses.deviceMatched))
-    if ($bit.HeaderParsed) { $preview.Add(('bitstream target : ' + $(if ($bit.Part) { $bit.Part } else { '?' }) + ' / ' + $(if ($bit.Package) { $bit.Package } else { '?' }) + ' / ' + $(if ($bit.Speed) { $bit.Speed } else { '?' }) + '   match: ' + $statuses.deviceMatched)) }
+    if ($bit.HeaderParsed) {
+        $targetText = $(if ($bit.Part) { $bit.Part } else { '?' }) +
+                      ' (header: ' + $bit.HeaderFormat + '; package ' + $(if ($bit.Package) { $bit.Package } else { 'not in header' }) +
+                      '; speed ' + $(if ($bit.Speed) { $bit.Speed } else { 'not in header' }) + ')' +
+                      '   match: ' + $(if ($bitMatch -eq $true) { 'YES' } elseif ($bitMatch -eq $false) { 'NO - bitstream targets another device' } else { 'UNDETERMINED' })
+        $preview.Add('bitstream target : ' + $targetText)
+    }
     else { $preview.Add('bitstream target : NOT_PARSED (relying on iMPACT compatibility checking)') }
     $preview.Add(('bitstream        : ' + $BitFile + '  (' + $bit.Size + ' bytes, SHA-256 ' + $bit.Sha256.Substring(0, 16) + '...)'))
     $preview.Add(('mode             : ' + $Mode + ' - ' + $volatileText))
