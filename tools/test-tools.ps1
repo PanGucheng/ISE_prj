@@ -125,9 +125,11 @@ INFO:iMPACT - Digilent Plugin: opening device: "JtagHs2", SN:210241672559
 INFO:iMPACT - Digilent Plugin: Product Name: Digilent JTAG-HS2
 INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559
 INFO:iMPACT - Digilent Plugin: JTAG Clock Frequency: 10000000 Hz
-Identifying chain contents...done.
-'1': IDCODE = 0x02610093
-'1': : Manufacturer's ID = Xilinx xc3s50an, Version : 4
+Identifying chain contents...'0': : Manufacturer's ID = Xilinx xc3s50an, Version : 0
+INFO:iMPACT:501 - '1': Added Device xc3s50an successfully.
+'1': IDCODE is '00000010011000010000000010010011'
+'1': IDCODE is '02610093' (in hex).
+'1': : Manufacturer's ID = Xilinx xc3s50an, Version : 0
 Elapsed time =      1 sec.
 '@
         }
@@ -642,7 +644,9 @@ $probe = Invoke-Probe -ProjectName 'fixture'
 Assert ($probe.Facts.CableStatus -eq 'PASS') 'probe did not detect the mock cable'
 Assert ($probe.Facts.ChainStatus -eq 'PASS') 'probe did not detect the mock chain'
 Assert ($probe.Facts.DeviceCount -eq 1) 'probe did not parse exactly one device'
+Assert ($probe.Facts.Devices[0].Idcode -eq '0x02610093') "IDCODE not parsed from the real transcript shape, got $($probe.Facts.Devices[0].Idcode)"
 Assert ($probe.Matched -eq $true) 'probe did not match xc3s50an'
+Assert ((Get-TextSafe "$($probe.RunDir)/generated/probe.cmd") -match 'readIdcode -p 1') 'probe script must read the IDCODE'
 Assert ((Get-TextSafe "$($probe.RunDir)/summary.txt") -match 'Match\s+YES') 'probe summary missing the YES match'
 Write-Host 'PASS: probe reports cable, chain and a matching XC3S50AN without writing anything.'
 

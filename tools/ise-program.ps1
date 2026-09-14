@@ -165,7 +165,28 @@ function Get-ProbeLogFacts {
     # taken from lines that actually describe a device, so paths and headers do not
     # invent phantom chain entries.
     $devices = New-Object System.Collections.Generic.List[object]
-    $idcodes = @([regex]::Matches($text, '(?i)IDCODE\s*[=:]\s*(0x[0-9A-Fa-f]{8})') | ForEach-Object { '0x' + $_.Groups[1].Value.Substring(2).ToUpperInvariant() })
+
+    # IDCODE shapes produced by this installation:
+    #   '1': IDCODE is '02610093' (in hex).                    <- readIdcode
+    #   '1': IDCODE is '00000010011000010000000010010011'      <- readIdcode (binary)
+    #   '1': IDCODE = 0x02610093
+    $idcodeByPos = @{}
+    foreach ($m in [regex]::Matches($text, "(?im)^\s*'?(?<pos>\d+)'?\s*:.*?IDCODE\s*(?:is|=|:)\s*'?(?<val>[01]{32}|[0-9A-Fa-f]{8})(?='|\b)")) {
+        $pos = [int]$m.Groups['pos'].Value
+        $val = $m.Groups['val'].Value
+        if ($val.Length -eq 32) { $val = ([Convert]::ToUInt32($val, 2)).ToString('X8') }
+        $idcodeByPos[$pos] = '0x' + $val.ToUpperInvariant()
+    }
+    if ($idcodeByPos.ContainsKey(0) -and -not $idcodeByPos.ContainsKey(1)) {
+        # iMPACT sometimes tags the first device as '0'; normalise to 1-based.
+        $shifted = @{}
+        foreach ($k in $idcodeByPos.Keys) { $shifted[$k + 1] = $idcodeByPos[$k] }
+        $idcodeByPos = $shifted
+    }
+    $idcodes = @($idcodeByPos.Keys | Sort-Object | ForEach-Object { $idcodeByPos[$_] })
+    if ($idcodes.Count -eq 0) {
+        $idcodes = @([regex]::Matches($text, '(?i)IDCODE\s*[=:]\s*(0x[0-9A-Fa-f]{8})') | ForEach-Object { '0x' + $_.Groups[1].Value.Substring(2).ToUpperInvariant() })
+    }
     $deviceLines = @([regex]::Matches($text, '(?im)^.*(IDCODE|Manufacturer|Device\s*(ID|#)|^\s*''?\d+''?\s*:).*$') | ForEach-Object { $_.Value })
     $names = @($deviceLines | ForEach-Object {
         $m = [regex]::Match($_, '(?i)\b(xc[0-9][a-z0-9]*[a-z])\b')
@@ -188,6 +209,7 @@ function Get-ProbeLogFacts {
         $existing = $devices | Where-Object { $_.Position -eq $pos } | Select-Object -First 1
         $idcode = $null
         if ($rest -match '(?i)(0x[0-9A-Fa-f]{8})') { $idcode = '0x' + $Matches[1].Substring(2).ToUpperInvariant() }
+        elseif ($idcodeByPos.ContainsKey($pos)) { $idcode = $idcodeByPos[$pos] }
         $name = $null
         if ($rest -match '(?i)\b(xc[0-9][a-z0-9]*[a-z])\b') { $name = $Matches[1].ToLowerInvariant() }
         if ($existing) {
@@ -282,6 +304,10 @@ function New-ImpactProbeScript {
         'setMode -bs'
         "setCable -p $CablePort"
         'identify'
+        # In this ISE 14.7 build `identify` prints the device name but not the
+        # 32 bit IDCODE; `readIdcode -p 1` adds
+        #   '1': IDCODE is '02610093' (in hex).
+        'readIdcode -p 1'
         'quit'
     ) -join "`r`n"
 }
@@ -494,7 +520,12 @@ function Invoke-Probe {
         $parsedIdcodes = @($facts.Devices | ForEach-Object { $_.Idcode } | Where-Object { $_ })
         if ($parsedNames -contains $expected.Part) {
             $matched = $true
-            $matchDetail = "device name matched $($expected.Part)"
+            $idcodeAgrees = ($bsdlIdcode -and ($parsedIdcodes -contains $bsdlIdcode.IdcodeHex))
+            $idcodeText = ''
+            if ($idcodeAgrees) { $idcodeText = "; IDCODE $($bsdlIdcode.IdcodeHex) matches the BSDL expectation" }
+            elseif ($parsedIdcodes.Count -gt 0 -and $bsdlIdcode) { $idcodeText = "; IDCODE $(($parsedIdcodes -join ', ')) does not match the BSDL expectation $($bsdlIdcode.IdcodeHex)" }
+            elseif ($parsedIdcodes.Count -gt 0) { $idcodeText = "; IDCODE $(($parsedIdcodes -join ', ')) (no BSDL expectation available)" }
+            $matchDetail = "device name matched $($expected.Part)$idcodeText"
         } elseif ($bsdlIdcode -and ($parsedIdcodes -contains $bsdlIdcode.IdcodeHex)) {
             $matched = $true
             $matchDetail = "IDCODE matched $($bsdlIdcode.IdcodeHex)"

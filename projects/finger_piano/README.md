@@ -275,7 +275,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 - 综合：`20260914-164037-9a8f4f9d`（verify 内）与 `20260914-163756-0fc737e0`（单独 build）→ 0 errors / 0 warnings / 0 latches，231 个触发器、20 个 I/O，`design.ngc` 已生成。
 - 仿真全部 PASS：`note_encoder`、`tone_generator`、**`tone_generator_2m`**（`sim-20260914-164029-dfcb69a7`，实测半周期与频率表逐位一致）、`top_default`、`top_active_low`、`top_filter_bypass`。
 - `verify` → **Overall PASS**（`verify-20260914-164037-b82da68b`，Stage `PRE_BOARD`）：静态检查 PASS、综合 0 errors/0 warnings、warnings 策略 blocking、implement 门禁 EXPECTED BLOCK = PASS。
-- 烧录相关：`probe` 实测三次——16:19 下载线可见（Digilent JTAG-HS2）但 `identify` 报链未识别；16:27 / 16:28 通过工具再测时下载线已从 VM 消失（`no JTAG device was found`）→ 工具如实报 `CABLE_NOT_FOUND` + `JTAG chain NOT_RUN` + `Result FAIL`，未改 VM 配置、未自动 attach USB。**本轮没有执行任何 program 写入。**
+- 烧录相关（`probe` 全程只读）：
+  - 16:19 下载线在 VM 内可见（Digilent JTAG-HS2, SN 210241672559），但 `identify` 报链未识别；
+  - 16:27 / 16:28 下载线从 VM 消失（`no JTAG device was found`）→ 工具如实报 `CABLE_NOT_FOUND` + `JTAG chain NOT_RUN` + `Result FAIL`；
+  - 板卡供电处理后（20:26 / 20:29）**`probe` PASS**：`Cable PASS`、`JTAG chain PASS`、Position 1 = **xc3s50an**、**IDCODE `0x02610093`**（与安装自带 `xc3s50an_tq144_1532.bsd` 的期望值完全一致）、`Match YES`、`Result PASS`（run `probe-20260914-202618-d161523e` 与 `probe-20260914-202941-bbbebd63`）；
+  - 为此给工具补了 `readIdcode -p 1`：本 ISE 版本的 `identify` 只打印器件名，IDCODE 由该命令以 `'1': IDCODE is '02610093' (in hex)` 形式给出；
+  - 已知环境问题：fpga-vm 的 USB 透传不稳定，连续运行时常报 `no JTAG device was found`，重试即可；与工具、板卡无关；
+  - **本轮没有执行任何 program 写入**（`constraintsReviewed` 仍为 `false`，且工程尚无 bitstream）。
 
 ### 第四轮：report 缺文件判定收紧 + 综合 warning 策略（2026-09-14）
 

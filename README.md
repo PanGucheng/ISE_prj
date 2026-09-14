@@ -252,6 +252,9 @@ Result          PASS | FAIL
 - 下载线不可见时输出 `CABLE_NOT_FOUND` 与 `USB/JTAG cable is not visible inside fpga-vm`，**不修改 VM 配置、不自动 USB attach**，只报告。
 - 只有「下载线 PASS + 链 PASS + 器件匹配」才 PASS；解析不出器件时是 `UNDETERMINED`/`FAIL`，**绝不伪造成 PASS**。
 - probe 会下载对应 BSDL 到 `artifacts/probe-*/inputs/fpga.bsd` 作为期望 IDCODE 的依据与留档。
+- 本 ISE 版本的 `identify` 只打印器件名、**不打印 32 位 IDCODE**；工具因此额外执行 `readIdcode -p 1`，其输出形如 `'1': IDCODE is '02610093' (in hex)`（工具同时能解析十六进制与 32 位二进制两种写法，并把 IDCODE 归到对应 position）。
+- **实测（2026-09-14 20:26，板卡供电后）**：`probe` **PASS** —— `Cable PASS`、`JTAG chain PASS`、Position 1 = `xc3s50an`、`IDCODE 0x02610093`（与本安装 `spartan3a/data/xc3s50an_tq144_1532.bsd` 的期望值完全一致）、`Match YES`。
+- **已知环境问题**：fpga-vm 的 USB 透传不稳定，连续多次运行常出现 `Digilent Plugin: no JTAG device was found`（实测约一半概率），稍等或重试即可；这是 VM/USB 侧问题，与工具和板卡无关。
 
 ### program 的安全与状态模型
 
