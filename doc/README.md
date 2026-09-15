@@ -583,7 +583,60 @@ user design functional = PASS
 
 当前基础设施计划完成后，仍有若干必须由实物信息解除的 blocker。
 
-### 12.1 三个 LM393 GPIO
+### 12.1 可用引脚池与 IO 重分配（用户 2026-09-15 确认）
+
+**用户确认下列 38 个引脚可用**（照录，未做推断）：
+
+```
+P3   P4   P5   P6   P7   P10  P12  P13  P15  P19
+P20  P21  P25  P27  P28  P29  P30  P31  P32
+P76  P77  P78  P79  P90  P91  P92  P93
+P102 P103 P104 P105 P110 P111 P113 P114
+P124 P125 P126
+```
+
+当前 UCF 已占用（legacy baseline，**迁移阶段之前一律不动**）：
+
+```
+clk              P57
+rst_n            P3
+key_in<0..6>     P4 P5 P6 P7 P8 P10 P11
+audio_out        P12
+key_debug<0..6>  P13 P15 P16 P18 P19 P20 P21
+note_debug<0..2> P24 P25 P27
+```
+
+**池与现状的差集（事实，不是推断）**：
+
+- 池中**不含** `P8`、`P11`、`P16`、`P18`、`P24`。这 5 根当前在用，但**没有被确认可用于改接**；迁移时不得把它们当作可用资源。
+- `P1`/`P2`（TMS/TDI）**永远保留给 JTAG**；`P9/P17/P26/P34`=GND、`P14/P23`=VCCO_3、`P40`=VCCO_2、`P22`=VCCINT、`P36`=VCCAUX、`P33/P35`=IPAD（仅输入），均不得作普通 I/O。
+- ⚠️ 现有 `constraints/finger_piano.ucf` 头部注释与 `projects/finger_piano/README.md` §7 仍写「可用 I/O 范围：P1..P40」（2026-09-14 的信息），已被本次 38 脚池取代；**这两处尚未同步**，待用户确认后再改（本轮不动 UCF）。
+
+迁移后需要新增的引脚：
+
+| 用途 | 数量 | 来源计划 |
+|---|---|---|
+| `sensor_async[2:0]`（3 个 LM393 数字输出） | 3 | P2 |
+| `ADC_SCL` / `ADC_SDA`（ADS1115，总线 1） | 2 | P1 / P5 |
+| `DAC_SCL` / `DAC_SDA`（MCP4725，总线 2） | 2 | P1 / P4 |
+| `note_debug` 等观测脚（可选） | 0~3 | 迁移阶段决定 |
+
+迁移后释放的 legacy 引脚：`key_in[6:0]` 7 根（其中 3 根可改作 `sensor_async[2:0]`）、`key_debug[6:0]` 7 根；`clk` / `rst_n` / `audio_out` 默认保持现脚不变。
+
+#### 候选分配（**候选，未经用户逐脚确认前不得写入 UCF**）
+
+| 信号 | 候选引脚 | 理由 |
+|---|---|---|
+| `sensor_async[0..2]` | P28 / P29 / P30 | 落在当前未占用的池内引脚，避开 onboard 键位与调试脚 |
+| `ADC_SCL` / `ADC_SDA` | P31 / P32 | 总线 1，独立于 DDS 音频链 |
+| `DAC_SCL` / `DAC_SDA` | P76 / P77 | 总线 2 |
+| `note_debug[2:0]`（可选） | P78 / P79 / P90 | 保留少量可观测脚 |
+
+选脚原则：① 一律 `LVCMOS33`（与现有 UCF 一致；若某个 bank 的 VCCO 不是 3.3 V，必须先确认）；② 新外设优先落在当前未占用的池内引脚，迁移前不与 legacy 抢脚；③ 迁移释放出来的 `P4~P11` 仍在池内，可作备选；④ 实际接线若把 LM393 接在 onboard 键位上，改候选表并重新确认即可。
+
+**硬规则**：候选表只是给用户逐脚确认的提案。确认之前**不得**在 UCF 增加任何新增外设 LOC，不得依赖 MAP 自动分配，也不得自动把 `constraintsReviewed` 置 true。
+
+### 12.2 三个 LM393 GPIO
 
 需要确认：
 
@@ -598,7 +651,8 @@ key_in[6:0]
 正式迁移到：
 
 sensor_async[2:0]（3-bit 计划中 `sensor_code_frontend` 的顶层输入名；其输出为 `sensor_code_stable[2:0]` 与 `note_code[2:0]`）
-### 12.2 两套 I²C GPIO
+
+### 12.3 两套 I²C GPIO
 
 由于 ADC 和 DAC 使用独立总线，需要确认四个真实 FPGA GPIO：
 
@@ -610,7 +664,7 @@ DAC_SDA
 
 在确认之前不得写 UCF LOC。
 
-### 12.3 FSR 实物标定
+### 12.4 FSR 实物标定
 
 需要实际记录三个传感器：
 
@@ -629,7 +683,7 @@ pressure normalization
 
 均不得声称完成。
 
-### 12.4 DAC模拟输出与LM386
+### 12.5 DAC模拟输出与LM386
 
 数字链通过后还需要实际验证：
 
