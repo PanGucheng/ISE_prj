@@ -1007,6 +1007,15 @@ Expect-Failure { Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile 
 $misRun = Get-LatestProgrammerRun 'fixturecable' 'program-'
 Assert (((Get-Content "$misRun/run.json" -Raw | ConvertFrom-Json).cableSerialMismatch) -eq $true) 'the serial mismatch must be recorded'
 Assert ((Get-TextSafe "$misRun/summary.txt") -match 'MISMATCH -> FAIL') 'the mismatch must be visible in the summary'
+# The diagnostic -CableMode Auto override must be visible and must never look like
+# the enforced path.
+$autoRun = Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile $bitPath -CableMode Auto -ConfirmHardwareWrite
+Assert ((Get-TextSafe "$($autoRun.RunDir)/generated/probe.cmd") -match '(?m)^setCable -p auto\r?$') 'the override must force -p auto'
+$autoJson = Get-Content "$($autoRun.RunDir)/run.json" -Raw | ConvertFrom-Json
+Assert ($autoJson.cableModeOverride -match 'diagnostic override') 'the override must be recorded as diagnostic'
+$autoSummary = Get-TextSafe "$($autoRun.RunDir)/summary.txt"
+Assert ($autoSummary -match 'Cable override : AUTO - diagnostic A/B only') 'the override must be flagged in the summary'
+Assert ($autoSummary -match 'pinned') 'the pinned serial must still be reported'
 # An Adept open failure must never be reported as a successful write.
 $script:ProgProgram = 'openfail'
 Expect-Failure { Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'

@@ -918,12 +918,19 @@ function Invoke-Program {
         [Parameter(Mandatory)][ValidateSet('Jtag', 'Isf')][string]$Mode,
         [Parameter(Mandatory)][string]$BitFile,
         [int]$Position = 0,
-        [switch]$ConfirmHardwareWrite
+        [switch]$ConfirmHardwareWrite,
+        # Diagnostic A/B override of the cable selection: 'Config' uses the pinned
+        # serial from project.json, 'Auto' forces `setCable -p auto`.
+        [ValidateSet('Config', 'Auto')][string]$CableMode = 'Config'
     )
     Assert-Name $ProjectName
     $p = Read-Project $ProjectName 'synth'
     $expected = Get-ExpectedDeviceFacts ([string]$p.Config.device)
     $cfg = Get-ProgrammingConfig $p
+    if ($CableMode -eq 'Auto') {
+        # Only for a controlled experiment: the enforced path is the pinned serial.
+        $cfg.CableArgument = '-p auto'
+    }
     $bit = Get-BitFileFacts $BitFile
     if (-not $bit.Exists) { throw "program: bitstream not found: $BitFile" }
     if ($bit.Size -le 0) { throw "program: bitstream is empty: $BitFile" }
@@ -1268,6 +1275,7 @@ function Invoke-Program {
     $meta.cableSerial = $cfg.CableSerial
     $meta.cableFrequencyHz = $cfg.CableFrequencyHz
     $meta.cableTarget = $cfg.CableArgument
+    $meta.cableModeOverride = $(if ($CableMode -eq 'Auto') { 'auto (diagnostic override - NOT the enforced path)' } else { $null })
     $meta.cableSerialSeen = $actualSerial
     $meta.cableSerialMismatch = $serialMismatch
     $meta.modeIsNonVolatile = [bool]($Mode -eq 'Isf')
@@ -1290,6 +1298,10 @@ function Invoke-Program {
     $summary.Add(('  Cable provider : ' + $(if ($cfg.CableType -eq 'digilent') { 'Digilent' } else { 'auto-detect (diagnostic only)' })))
     $summary.Add(('  Cable serial   : ' + $(if ($cfg.CableSerial) { $cfg.CableSerial } else { 'NOT_CONFIGURED' })))
     $summary.Add(('  Cable target   : ' + $(if ($cfg.CableSerial) { 'explicit' } else { 'auto' }) + '  (' + $cfg.CableArgument + ')'))
+    if ($CableMode -eq 'Auto') {
+        $summary.Add('  Cable override : AUTO - diagnostic A/B only; the enforced path pins the serial.')
+        $summary.Add('                   Compare this run against a pinned run before drawing conclusions.')
+    }
     $summary.Add(('  Cable frequency: ' + $(if ($cfg.CableFrequencyHz) { $cfg.CableFrequencyHz.ToString() + ' Hz (measured)' } else { 'NOT_CONFIGURED' })))
     $summary.Add(('  Cable in log   : ' + $(if ($actualSerial) { $actualSerial } else { 'NOT_REPORTED' }) + $(if ($serialMismatch) { '   MISMATCH -> FAIL' } else { '' })))
     $summary.Add(('  Preflight      : ' + $preflightState + $(if ($preflightState -eq 'PREFLIGHT_FAILED') { ' (program.cmd was never executed)' } else { '' })))

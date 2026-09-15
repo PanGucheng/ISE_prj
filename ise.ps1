@@ -21,6 +21,10 @@ param(
     [string]$BitFile,
     # program: JTAG chain position (required when the chain has more than one device)
     [int]$Position = 0,
+    # program: diagnostic override of the cable selection. 'Config' (default) uses the
+    # pinned serial from project.json; 'Auto' forces `setCable -p auto` for an A/B
+    # experiment and marks the run as an override.
+    [ValidateSet('Config','Auto')][string]$CableMode = 'Config',
     # program: without this switch the command only previews what it would do
     [switch]$ConfirmHardwareWrite,
     # probe-diag: how many measurement iterations, and in which Windows session
@@ -45,7 +49,7 @@ try {
         'program' {
             if (-not $Mode) { throw 'program needs -Mode Jtag|Isf (JTAG configuration is volatile, Isf programs the internal flash).' }
             if (-not $BitFile) { throw 'program needs -BitFile <path>.' }
-            $null = Invoke-Program -ProjectName $Project -Mode $Mode -BitFile $BitFile -Position $Position -ConfirmHardwareWrite:$ConfirmHardwareWrite
+            $null = Invoke-Program -ProjectName $Project -Mode $Mode -BitFile $BitFile -Position $Position -CableMode $CableMode -ConfirmHardwareWrite:$ConfirmHardwareWrite
         }
         'board-check' { Invoke-BoardCheck -ProjectName $Project }
     }
