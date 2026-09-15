@@ -28,6 +28,11 @@
       "library": "work"
     },
     {
+      "path": "src/pressure/pressure_channel_corrector.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/input/sensor_code_filter.v",
       "language": "verilog",
       "library": "work"
@@ -366,6 +371,17 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_PRESSURE_FRAME_CAPTURE: PASS",
       "failPattern": "TB_PRESSURE_FRAME_CAPTURE: FAIL"
+    },
+    {
+      "name": "pressure_channel_corrector",
+      "top": "tb_pressure_channel_corrector",
+      "sources": [
+        "sim/tb_pressure_channel_corrector.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_PRESSURE_CHANNEL_CORRECTOR: PASS",
+      "failPattern": "TB_PRESSURE_CHANNEL_CORRECTOR: FAIL"
     }
   ],
   "verification": {
