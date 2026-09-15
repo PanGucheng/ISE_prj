@@ -10,6 +10,7 @@
     {"path":"src/input/sensor_code_frontend.v","language":"verilog","library":"work"},
     {"path":"src/audio/sine_lut_12bit.v","language":"verilog","library":"work"},
     {"path":"src/audio/dds_sine_generator.v","language":"verilog","library":"work"},
+    {"path":"src/audio/dds_mcp4725_pipeline.v","language":"verilog","library":"work"},
     {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
     {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
     {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
