@@ -1008,7 +1008,8 @@ $misRun = Get-LatestProgrammerRun 'fixturecable' 'program-'
 Assert (((Get-Content "$misRun/run.json" -Raw | ConvertFrom-Json).cableSerialMismatch) -eq $true) 'the serial mismatch must be recorded'
 Assert ((Get-TextSafe "$misRun/summary.txt") -match 'MISMATCH -> FAIL') 'the mismatch must be visible in the summary'
 # The diagnostic -CableMode Auto override must be visible and must never look like
-# the enforced path.
+# the enforced path. The mock must be back to a healthy write transcript first.
+$script:ProgProgram = 'ok'
 $autoRun = Invoke-Program -ProjectName 'fixturecable' -Mode Jtag -BitFile $bitPath -CableMode Auto -ConfirmHardwareWrite
 Assert ((Get-TextSafe "$($autoRun.RunDir)/generated/probe.cmd") -match '(?m)^setCable -p auto\r?$') 'the override must force -p auto'
 $autoJson = Get-Content "$($autoRun.RunDir)/run.json" -Raw | ConvertFrom-Json
