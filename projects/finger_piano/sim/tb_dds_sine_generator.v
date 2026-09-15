@@ -147,12 +147,101 @@ module tb_dds_sine_generator;
     endtask
 
     //-------------------------------------------------------------------------
-    // 主流程
+    // P3 Commit D:phase increment 独立数学检查(§33)。
+    // 放在 generate 作用域内:TB_ENABLE=0 时 GEN_DDS 未 elaborate,
+    // 对 u_dut.GEN_DDS 的层次引用随之消失,disabled 仿真可正常编译。
+    // real 运算仅存在于 TB(ISim 无 $sin 已在 LUT TB 用泰勒级数替代,
+    // 这里只需要乘除)。
     //-------------------------------------------------------------------------
     reg [11:0] s_first;
     reg [11:0] s_last;
     integer    vc0;
+    reg [2:0] tb_exp_note;   // 主流程写入:当前被测音符
 
+    generate
+        if (TB_ENABLE != 0) begin : G_INC
+            reg [23:0] inc_got;
+            real inc_nom_cHz;
+            integer inc_exp;
+            always @(tb_exp_note) begin
+                #20000;      // 等相位重启与 increment 更新稳定
+                inc_got = u_dut.GEN_DDS.phase_inc;
+                case (tb_exp_note)
+                    3'd1:    inc_nom_cHz = 26162.0;
+                    3'd2:    inc_nom_cHz = 29367.0;
+                    3'd3:    inc_nom_cHz = 32963.0;
+                    3'd4:    inc_nom_cHz = 34923.0;
+                    3'd5:    inc_nom_cHz = 39199.0;
+                    3'd6:    inc_nom_cHz = 44000.0;
+                    3'd7:    inc_nom_cHz = 49388.0;
+                    default: inc_nom_cHz = 0.0;
+                endcase
+                inc_exp = $rtoi((inc_nom_cHz / 100.0) * 16777216.0 / 8000.0 + 0.5);
+                checks = checks + 1;
+                if (inc_got !== inc_exp[23:0]) begin
+                    errors = errors + 1;
+                    $display("FAIL: inc note=%0d got=%0d expected=%0d",
+                             tb_exp_note, inc_got, inc_exp);
+                end else begin
+                    $display("  ok: inc note=%0d == %0d (independent math)",
+                             tb_exp_note, inc_got);
+                end
+            end
+        end
+    endgenerate
+
+    //-------------------------------------------------------------------------
+    // 七音频率测试(§31/§32):跳过重启样点后,统计 8192 个样点内
+    // dac_code < 2048 -> >= 2048 的正向零交叉:
+    //   f_meas = crossings / N * fs,|err| < 1%
+    //-------------------------------------------------------------------------
+    task freq_test;
+        input [2:0] n;
+        input integer f_cHz;      // 标称频率,单位 0.01 Hz
+        integer k;
+        integer crossings;
+        reg [11:0] prev;
+        reg [11:0] cur;
+        real f_nom;
+        real f_meas;
+        real err_pct;
+        begin
+            @(negedge clk);
+            note_code    = n;
+            tb_exp_note  = n;     // 触发 inc 数学检查
+            collect_valids(2, s_first, s_last);
+            check_eq12(s_first, 12'h800, "  restart sample == 0x800");
+            crossings = 0;
+            prev      = s_last;
+            for (k = 0; k < 8192; k = k + 1) begin
+                @(posedge clk);
+                while (dac_code_valid !== 1'b1) begin
+                    @(posedge clk);
+                end
+                cur = dac_code;
+                if ((prev < 12'd2048) && (cur >= 12'd2048)) begin
+                    crossings = crossings + 1;
+                end
+                prev = cur;
+            end
+            f_nom  = f_cHz / 100.0;
+            f_meas = crossings * 8000.0 / 8192.0;
+            err_pct = (f_meas - f_nom) / f_nom * 100.0;
+            checks = checks + 1;
+            if ((err_pct > 1.0) || (err_pct < -1.0)) begin
+                errors = errors + 1;
+                $display("FAIL: freq note=%0d f_meas=%.3f nom=%.2f err=%+.4f%% crossings=%0d",
+                         n, f_meas, f_nom, err_pct, crossings);
+            end else begin
+                $display("  ok: freq note=%0d f_meas=%.3f nom=%.2f err=%+.4f%% crossings=%0d",
+                         n, f_meas, f_nom, err_pct, crossings);
+            end
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
+    // 主流程
+    //-------------------------------------------------------------------------
     initial clk = 1'b0;
     always #5 clk = ~clk;       // 时钟周期任意,DDS 只关心拍数(DIV)
 
@@ -164,6 +253,7 @@ module tb_dds_sine_generator;
         clk       = 1'b0;
         rst_n     = 1'b0;
         note_code = 3'd0;
+        tb_exp_note = 3'd0;
 
         $display("TB_DDS_SINE_GENERATOR: start (CLK=%0d RATE=%0d DIV=%0d ENABLE=%0d)",
                  TB_SYS_CLK_HZ, TB_SAMPLE_RATE_HZ, SAMPLE_DIV, TB_ENABLE);
@@ -251,6 +341,25 @@ module tb_dds_sine_generator;
             $display("FAIL: T3 sample cadence disturbed by note transitions");
         end else begin
             $display("  ok: T3 8 kHz cadence unchanged across transitions");
+        end
+
+        //---------------------------------------------------------------------
+        // T5(P3 Commit D):七音全部实测(仅快速模式;§30/§31/§32/§33)
+        //---------------------------------------------------------------------
+        if (TB_SYS_CLK_HZ == 1000000) begin : SEVEN_NOTES
+            $display("T5: seven-note frequency measurement (8192 samples/note)");
+            freq_test(3'd1, 26162);
+            freq_test(3'd2, 29367);
+            freq_test(3'd3, 32963);
+            freq_test(3'd4, 34923);
+            freq_test(3'd5, 39199);
+            freq_test(3'd6, 44000);
+            freq_test(3'd7, 49388);
+            // 回静音:静音样点恒 0x800
+            @(negedge clk);
+            note_code = 3'd0;
+            collect_valids(5, s_first, s_last);
+            check_eq12(s_first, 12'h800, "T5 back to mute sample == 0x800");
         end
 
         //---------------------------------------------------------------------
