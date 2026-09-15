@@ -1,5 +1,7 @@
 # 手指钢琴 ISE 工程 + GitHub 仓库 实施计划（v2）
 
+> **HISTORICAL（第一阶段存档，2026-09-15 归档）**：本文是第一阶段实施计划的原样存档，**正文未做任何修改**。其中「尚未进行板卡烧录 / `program` 只跑过 PREVIEW ONLY / 尚未上板」等描述反映的是 2026-09-14 之前的状态，**已被后续真机写入取代**：`-Mode Jtag`（易失，`program -onlyFpga`）连续两次 PASS（`program-20260915-003257-7ef9c0de`、`program-20260915-003321-faf98f9b`），`-Mode Isf`（非易失，`program -p 1 -e -v`，显式擦除门禁）一次通过（`program-20260915-083244-bf54acda`，`Erase → Program → Verify` 全部成功）。**板卡功能仍未验证**——未做断电保持启动测试、未用示波器/频率计实测音高，`userDesignFunctional = NOT_TESTED`。当前状态一律以 `projects/finger_piano/README.md`、`doc/ISE工具链最终状态.md` 和 README.md 的「工具链冻结」章节为准，**不得再引用本文的烧录状态作为依据**。
+
 - 状态：第一阶段软件工程已完成并验证，等待实际板级参数
 - 目标器件：Xilinx Spartan-3AN `xc3s50an-4-tqg144`（`-4` 为暂定值，待按芯片丝印核对）
 - 工具链：本机 PowerShell 7 编辑 → SSH/SFTP → Win7 `fpga-vm` 上的 ISE 14.7
