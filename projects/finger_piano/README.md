@@ -292,7 +292,44 @@ OS 轮询+超时)、`mcp4725_ctrl.v`(仅 Fast Write,pending+overrun 缓冲),
 232 FF / 20 I/O 与 legacy 基线一致,方波路径未受影响。**7 键 RTL 仍是
 legacy baseline**,真实硬件(3×LM393 → 3-bit 编码)迁移在上板前单独进行。
 
+### 12.2 3-bit 传感器输入基础设施(P2,IMPLEMENTED / STANDALONE)
+
+P2 五个提交(A~E)已落地:`src/input/` 下的 `sensor_code_decoder.v`
+(编码表语义边界,000=静音,001~111=C4~B4)、`sensor_code_filter.v`
+(**整体码字原子滤波**:单一 candidate + 单一计数器,N-1 拍不更新、第 N 拍
+一次性更新,杜绝 001→011→111 逐 bit 滤波的短暂错音)、`sensor_code_frontend.v`
+(极性归一化 → 复用 `key_sync` WIDTH=3 两级同步 → 原子滤波 → 解码),
+配套三个 TB(8/29/6 checks)与 4 个仿真(含 ACTIVE_HIGH=0 低有效套件)。
+状态:**NOT_INTEGRATED**(顶层未实例化)、**BOARD PINS TODO**(3 个 LM393
+输入引脚待用户逐脚确认,见 doc/README.md §12.2);legacy 7-key 路径零改动,
+综合仍为 232 FF / 20 I/O。验收:verify-20260916-015815-edd2f5fa 全量 PASS。
+
 ## 13. 验证记录
+
+### 第九轮:P2 3-bit 传感器输入基础设施(decoder / filter / frontend,2026-09-16)
+
+**未改任何 legacy RTL、顶层端口与 UCF**;新增 `src/input/` 三个模块与三个 TB。
+提交序列:`p2a`(776659d)→ `p2b`(c454e22)→ `p2c`(1821585)→ 全量
+verify(集成已分布在 A~C 的 project.json 增量中)→ 本文档(`p2e`)。
+
+- `sensor_code_decoder`:显式 case 编码表(000=静音,001~111=C4~B4),
+  8/8 编码 TB PASS;按设计无非法编码逻辑。
+- `sensor_code_filter`:整体码字原子滤波(单一 candidate + 单一计数器 +
+  stable 寄存器),N-1 拍不更新、第 N 拍一次性更新(off-by-one 由 TB 锁死);
+  短暂中间码零泄漏(逐拍允许集合监视);candidate 改变计数重记;
+  回 stable 清零;ENABLE=0 纯直通。TB 用缩短参数(10 kHz / 1 ms → N=10)。
+- `sensor_code_frontend`:极性归一化(唯一反相点,ACTIVE_HIGH 参数)→
+  复用 key_sync WIDTH=3 → 原子滤波 → 解码;high/low 两套仿真均 PASS,
+  低有效套件验证物理111→逻辑000、110→001、000→111 的极性映射;
+  快速中间码 001→011(短)→111 全程无短暂 note 3。
+
+**验收**:verify-20260916-015815-edd2f5fa Overall PASS:综合 0 errors /
+0 warnings / 0 latches,registers 232 / IOs 20(与基线一致);13 个仿真
+全部 PASS(legacy 6 + P1 3 + P2 4)。P2 功能状态:**SIMULATED /
+NOT_INTEGRATED / BOARD PINS TODO**(3 个 LM393 引脚待用户逐脚确认,
+顶层迁移属 §31 独立提交)。
+
+
 
 ### 第八轮:P1 可选外设驱动基础设施(i2c_master / ads1115_ctrl / mcp4725_ctrl,2026-09-15 ~ 09-16)
 

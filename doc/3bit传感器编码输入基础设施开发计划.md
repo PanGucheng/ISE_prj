@@ -1,12 +1,21 @@
 # finger_piano 3-bit 传感器编码输入基础设施开发计划
 
-> **Status**: PLANNED（本计划尚无任何 RTL 落地）
+> **Status**: IMPLEMENTED / STANDALONE（已仿真通过,默认不接顶层,未上板）
 > **Scope**: standalone 3-bit 传感器输入 RTL + ISim（legacy 7-key 顶层保持不动）
 > **Depends on**: 现有同步/滤波基础设施（`key_sync` / `key_filter`）；与 P1 独立
 > **Top integration**: NO
 > **UCF changes**: NO
 > **Hardware programming**: FORBIDDEN
 > **Acceptance**: full `verify`（`.\ise.ps1 verify -Project finger_piano`）
+>
+> **落地记录（2026-09-16）**:Commit A decoder（776659d）、B atomic vector
+> filter（c454e22）、C frontend（1821585）逐阶段仿真 PASS;D 全量
+> verify-20260916-015815-edd2f5fa Overall PASS（综合 0 errors / 0 warnings /
+> 0 latches,232 FF / 20 IOs 与基线一致,13 个仿真全部 PASS）;E 文档（本条）。
+> 文件:`src/input/sensor_code_{decoder,filter,frontend}.v` +
+> `sim/tb_sensor_code_*.v`;新增仿真 sensor_code_decoder / sensor_code_filter /
+> sensor_code_frontend_high / sensor_code_frontend_low。
+> 顶层迁移（§31）仍等用户逐脚确认 3 个 LM393 引脚后单独执行。
 
 本阶段只开发并验证 3-bit 传感器编码输入基础设施，不进行最终顶层迁移。当前 key_in[6:0] → note_encoder 路径是已验证 legacy baseline，必须保持不变。真实硬件采用 3 个 LM393 输出组成 3-bit 编码，项目冻结编码为 000=静音，001~111=唱名1~7。三位编码必须先经两级同步，再使用 whole-vector atomic stable filter；禁止简单复用现有逐bit key_filter 作为最终码字滤波。新增 RTL 可以进入 project.json 接受 XST/ISim 验证，但不得增加未约束顶层端口、不得修改 UCF、不得执行 program。每个阶段完成后运行对应 simulation，最终必须执行完整 verify -Project finger_piano，任何回归失败必须先修复，不得带着失败继续叠加功能。
 

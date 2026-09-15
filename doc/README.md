@@ -26,7 +26,7 @@
 | Plan | 状态 | 顶层接入 | 板测 |
 |---|---|---|---|
 | P1 ADC/DAC drivers | SIMULATED（IMPLEMENTED / STANDALONE，默认关闭） | NO | NO |
-| P2 3-bit input | PLANNED | NO | NO |
+| P2 3-bit input | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P3 DDS | PLANNED | NO | NO |
 | P4 DDS → MCP4725 | PLANNED | NO | NO |
 | P5 Pressure processor | PLANNED | NO | NO |
