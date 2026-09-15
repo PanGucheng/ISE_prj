@@ -42,4 +42,40 @@
 // 音频半周期计数器位宽。12 MHz 下最高音 B4 只需 12148（14 位），24 位非常充足。
 `define FP_TONE_CNT_WIDTH   24
 
+//-----------------------------------------------------------------------------
+// P1 可选外设(ADS1115 / MCP4725)配置宏 —— driver default enable /
+// integration-ready 默认值(见 doc/ADS1115与MCP4725可选外设开发计划.md)。
+//
+// **把 ENABLE 宏改为 1 并不能真正启用硬件。** 真正启用必须同时满足三项
+// (本阶段全部不做,外设默认全关):
+//   1) finger_piano_top 增加 adc/dac 四个 inout 端口;
+//   2) 顶层实例化 ads1115_ctrl 与 mcp4725_ctrl(两个独立的 i2c_master);
+//   3) 用户逐脚确认后的 4 个真实 UCF LOC(禁止 MAP 自动分配)。
+//-----------------------------------------------------------------------------
+
+// driver 默认使能开关(0 = 关闭)。**不是**系统启用开关,见上。
+`define CFG_ENABLE_ADS1115    0
+`define CFG_ENABLE_MCP4725    0
+
+// I2C 器件地址(7 位)。ADS1115: ADDR=GND -> 1001000b(表 7-2);
+// MCP4725: 器件码 1100 + A2A1A0=000 -> 1100000b。改地址只改这里。
+`define CFG_ADS1115_ADDR      7'h48
+`define CFG_MCP4725_ADDR      7'h60
+
+// I2C 速率(Hz,名义目标值,不是 actual_f_SCL 硬上限)。
+// 12 MHz + 333333 走板上默认设计目标 18+18=36 拍(actual 333333.333 Hz);
+// 其它速率由各 controller 内的强制公式换算(见 P1 计划"I2C 拍数算法")。
+// 400000 仅为可配置项,不是实物默认。
+`define CFG_ADC_I2C_SPEED     333333
+`define CFG_DAC_I2C_SPEED     333333
+
+// 未来 DDS 的样点率。仅预留,P1 阶段不实现 DDS。
+`define CFG_DAC_SAMPLE_RATE   8000
+
+// ADS1115 采样参数(doc/ads1115.pdf 8.1.3 Config 寄存器):
+//   PGA[2:0] = 001 -> FSR = +-4.096 V
+//   DR[2:0]  = 111 -> 860 SPS(容差 +-10%,controller 的转换等待超时据此留裕量)
+`define CFG_ADS1115_PGA       3'b001
+`define CFG_ADS1115_DR        3'b111
+
 `endif // FINGER_PIANO_CFG_VH
