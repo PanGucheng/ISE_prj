@@ -25,13 +25,16 @@
 
 | Plan | 状态 | 顶层接入 | 板测 |
 |---|---|---|---|
-| P1 ADC/DAC drivers | PLANNED | NO | NO |
+| P1 ADC/DAC drivers | SIMULATED（IMPLEMENTED / STANDALONE，默认关闭） | NO | NO |
 | P2 3-bit input | PLANNED | NO | NO |
 | P3 DDS | PLANNED | NO | NO |
 | P4 DDS → MCP4725 | PLANNED | NO | NO |
 | P5 Pressure processor | PLANNED | NO | NO |
 
-目前仓库里真正能跑通的仍然是 **legacy baseline**（7-key 方波电子琴）；P1~P5 尚无 RTL 落地，没有任何阶段进入顶层或板级验证。
+目前仓库里真正能跑通的仍然是 **legacy baseline**（7-key 方波电子琴）；P1 的
+i2c_master / ads1115_ctrl / mcp4725_ctrl 已实现并通过全量仿真与综合
+（verify-20260916-014501-de164af3 Overall PASS，232 FF / 20 I/O 与基线一致），
+但默认关闭、未接顶层、未上板。P2~P5 尚无 RTL 落地。
 
 ### 0.2 事实来源优先级（冲突时以此为准）
 

@@ -278,7 +278,52 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 - **PWM 音量**：在 `tone_generator` 输出之后插入 `pwm_volume`（同 `clk` 域），用高速计数器调制占空比；`audio_out` 语义不变。
 - **DDS 正弦波**：把 `tone_generator` 的“半周期翻转”替换为相位累加器 + 正弦查找表（可用 `ip/` 下的分布式 ROM 或 Block RAM）；`SYS_CLK_HZ` 与相位增量仍由同一参数推导。
 
+### 12.1 可选外设(P1:ADS1115 / MCP4725 驱动基础设施,默认关闭)
+
+P1 五个提交(A~E)已落地,**IMPLEMENTED / STANDALONE**:`src/periph/` 下的
+`i2c_master.v`(命令级开漏主机)、`ads1115_ctrl.v`(三通道轮询采集,
+OS 轮询+超时)、`mcp4725_ctrl.v`(仅 Fast Write,pending+overrun 缓冲),
+配套协议模型与三个 TB(58/40/73 checks)。协议依据为仓库内
+`doc/ads1115.pdf` 与 `doc/MCP4725.pdf`。设计细节、I²C 拍数公式、ENABLE 宏
+语义与接线规划见 [doc/ADC_DAC扩展设计.md](../../doc/ADC_DAC扩展设计.md)。
+
+**默认全关**:ENABLE 宏为 0、顶层无端口、无实例化、UCF 无 I²C LOC
+(引脚待用户逐脚确认,见 doc/README.md §12.3 候选分配);综合网表
+232 FF / 20 I/O 与 legacy 基线一致,方波路径未受影响。**7 键 RTL 仍是
+legacy baseline**,真实硬件(3×LM393 → 3-bit 编码)迁移在上板前单独进行。
+
 ## 13. 验证记录
+
+### 第八轮:P1 可选外设驱动基础设施(i2c_master / ads1115_ctrl / mcp4725_ctrl,2026-09-15 ~ 09-16)
+
+**未改任何 legacy RTL、顶层端口与 UCF LOC**;新增 `src/periph/` 三个模块、
+两个协议模型、三个 TB、cfg.vh 外设宏(默认全关)。提交序列:
+`p1a`(12ea8d2)→ `p1b`(91c65ee)→ `p1c`(9a019d2)→ `p1d`(84a0afd)→ 本文档(`p1e`)。
+
+- `i2c_master`:命令级 START/RESTART/WRITE/READ/STOP,开漏 0/Z,粘滞
+  error_code(0/1 NACK/2 timeout/3 protocol),写 NACK 自动补 STOP,逐命令
+  看门狗;master 不区分地址/数据字节,拍数全部由 controller 传入。
+- `ads1115_ctrl`:三通道"写配置→轮询 Config.OS(≥2ms 等待超时)→读转换",
+  配置字由手册位域拼接(C3E3/D3E3/E3E3),原始 16-bit 有符号输出。
+- `mcp4725_ctrl`:仅 Fast Write(首字节高半字节恒 0000,EEPROM 命令结构上
+  不可能),一项 pending + overrun(拒绝 latest-value-wins),VOUT 语义按
+  第三字节 ACK 沿;t_BUF 按 MCP 手册 1300ns。
+- 拍数分层:12 MHz + 333333 → 固定 18+18=36 拍(actual 333333.333 Hz);
+  其它速率走强制公式(先除后取整避免 32 位溢出);吞吐 TB 实测 120/120
+  样点 0 overrun / 0 drop,SCL 高段全部 18 拍。
+- 本轮踩过并修掉的真 bug:XST 拒绝 generate 块内 `localparam`(ISim 却
+  接受,故单测全绿而综合 6 errors——localparam 已全部移到模块作用域);
+  controller 完成判定补"master 即时拒绝(cmd_ready 从不拉低)"路径;
+  ads1115 OS 位误用越界 `poll_hi[15]`(应为高位字节的 bit7);轮询未关
+  事务就再发 START(违反自身 xact 纪律);mcp4725 FSM 漏写 S_ERR 分支。
+
+**验收**:verify-20260916-013752-c8254ef6 Overall PASS(stage
+IMPLEMENT_ALLOWED):综合 0 errors / 0 warnings / 0 latches,
+registers 232 / IOs 20(与 P1 前完全一致);9 个仿真全 PASS
+(legacy 6 + i2c_master 58 checks + ads1115_ctrl 40 + mcp4725_ctrl 73);
+implement 门禁 PASS。外设功能状态:**SIMULATED / NOT_INTEGRATED /
+NOT_BOARD_TESTED**(仿真 PASS ≠ 板卡可用)。
+
 
 ### 第七轮：JTAG 烧录稳定性 + ISF 写入只读诊断（2026-09-14 ~ 09-15）
 

@@ -66,3 +66,17 @@ NET "key_debug<6>" LOC = P21 | IOSTANDARD = LVCMOS33;
 NET "note_debug<0>" LOC = P24 | IOSTANDARD = LVCMOS33;
 NET "note_debug<1>" LOC = P25 | IOSTANDARD = LVCMOS33;
 NET "note_debug<2>" LOC = P27 | IOSTANDARD = LVCMOS33;
+
+
+#-----------------------------------------------------------------------------
+# BOARD TODO（P1 可选外设，全部未确认、未启用——此处不得出现任何 LOC）
+#
+# P1 的 ads1115_ctrl / mcp4725_ctrl 已作为独立 RTL 存在（默认关闭，顶层未
+# 实例化），将来顶层集成前必须由用户逐脚确认以下 4 个 I²C 引脚后，
+# 才允许在这里写 NET ... LOC（候选分配见 doc/README.md「可用引脚池与
+# IO 重分配」，确认前禁止依赖 MAP 自动分配）：
+#   - ADC_SCL / ADC_SDA（ADS1115，独立总线 1）
+#   - DAC_SCL / DAC_SDA（MCP4725，独立总线 2）
+# 上拉电阻在板级（4.7 kΩ 到 3.3 V），不是 FPGA 内部资源。
+#-----------------------------------------------------------------------------
+
