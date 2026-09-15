@@ -78,6 +78,7 @@
 
 - 复用 `ssh fpga-vm` 的本机密钥配置。不要要求用户重复提供密码，不向工程或日志写入密码、私钥内容。
 - 常规源码修改和构建按用户任务授权执行；JTAG 写入必须由用户明确要求并带 `-ConfirmHardwareWrite`，工具自身不做隐式烧录。
+- **每个阶段完成后自行提交并推送**：一份计划的一小步做完、判定通过（单测出现 `PASS`，或完整 `verify` 全绿）后，Agent 直接 `git commit` + `git push origin main`，**不需要逐次征询**；一个阶段一个 commit，**不得把失败的测试或未验证的状态推上去**。本条只覆盖源码、测试与文档；**硬件写入仍必须由用户明确要求**并带 `-ConfirmHardwareWrite`。（项目侧细则见 `projects/finger_piano/AGENTS.md` 的「每完成一个阶段：自行提交并推送」。）
 - 构建仅写入远端 `C:\Users\PanGucheng\ise-builds` 下的受管目录，不改系统环境变量或现有 ISE 安装。
 - 不自动删除构建目录；如用户要求清理，先解析并确认绝对路径在受管根目录内，禁止删除整个用户目录或越界路径。
 - 工具和目录约定改变时同步更新 README.md、AGENTS.md。不要把密钥复制进版本库；忽略 artifacts 与 tools/.work。

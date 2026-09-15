@@ -174,9 +174,21 @@ ADS1115 与 MCP4725 使用**两套独立 I²C 总线**，可复用同一份 `i2c
 每一小阶段：
 
 ```
-实现 → 单项 simulation → PASS → 独立 commit → 下一小阶段
+实现 → 单项 simulation → PASS → 独立 commit + push → 下一小阶段
 ```
 
 整份计划完成：跑完整 `verify`（`.\ise.ps1 verify -Project finger_piano`）。
 
-出现 FAIL 时：**先修复**，不得禁用测试、放宽 PASS 条件、删除旧回归或继续叠加新功能。完成后同步更新 `projects/finger_piano/README.md` 与 `/doc/README.md` 的当前实施状态。
+### 每完成一个阶段：自行提交并推送
+
+**不需要逐次征询用户**——阶段做完就自己提交、自己推送：
+
+1. **判定通过才提交**：对应 simulation 必须出现 `PASS`（整份计划收尾时完整 `verify` 全绿）。**任何时候都不得把失败的测试或未验证的状态推上去。**
+2. **一个阶段一个 commit**，不要把多个阶段或无关重构夹进同一个 commit。
+3. commit message 用 `type: summary` 风格（如 `dds: add sine LUT and its testbench`），正文写清 run ID、关键日志证据与仍未做的事。
+4. 提交后立即 `git push origin main`（仓库只有 `main` 一条分支）。
+5. 推送前检查：`git status` 无残留临时文件、无 `projects/*/artifacts/`、无 `tools/.work/`、无自己生成的构建产物。
+6. 推送后同步更新 `projects/finger_piano/README.md` 的本轮记录与 `/doc/README.md` 的「当前实施状态」表。
+7. **例外**：`program -Mode Jtag` / `-Mode Isf` 是硬件写入，**永远**要用户明确要求并带 `-ConfirmHardwareWrite`；本条规则只覆盖源码、测试与文档的提交推送。
+
+出现 FAIL 时：**先修复**，不得禁用测试、放宽 PASS 条件、删除旧回归或继续叠加新功能。
