@@ -9,6 +9,7 @@
     {"path":"src/input/sensor_code_filter.v","language":"verilog","library":"work"},
     {"path":"src/input/sensor_code_frontend.v","language":"verilog","library":"work"},
     {"path":"src/audio/sine_lut_12bit.v","language":"verilog","library":"work"},
+    {"path":"src/audio/dds_sine_generator.v","language":"verilog","library":"work"},
     {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
     {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
     {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
@@ -150,6 +151,33 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_SINE_LUT_12BIT: PASS",
       "failPattern": "TB_SINE_LUT_12BIT: FAIL"
+    },
+    {
+      "name": "dds_sine_generator",
+      "top": "tb_dds_sine_generator",
+      "sources": ["sim/tb_dds_sine_generator.v"],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
+      "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_sine_generator_12m",
+      "top": "tb_dds_sine_generator",
+      "sources": ["sim/tb_dds_sine_generator.v"],
+      "generics": {"TB_SYS_CLK_HZ": "12000000"},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
+      "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_sine_generator_disabled",
+      "top": "tb_dds_sine_generator",
+      "sources": ["sim/tb_dds_sine_generator.v"],
+      "generics": {"TB_ENABLE": "0"},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
+      "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
     }
   ],
   "verification": {

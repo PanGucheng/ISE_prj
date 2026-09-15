@@ -70,7 +70,18 @@
 `define CFG_DAC_I2C_SPEED     333333
 
 // 未来 DDS 的样点率。仅预留,P1 阶段不实现 DDS。
+// P3 DDS 直接复用本宏作为采样率真值源,不另建第二份(CFG_DDS_SAMPLE_RATE
+// 之类禁止出现);12 MHz / 8 kHz 为精确整除配置(SAMPLE_DIV = 1500)。
 `define CFG_DAC_SAMPLE_RATE   8000
+
+// DDS driver default enable(P3):**不是**"改成 1 就启用硬件"。真正启用
+// 仍需顶层实例化 dds_sine_generator 并把 dac_code/dac_code_valid 接到
+// MCP4725 controller(P4 计划),本阶段全部不做,保持 0。
+`define CFG_ENABLE_DDS        0
+
+// DDS 相位累加器位宽(P3 冻结 24 bit);DDS 频率表只适用于 8 kS/s +
+// 24 bit,改采样率/位宽必须重新生成 phase increment 表。
+`define CFG_DDS_PHASE_BITS    24
 
 // ADS1115 采样参数(doc/ads1115.pdf 8.1.3 Config 寄存器):
 //   PGA[2:0] = 001 -> FSR = +-4.096 V
