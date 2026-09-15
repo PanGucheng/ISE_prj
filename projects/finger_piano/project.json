@@ -2,24 +2,88 @@
   "device": "xc3s50an-4-tqg144",
   "top": "finger_piano_top",
   "sources": [
-    {"path":"src/periph/i2c_master.v","language":"verilog","library":"work"},
-    {"path":"src/periph/ads1115_ctrl.v","language":"verilog","library":"work"},
-    {"path":"src/periph/mcp4725_ctrl.v","language":"verilog","library":"work"},
-    {"path":"src/input/sensor_code_decoder.v","language":"verilog","library":"work"},
-    {"path":"src/input/sensor_code_filter.v","language":"verilog","library":"work"},
-    {"path":"src/input/sensor_code_frontend.v","language":"verilog","library":"work"},
-    {"path":"src/audio/sine_lut_12bit.v","language":"verilog","library":"work"},
-    {"path":"src/audio/dds_sine_generator.v","language":"verilog","library":"work"},
-    {"path":"src/audio/dds_mcp4725_pipeline.v","language":"verilog","library":"work"},
-    {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
-    {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
-    {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
-    {"path":"src/note_encoder.v",   "language":"verilog", "library":"work"},
-    {"path":"src/tone_generator.v", "language":"verilog", "library":"work"},
-    {"path":"src/finger_piano_top.v","language":"verilog","library":"work"}
+    {
+      "path": "src/periph/i2c_master.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/ads1115_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/mcp4725_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_decoder.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_filter.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_frontend.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/sine_lut_12bit.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_sine_generator.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_mcp4725_pipeline.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/reset_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/key_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/key_filter.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/note_encoder.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/tone_generator.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/finger_piano_top.v",
+      "language": "verilog",
+      "library": "work"
+    }
   ],
-  "includeDirs": ["src"],
-  "includeFiles": ["src/finger_piano_cfg.vh"],
+  "includeDirs": [
+    "src"
+  ],
+  "includeFiles": [
+    "src/finger_piano_cfg.vh"
+  ],
   "defines": [],
   "netlists": [],
   "ucf": "constraints/finger_piano.ucf",
@@ -30,7 +94,9 @@
     {
       "name": "note_encoder",
       "top": "tb_note_encoder",
-      "sources": ["sim/tb_note_encoder.v"],
+      "sources": [
+        "sim/tb_note_encoder.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_NOTE_ENCODER: PASS",
@@ -39,7 +105,9 @@
     {
       "name": "tone_generator",
       "top": "tb_tone_generator",
-      "sources": ["sim/tb_tone_generator.v"],
+      "sources": [
+        "sim/tb_tone_generator.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_TONE_GENERATOR: PASS",
@@ -48,8 +116,12 @@
     {
       "name": "tone_generator_12m",
       "top": "tb_tone_generator",
-      "sources": ["sim/tb_tone_generator.v"],
-      "generics": {"TB_SYS_CLK_HZ": "12000000"},
+      "sources": [
+        "sim/tb_tone_generator.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
       "timeoutSeconds": 120,
       "passPattern": "TB_TONE_GENERATOR: PASS",
       "failPattern": "TB_TONE_GENERATOR: FAIL"
@@ -57,7 +129,9 @@
     {
       "name": "top_default",
       "top": "tb_finger_piano_top",
-      "sources": ["sim/tb_finger_piano_top.v"],
+      "sources": [
+        "sim/tb_finger_piano_top.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_FINGER_PIANO_TOP: PASS",
@@ -66,8 +140,12 @@
     {
       "name": "top_active_low",
       "top": "tb_finger_piano_top",
-      "sources": ["sim/tb_finger_piano_top.v"],
-      "generics": {"TB_KEY_ACTIVE_HIGH": "0"},
+      "sources": [
+        "sim/tb_finger_piano_top.v"
+      ],
+      "generics": {
+        "TB_KEY_ACTIVE_HIGH": "0"
+      },
       "timeoutSeconds": 120,
       "passPattern": "TB_FINGER_PIANO_TOP: PASS",
       "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
@@ -75,8 +153,12 @@
     {
       "name": "top_filter_bypass",
       "top": "tb_finger_piano_top",
-      "sources": ["sim/tb_finger_piano_top.v"],
-      "generics": {"TB_KEY_FILTER_ENABLE": "0"},
+      "sources": [
+        "sim/tb_finger_piano_top.v"
+      ],
+      "generics": {
+        "TB_KEY_FILTER_ENABLE": "0"
+      },
       "timeoutSeconds": 120,
       "passPattern": "TB_FINGER_PIANO_TOP: PASS",
       "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
@@ -84,7 +166,9 @@
     {
       "name": "i2c_master",
       "top": "tb_i2c_master",
-      "sources": ["sim/tb_i2c_master.v"],
+      "sources": [
+        "sim/tb_i2c_master.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_I2C_MASTER: PASS",
@@ -93,7 +177,10 @@
     {
       "name": "ads1115_ctrl",
       "top": "tb_ads1115_ctrl",
-      "sources": ["sim/tb_ads1115_ctrl.v", "sim/models/ads1115_model.v"],
+      "sources": [
+        "sim/tb_ads1115_ctrl.v",
+        "sim/models/ads1115_model.v"
+      ],
       "generics": {},
       "timeoutSeconds": 240,
       "passPattern": "TB_ADS1115_CTRL: PASS",
@@ -102,7 +189,10 @@
     {
       "name": "mcp4725_ctrl",
       "top": "tb_mcp4725_ctrl",
-      "sources": ["sim/tb_mcp4725_ctrl.v", "sim/models/mcp4725_model.v"],
+      "sources": [
+        "sim/tb_mcp4725_ctrl.v",
+        "sim/models/mcp4725_model.v"
+      ],
       "generics": {},
       "timeoutSeconds": 240,
       "passPattern": "TB_MCP4725_CTRL: PASS",
@@ -111,7 +201,9 @@
     {
       "name": "sensor_code_decoder",
       "top": "tb_sensor_code_decoder",
-      "sources": ["sim/tb_sensor_code_decoder.v"],
+      "sources": [
+        "sim/tb_sensor_code_decoder.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_SENSOR_CODE_DECODER: PASS",
@@ -120,7 +212,9 @@
     {
       "name": "sensor_code_filter",
       "top": "tb_sensor_code_filter",
-      "sources": ["sim/tb_sensor_code_filter.v"],
+      "sources": [
+        "sim/tb_sensor_code_filter.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_SENSOR_CODE_FILTER: PASS",
@@ -129,7 +223,9 @@
     {
       "name": "sensor_code_frontend_high",
       "top": "tb_sensor_code_frontend",
-      "sources": ["sim/tb_sensor_code_frontend.v"],
+      "sources": [
+        "sim/tb_sensor_code_frontend.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_SENSOR_CODE_FRONTEND: PASS",
@@ -138,8 +234,12 @@
     {
       "name": "sensor_code_frontend_low",
       "top": "tb_sensor_code_frontend",
-      "sources": ["sim/tb_sensor_code_frontend.v"],
-      "generics": {"TB_ACTIVE_HIGH": "0"},
+      "sources": [
+        "sim/tb_sensor_code_frontend.v"
+      ],
+      "generics": {
+        "TB_ACTIVE_HIGH": "0"
+      },
       "timeoutSeconds": 120,
       "passPattern": "TB_SENSOR_CODE_FRONTEND: PASS",
       "failPattern": "TB_SENSOR_CODE_FRONTEND: FAIL"
@@ -147,7 +247,9 @@
     {
       "name": "sine_lut_12bit",
       "top": "tb_sine_lut_12bit",
-      "sources": ["sim/tb_sine_lut_12bit.v"],
+      "sources": [
+        "sim/tb_sine_lut_12bit.v"
+      ],
       "generics": {},
       "timeoutSeconds": 120,
       "passPattern": "TB_SINE_LUT_12BIT: PASS",
@@ -156,7 +258,9 @@
     {
       "name": "dds_sine_generator",
       "top": "tb_dds_sine_generator",
-      "sources": ["sim/tb_dds_sine_generator.v"],
+      "sources": [
+        "sim/tb_dds_sine_generator.v"
+      ],
       "generics": {},
       "timeoutSeconds": 240,
       "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
@@ -165,8 +269,12 @@
     {
       "name": "dds_sine_generator_12m",
       "top": "tb_dds_sine_generator",
-      "sources": ["sim/tb_dds_sine_generator.v"],
-      "generics": {"TB_SYS_CLK_HZ": "12000000"},
+      "sources": [
+        "sim/tb_dds_sine_generator.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
       "timeoutSeconds": 240,
       "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
       "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
@@ -174,19 +282,88 @@
     {
       "name": "dds_sine_generator_disabled",
       "top": "tb_dds_sine_generator",
-      "sources": ["sim/tb_dds_sine_generator.v"],
-      "generics": {"TB_ENABLE": "0"},
+      "sources": [
+        "sim/tb_dds_sine_generator.v"
+      ],
+      "generics": {
+        "TB_ENABLE": "0"
+      },
       "timeoutSeconds": 120,
       "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
       "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline_12m",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "1",
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline_error",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "2",
+        "TB_ADDR": "97",
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline_disabled",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "3"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
     }
   ],
   "verification": {
     "expectImplementationBlocked": false,
     "failOnSynthesisWarnings": true,
     "clockName": "clk",
-    "resetNames": ["rst_n", "rst_n_sync"],
-    "forbiddenEdgeSignals": ["clk_2m", "audio_out"]
+    "resetNames": [
+      "rst_n",
+      "rst_n_sync"
+    ],
+    "forbiddenEdgeSignals": [
+      "clk_2m",
+      "audio_out"
+    ]
   },
   "programming": {
     "cableType": "digilent",
