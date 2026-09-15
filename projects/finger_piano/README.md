@@ -7,6 +7,25 @@
 - 顶层：`finger_piano_top`
 - 时钟：外部有源晶振作为**唯一**系统时钟；全工程只有一个时钟域 `clk`，无门控时钟、无逻辑产生的第二时钟
 
+## 0. 当前状态（Toolchain Freeze v1 口径）
+
+**已完成（均有真机或工具证据）**：RTL、综合（0 errors / 0 warnings）、6 个仿真用例、实现（MAP/PAR 0/0）、时序（`TS_clk = PERIOD 83.33 ns` 读 `timing.twr`：0 timing errors、最差 slack 70.697 ns）、bitstream（`design.bit` 54 738 字节）、**JTAG 易失配置**（`-Mode Jtag`）、**ISF erase/program/verify**（`-Mode Isf`，run `program-20260915-083244-bf54acda`）。
+
+**尚未完成（外围硬件未搭建，未做测量）**：
+
+```
+power-cycle persistent boot   = NOT_TESTED   # 成功写入后尚未做断电启动验证
+board functional test         = NOT_TESTED
+sensor input test             = NOT_TESTED   # 压力传感器调理电路未搭建
+audio output measurement      = NOT_TESTED   # 未用示波器/频率计测 P12
+LM386 test                    = NOT_TESTED
+speaker test                  = NOT_TESTED
+complete finger-piano acceptance = NOT_TESTED
+userDesignFunctional          = NOT_TESTED
+```
+
+**这些一律记为 `NOT_TESTED`，不得写成 FAIL。** 烧录结论（`programmingVerified = VERIFIED`）与板卡功能结论是两件事，不可互相推导。
+
 ## 1. 顶层端口
 
 | 端口 | 方向 | 位宽 | 说明 |
@@ -268,7 +287,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 - `readStatusRegister -p 1 -flash`：`Device Density Bits: 0011` → 按 XCN14003/AR59572 的对应关系为 **X-FAB ISF，1 Mbit**（非 UMC）；`Sector Protection enabled = 0`、全部 sector `NOT SECURED`/`NOT LOCKED DOWN` → **无写保护**。
 - `blankCheck -p 1 -spi`：`Part is not blank`（Flash 里有内容）。
-- `readStatusRegister -p 1 -fpga`（未加载 SPI core 时）：`CRC error = 1`、`CFG_RDY(INIT_B) = 0`、`DONEIN = 0` → **从 Flash 启动以 CRC 错误失败**。
+- `readStatusRegister -p 1 -fpga`（未加载 SPI core 时）：`CRC error = 1`、`CFG_RDY(INIT_B) = 0`、`DONEIN = 0` → 从 Flash 启动以 CRC 错误失败。
+  > **HISTORICAL（已被后续成功写入取代）**：这条读数是在**三次失败写入之后、成功写入之前**采集的，反映的是当时的损坏内容；它**不代表**当前 ISF 状态，也不能作为当前持久启动的结论。
 - 环境/补丁：`MYXILINX` 与 `ISE_XCN14003_patch` **均未设置**，ISE 安装内无任何 `*patch*` 文件，`impact` 为 `Release 14.7 - iMPACT P.20131013`，`spartan3a\data` 全部为 2013/10/13 基准文件 → **未安装 XCN14003 补丁**；因器件判定为 X-FAB，该补丁（针对 X-FAB→UMC 算法变更）在本例中按判定树不需要。
 
 **已排除**：下载线选择方式（`-p auto` 同样失败，选项 A 实测）、bitstream 文件（与成功那次同一 SHA-256）、命令序列（转录前缀逐行相同）、Flash 写保护、工具判定层（工具如实报 FAIL）。
@@ -291,7 +311,8 @@ Elapsed time =      7 sec.                          ← 失败时是 65 sec
 
 `run.json`：`result = PASS`、`programmingCompleted = PASS`、`programmingVerified = VERIFIED`、`preflightState = COMPLETE`、`cableSerialSeen = 210241672559`（无 mismatch）、`programAttempts = 2`（**第 1 次是只读 preflight 冷启动失败、未写入**，第 2 次完成唯一一次写入）。
 
-**根因（有对照证据）**：此前 `program -p N -v` 的**隐式擦除没有真正擦净**，于是在未擦净的内容上编程 → 编程自称成功而回读第 0 页失配、FPGA 启动 CRC 错误。同一镜像、同一下载线、同一工具，**唯一差别是加了 `-e`**，结果由恒定失败变为通过。因此工具的 ISF 路径固定为 `program -p N -e -v` 并强制擦除门禁。
+**根因（工程结论，措辞已冻结）**：旧 ISF 流程在**重写非空 ISF 时没有显式执行擦除**。加入 `-e` 后，iMPACT 明确完成 `Erase → Program → Verify`，原先稳定出现的 page 0 verify failure 消失。因此工程上将「缺少显式 erase」认定为本次 ISF 重写失败的根因。
+（**不要**写成「`program -v` 的隐式 erase 没有擦净」——没有直接证据证明旧流程真的执行过 erase。同一镜像、同一下载线、同一工具，唯一差别是加了 `-e`。）
 
 **结论 B（断电重启持久启动）：仍未测试**，必须在上面 verify PASS 之后再单独进行，且不得从 programming PASS 推导。
 

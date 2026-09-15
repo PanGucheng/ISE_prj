@@ -6,6 +6,54 @@
 
 本机已确认安装 `C:\Program Files\PowerShell\7\pwsh.exe`，版本 7.6.5。如果新终端未识别 pwsh，可直接使用该绝对路径；不依赖 Codex 的缓存运行时。入口通过 `#Requires -Version 7.0` 拒绝旧版本 PowerShell。
 
+## 日常流程（Toolchain Freeze v1）
+
+**只需要这五条命令。** 底层细节（iMPACT 批处理、`fuse`、SSH staging 目录、Digilent target 语法、ISF 擦除顺序）都由工具负责，使用课程设计时不需要理解它们。
+
+```powershell
+# 修改 RTL 之后：配置检查 + 静态检查 + 综合 + 全部仿真 + implement 门禁
+.\ise.ps1 verify -Project finger_piano
+
+# 生成 bitstream
+.\ise.ps1 build  -Project finger_piano -Stage bitstream
+
+# 检查下载线（只读）
+.\ise.ps1 probe  -Project finger_piano
+
+# 临时下载调试（掉电丢失，不写内部 Flash）
+.\ise.ps1 program -Project finger_piano -Mode Jtag `
+    -BitFile projects\finger_piano\artifacts\<构建编号>\results\design.bit `
+    -ConfirmHardwareWrite
+
+# 最终持久化（写入 Spartan-3AN 内部 ISF，上电自动配置）
+.\ise.ps1 program -Project finger_piano -Mode Isf `
+    -BitFile projects\finger_piano\artifacts\<构建编号>\results\design.bit `
+    -ConfirmHardwareWrite
+```
+
+没有 `-ConfirmHardwareWrite` 时 `program` **只做预览**，不会写 FPGA，也不会写 ISF。
+`program` 的结论里 `programmingVerified = VERIFIED` **不等于**设计在板上能用；板卡功能永远单独判定。
+
+## 冻结的正式命令集合（不再新增烧录模式）
+
+| 命令 | 作用 |
+|---|---|
+| `doctor` | 本机/远端环境与传输自检 |
+| `new` | 新建工程骨架（器件与源文件需自行填写） |
+| `check` | 只做配置与门禁检查，不构建 |
+| `build` | 从新目录构建到 `synth` / `implement` / `bitstream` |
+| `fetch` | 按构建编号补取远端结果 |
+| `sim` | 运行 `project.json` 里的仿真用例 |
+| `verify` | 主验收入口：配置+静态+综合+全部仿真+implement 门禁 |
+| `report` | 只读汇总已有 artifacts（不重新构建，时序永不自动 PASS） |
+| `probe` | **只读** JTAG 链检测 |
+| `probe-diag` | 下载线 / Adept 层诊断实验工具 |
+| `program -Mode Jtag` | 易失 FPGA 配置 |
+| `program -Mode Isf` | Spartan-3AN 内部 ISF 持久化写入 |
+| `board-check` | 板卡约束比对（缺少 `board.json` 时 `NOT_CONFIGURED`） |
+
+工具链的完整冻结说明见 **`doc/ISE工具链最终状态.md`**。
+
 ## 使用
 
 在 PowerShell 中运行：
@@ -29,6 +77,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 report -Project finger_p
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 report -Project finger_piano -RunId <构建编号> -Json
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 board-check -Project finger_piano
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 probe       -Project finger_piano
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 probe-diag  -Project finger_piano -Iterations 8 -DiagSession Ssh
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 program -Project finger_piano -Mode Jtag -BitFile <path>
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile <path> -ConfirmHardwareWrite
 ```
@@ -192,7 +241,7 @@ pwsh -File .\ise.ps1 report -Project finger_piano -Latest -Json
 pwsh -File .\ise.ps1 board-check -Project finger_piano
 ```
 
-没有 `projects/<工程>/board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED` 并列出还缺什么；`board.json` 已存在时输出 `BOARD_CHECK: NOT_IMPLEMENTED`。**不猜引脚、不改 UCF、不自动设置 `constraintsReviewed`，本轮不实现烧录。**
+没有 `projects/<工程>/board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED` 并列出还缺什么；`board.json` 已存在时输出 `BOARD_CHECK: NOT_IMPLEMENTED`。**不猜引脚、不改 UCF、不自动设置 `constraintsReviewed`。**（烧录已经实现，见 `program`；`board-check` 本身仍是占位入口。）
 
 ## JTAG 探测与烧录（probe / program）
 
@@ -264,8 +313,10 @@ hardware_transaction.cmd
 
 ### ISF 写入必须显式擦除并受门禁约束
 
-`-Mode Isf` 使用 **`program -p N -e -v`**（`-e` = erase）。实测教训：不带 `-e` 的 `program -p N -v` 会在同一份转录里打印
-`Programming completed successfully`，随后 `Verifying device...Verify failed on page 0` —— 写入自称成功、内容却是错的。
+`-Mode Isf` 使用 **`program -p N -e -v`**（`-e` = erase）。
+
+> **根因（工程结论，措辞已冻结）**：旧 ISF 流程在**重写非空 ISF 时没有显式执行擦除**。加入 `-e` 后，iMPACT 明确完成 `Erase → Program → Verify`，原先稳定出现的 page 0 verify failure 消失。因此工程上将「缺少显式 erase」认定为本次 ISF 重写失败的根因。
+> （不要写成「`program -v` 的隐式 erase 没有擦净」——没有直接证据证明旧流程真的执行过 erase。）
 
 因此工具的判定加了**硬门禁**：
 1. 必须出现 `Erasing device...`；
@@ -285,6 +336,35 @@ CABLE_UNAVAILABLE      iMPACT 回退到 Platform Cable/并口后仍失败
 
 **「Windows 里设备存在」不能证明「Adept 能枚举/打开它」**：实测在失败前后 `wmic Win32_PnPEntity` 都显示 `USB\VID_0403&PID_6014\210241672559 Status=OK`。因此摘要明确写出这一层区别，不再声称「下载线对虚拟机不可见」。
 
+### 结果状态模型（冻结）
+
+文档与 `run.json` 一律使用这六个字段，不允许改名或合并：
+
+```
+cableDetected        PASS | DIGILENT_ENUM_FAILED | DIGILENT_OPEN_FAILED | CABLE_UNAVAILABLE | UNKNOWN | PENDING (checked inside the transaction)
+jtagChainDetected    PASS | FAIL | INCONCLUSIVE | NOT_RUN
+deviceMatched        PASS | FAIL | UNDETERMINED
+programmingCompleted PASS | PASS_UNCONFIRMED | FAIL | TIMEOUT | PROGRAM_STATE_UNKNOWN | NOT_RUN
+programmingVerified  VERIFIED | CONFIG_STATUS_OK | NOT_APPLICABLE | NOT_REPORTED | FAIL | TIMEOUT | NOT_RUN
+userDesignFunctional NOT_TESTED
+```
+
+- **`programmingVerified = VERIFIED` 不等于 `userDesignFunctional = PASS`。**前者只说明 iMPACT 转录里的擦除/编程/校验过程完成；后者需要板卡上真实的功能测量。
+- 工具**永远**不会仅凭烧录结果打印 `BOARD PASS`；`userDesignFunctional` 的固定值是 `NOT_TESTED`。
+
+### 已否定 / 已撤回的历史结论（HISTORICAL · SUPERSEDED）
+
+以下结论都曾被写进文档，随后被真机实验否定。保留在此仅作追溯，**不得再作为依据**：
+
+| 已否定结论 | 真机实验如何推翻 |
+|---|---|
+| “Spartan-3AN 经 iMPACT 批处理没有易失 SRAM 配置路径” | `program -p N -onlyFpga` 实测为**纯 FPGA fabric 配置**（`Programming device` → `Completed downloading bit file to device`，无 SPI/Flash 行），连续两次 PASS |
+| “`-onlyFpga` 属于需要 `.msk` 的另一条流程，不是易失配置” | 只有 **`-onlyFpga` + `-v`** 才要求 BitGen 的 `.msk`；去掉 `-v` 即为正常易失配置 |
+| “`assignFileToAttachedFlash` 是写内部 ISF 的路径” | 它是**外挂** PROM 的 indirect SPI 流程，对内部 ISF 报 `No attached device found at position '1'`；内部 ISF 用 `assignFile` + `program` |
+| “`program -p N -v` 足以可靠重写 ISF” | 在**非空** ISF 上重写时恒定 `Verify failed on page 0`；改为 `program -p N -e -v` 后一次通过 |
+| “USB/JTAG cable is not visible inside fpga-vm（`CABLE_NOT_FOUND`）” | 失败前后 Windows PnP 都显示设备 `Status=OK`；真实失败发生在 Adept 枚举/打开层 |
+| “Session 0（SSH 服务会话）是下载线失败主因” | Session 0 与交互会话（Task Scheduler InteractiveToken）的 A/B 失败形态几乎镜像，不足以支持该结论；该假设已放弃（不再继续研究） |
+
 **JTAG 编程使用下载线产生的 TCK，不依赖用户时钟。** 因此即使 12 MHz 有源晶振没插/没起振，只要 FPGA 供电、JTAG 与下载器正常，`probe`（链路识别）与 `program` 都应该能工作；反过来，烧录成功也**不代表**用户设计能跑（手指钢琴需要 12 MHz 时钟才能发声）。
 
 ### iMPACT batch 命令是实测得到的，不是猜的
@@ -299,7 +379,7 @@ CABLE_UNAVAILABLE      iMPACT 回退到 Platform Cable/并口后仍失败
 | 顺序要求 | 除 `setMode` 外一切命令都报 `ERROR:iMPACT:351 - setMode is required before this operation.`，所以脚本必须 `setMode` 优先 |
 | `setMode -bs` / `-bscan` | 均被接受（RC=0）；`setMode` 空参 → `ERROR:iMPACT:339 - Mode string is required` |
 | `setCable -p auto` | 通过 Digilent 插件枚举/打开下载器（实测枚举到 Digilent JTAG-HS2，SN 210241672559，TCK 10 MHz） |
-| `assignFile -p N -file X`、`assignFileToAttachedFlash -p N -file X` | 语法被接受（无链时只报 `ERROR:iMPACT:589 - No devices on chain, can't assign file`，未报参数错误） |
+| `assignFile -p N -file X`、`assignFileToAttachedFlash -p N -file X` | 语法均被接受（无链时只报 `ERROR:iMPACT:589 - No devices on chain, can't assign file`，未报参数错误）。**注意**：`assignFileToAttachedFlash` 只适用于**外挂** SPI/BPI PROM，用它写内部 ISF 会报 `No attached device found at position '1'`（见下方 HISTORICAL 说明） |
 | `listUsbCables` | 只认 Xilinx Platform Cable USB，实测在有 Digilent 线时仍报“未检测到 Platform Cable”→ **不能**用作通用下载线探测 |
 | `blankCheck`（未先 setMode） | iMPACT 直接崩溃（RC `-1073741819` = 0xC0000005），因此工具绝不乱序调用 |
 | **退出码可信度** | **不可靠**：同一条失败的 `identify` 一次返回 0、一次返回 1。工具因此只把退出码当记录，判定一律解析转录日志 |
@@ -325,7 +405,8 @@ Match           YES | NO | UNDETERMINED
 Result          PASS | FAIL
 ```
 
-- 下载线不可见时输出 `CABLE_NOT_FOUND` 与 `USB/JTAG cable is not visible inside fpga-vm`，**不修改 VM 配置、不自动 USB attach**，只报告。
+- 下载线不可用时按**分层**状态报告（`DIGILENT_ENUM_FAILED` / `DIGILENT_OPEN_FAILED` / `CABLE_UNAVAILABLE`），**不修改 VM 配置、不自动 USB attach**，只报告。
+  > **HISTORICAL / 已废弃**：早期输出 `CABLE_NOT_FOUND` 与 “USB/JTAG cable is not visible inside fpga-vm”。该措辞已被真机实验否定（设备在 Windows 里存在且状态正常时，Adept 层仍可能打不开），不再使用。
 - 只有「下载线 PASS + 链 PASS + 器件匹配」才 PASS；解析不出器件时是 `UNDETERMINED`/`FAIL`，**绝不伪造成 PASS**。
 - probe 会下载对应 BSDL 到 `artifacts/probe-*/inputs/fpga.bsd` 作为期望 IDCODE 的依据与留档。
 - 本 ISE 版本的 `identify` 只打印器件名、**不打印 32 位 IDCODE**；工具因此额外执行 `readIdcode -p 1`，其输出形如 `'1': IDCODE is '02610093' (in hex)`（工具同时能解析十六进制与 32 位二进制两种写法，并把 IDCODE 归到对应 position）。

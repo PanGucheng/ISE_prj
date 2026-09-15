@@ -35,8 +35,20 @@
 - sim 的判据是日志出现 `passPattern`：退出码 0 不算通过，既无 PASS 也无 FAIL 视为 FAIL；generic 覆盖只在 fuse 阶段生效，每次参数组合重新 fuse；超时会终止本地 SSH 会话并判 FAIL。
 - `pwsh -File .\ise.ps1 report -Project <名称> (-RunId <id> | -Latest) [-Json]` 只读取已有 artifacts，不重新构建；`timing` 在有人实际阅读 timing.twr 之前只能是 `NOT_RUN`/`NEEDS_REVIEW`，不得据此声称时序通过。
 - implement 是否应当被阻止由 project.json 的 `verification.expectImplementationBlocked` 决定（当前为 `true`）。verify 以此判定 EXPECTED BLOCK 是否 PASS，工具内不写工程名特例。
-- `board-check` 目前只在缺少 `board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED`；不得猜测引脚，不得自动设置 `constraintsReviewed=true`，本轮不实现烧录。
+- `board-check` 目前只在缺少 `board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED`，存在时输出 `BOARD_CHECK: NOT_IMPLEMENTED`；不得猜测引脚，不得自动设置 `constraintsReviewed=true`。（烧录已实现，见 `program`；`board-check` 仍是占位入口。）
 - 工具自测 `pwsh -NoProfile -File .\tools\test-tools.ps1` 覆盖失败路径（fuse 失败、超时、无 PASS 模式、failPattern、门禁两个方向、report 缺文件、旧工程兼容），使用隔离目录与模拟远端，不代表真实综合或真实仿真。
+
+## 工具链冻结（Toolchain Freeze v1）
+
+- **正式命令集合已冻结，不再增加烧录模式**：`doctor / new / check / build / fetch / sim / verify / report / probe / probe-diag / program / board-check`。`program` 只有 `-Mode Jtag`（易失）与 `-Mode Isf`（持久）两种，不得新增第三种。
+- **Spartan-3AN 语义（真机验证过，不得改动）**：
+  - `-Mode Jtag` = `assignFile` + **`program -p N -onlyFpga`** → VOLATILE，只配置 FPGA fabric，不写内部 ISF，**不加 `-v`**。
+  - `-Mode Isf` = `assignFile` + **`program -p N -e -v`** → NON-VOLATILE，显式 erase → program → verify。
+  - **禁止**把 `program -p N -v` 恢复为正式 ISF 重写流程。
+- **ISF 失败根因的措辞已冻结**：只能写「旧 ISF 流程在重写非空 ISF 时没有显式执行擦除；加入 `-e` 后 iMPACT 明确完成 Erase → Program → Verify，原先稳定出现的 page 0 verify failure 消失，因此工程上将『缺少显式 erase』认定为根因」。**不得**写成「隐式 erase 没有擦净」（没有证据证明旧流程执行过 erase）。
+- **下载线配置固定**：Digilent JTAG-HS2、`SN = 210241672559`、`TCK = 10000000 Hz`、`position = 1`；正式 `probe`/`program` 必须用显式 target，`-p auto` 只允许出现在 `probe-diag`。
+- **hardware transaction 架构保留**：local static validation → 一次上传 → remote hardware transaction → 只读 preflight → 立即 program → fetch。两段之间不得插入 SSH 往返 / SFTP / 本地解析 / 数秒 sleep。Adept 冷启动 `DmgrOpenEx erc=3072` 已由事务内只读 preflight retry 吸收，**不需要继续研究 Session 0**。
+- **本轮冻结期间禁止**：改 RTL 功能、改引脚、重写 ISF、调 Windows USB 电源策略、再做 Session 0 A/B、再做几十次 probe 统计、GUI 自动化、新增 programmer backend。
 
 ## JTAG 探测与烧录
 
@@ -44,7 +56,9 @@
 - `program` 是硬件写操作，**默认只预览**（PREVIEW ONLY：打印 cable/chain/device/position/bitstream/mode 后结束，不生成写脚本、不执行 program）。必须由用户明确要求并带 `-ConfirmHardwareWrite` 才真正写入。
 - 两种模式含义不同、不得混用：`-Mode Jtag` = 通过 JTAG 配置 FPGA 本体（VOLATILE），`program -p N -onlyFpga`；`-Mode Isf` = 编程 Spartan-3AN 内部 ISF（NON-VOLATILE，上电自动配置），**`program -p N -e -v`**。Isf 执行前必须提示 `M[2:0] = 011` 与 `VCCAUX = 3.3 V`。
 - **ISF 的擦除阶段是硬门禁**：不带 `-e` 的 `program -v` 实测会打印 `Programming completed successfully` 却随后 `Verify failed on page 0`（写入自称成功、内容错误）。因此 `-Mode Isf` 必须用 `-e`，且必须在转录中看到 `Erasing device...` 与 `Erasure completed successfully.`（且无 erase 失败行）之后，才允许采信 `Programming Flash...`/`Programming completed successfully`/`Verification completed successfully`。擦除一旦启动即视为已动 Flash → **绝不自动重试写入**。
-- **实测结论（ISE 14.7 + XC3S50AN，2026-09-14）**：同一个 `assignFile` + `program` 因 `-onlyFpga` 而含义不同——不加它是写**内部 ISF**（转录出现 `SPI access core`、`Programming Flash`、sector/page），加它是**只配置 FPGA 本体**（`Programming device` → `Completed downloading bit file to device`，无任何 SPI/Flash 行）。因此：Jtag 模式必须带 `-onlyFpga` 且**默认不加 `-v`**（FPGA 回读校验需要 BitGen `-m` 的 `.msk`，否则报 `ERROR:Bitstream:2 ... design.msk does not exist`）；Isf 模式用 `-v` 作为 in-step 校验。`assignFileToAttachedFlash`/`-spi` 属于**外挂** PROM 的 indirect SPI 流程，对内部 ISF 会报 `No attached device found at position '1'`，不得使用。
+- **实测结论（ISE 14.7 + XC3S50AN）**：同一个 `assignFile` + `program` 因 `-onlyFpga` 而含义不同——不加它是写**内部 ISF**（转录出现 `SPI access core`、`Programming Flash`、sector/page），加它是**只配置 FPGA 本体**（`Programming device` → `Completed downloading bit file to device`，无任何 SPI/Flash 行）。因此：Jtag 模式必须带 `-onlyFpga` 且**不加 `-v`**（FPGA 回读校验需要 BitGen `-m` 的 `.msk`，否则报 `ERROR:Bitstream:2 ... design.msk does not exist`）；Isf 模式用 **`-e -v`** 作为显式擦除 + in-step 校验。`assignFileToAttachedFlash`/`-spi` 属于**外挂** PROM 的 indirect SPI 流程，对内部 ISF 会报 `No attached device found at position '1'`，不得使用。
+- **已撤回的历史结论（不得再作为依据）**：「Spartan-3AN 没有易失 SRAM 配置路径」（被 `-onlyFpga` 推翻）、「`-onlyFpga` 需要 `.msk` 所以不是易失配置」（只有 `-onlyFpga + -v` 才需要 `.msk`）、「`assignFileToAttachedFlash` 用于内部 ISF」（被 `No attached device found` 推翻）、「`program -v` 足以可靠重写 ISF」（被 page 0 verify failure 推翻）、「下载线对虚拟机不可见 / `CABLE_NOT_FOUND`」（被 PnP 实测推翻）、「Session 0 是主因」（被会话 A/B 推翻）。
+- **结果状态模型固定为六个字段**：`cableDetected` / `jtagChainDetected` / `deviceMatched` / `programmingCompleted` / `programmingVerified` / `userDesignFunctional`。`programmingVerified = VERIFIED` **不等于** `userDesignFunctional = PASS`；后者需要板卡功能测量，工具固定输出 `NOT_TESTED`，永不打印 `BOARD PASS`。
 - **不跑独立 `verify`**：实测 `verify -p N` 与 `verify -p N -sram` 均回 `Verify failed on page 0`（即使紧接在一次 iMPACT 已自行 `Verification completed successfully` 的写入之后），其结论不可信。校验结论一律取自 program 转录：`Verification completed successfully` → `VERIFIED`；出现 `Verify failed` → `FAIL`；FPGA 配置且 `DONEIN=1`/`CRC error=0` → `CONFIG_STATUS_OK`。转录里的器件状态寄存器（`M[2:0]`、`DONEIN`、`CRC error`、`VSEL`）必须解析并在摘要中显示。
 - Jtag 模式的转录里若出现任何内部 Flash 编程迹象，判 FAIL 并标注 `MODE VIOLATION`（易失语义被破坏、非易失 Flash 已被改动）。
 - **正式 probe / program 必须固定下载线**：`programming.cableType/cableSerial/cableFrequencyHz` → `setCable -target "digilent_plugin DEVICE=SN:<sn> FREQUENCY=<measured>"`。`cableFrequencyHz` 只能来自真实转录，缺失就报错停止，**永不默认 10000000**。`-p auto` 只允许出现在 `probe-diag`。摘要必须打印 cable provider/serial/target/frequency 与转录中实际出现的序列号，不符即 `CABLE MISMATCH` 判 FAIL。
@@ -61,7 +75,7 @@
 ## 凭据与操作范围
 
 - 复用 `ssh fpga-vm` 的本机密钥配置。不要要求用户重复提供密码，不向工程或日志写入密码、私钥内容。
-- 常规源码修改和构建按用户任务授权执行；本工具没有烧录入口，不自动操作 JTAG。
+- 常规源码修改和构建按用户任务授权执行；JTAG 写入必须由用户明确要求并带 `-ConfirmHardwareWrite`，工具自身不做隐式烧录。
 - 构建仅写入远端 `C:\Users\PanGucheng\ise-builds` 下的受管目录，不改系统环境变量或现有 ISE 安装。
 - 不自动删除构建目录；如用户要求清理，先解析并确认绝对路径在受管根目录内，禁止删除整个用户目录或越界路径。
 - 工具和目录约定改变时同步更新 README.md、AGENTS.md。不要把密钥复制进版本库；忽略 artifacts 与 tools/.work。
