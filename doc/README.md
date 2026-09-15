@@ -1,0 +1,772 @@
+# finger_piano 文档入口
+
+本目录是 `finger_piano` 课程设计的软件、FPGA、扩展外设与验证文档入口。
+
+当前工程采用 **Xilinx ISE 14.7 + XC3S50AN**。已验证的 legacy baseline 仍保留现有方波电子琴路径；新增的 3-bit 传感器输入、ADS1115、MCP4725、DDS 和压力数据处理均按照独立计划分阶段开发、独立仿真，并在板级管脚与实物条件确认后再进行最终顶层集成。
+
+> **重要：计划文档描述“准备怎样实现”，不等于相关功能已经实现或已经通过板上验证。**
+>
+> 实际状态必须以当前源码、`projects/finger_piano/README.md`、Git 提交记录以及
+>
+> ```powershell
+> pwsh -File .\ise.ps1 verify -Project finger_piano
+> ```
+>
+> 的真实结果为准。
+
+---
+
+## 1. 从哪里开始
+
+如果第一次进入本工程，建议依次阅读：
+
+1. [ISE 工具链最终状态](./ISE工具链最终状态.md)  
+   了解当前冻结的构建、仿真、JTAG、ISF 和安全边界。
+
+2. [finger_piano 工程 README](../projects/finger_piano/README.md)  
+   了解当前 RTL、板卡、历史验证结果和仍未完成的实物测试。
+
+3. 本页下面的“开发计划执行顺序”  
+   根据依赖关系选择下一项开发任务。
+
+日常修改 RTL 后的主验收入口始终是：
+
+```powershell
+pwsh -File .\ise.ps1 verify -Project finger_piano
+```
+
+除非明确进入人工板级验证阶段，否则开发 Agent 不得执行 program。
+
+2. 当前总体架构
+
+最终目标系统分为三条逻辑上相互独立的数据链。
+
+2.1 数字音符选择链
+
+真实硬件最终采用三个 LM393 比较器输出组成 3-bit 编码：
+
+FSR ×3
+  ↓
+模拟调理
+  ↓
+LM393 ×3
+  ↓
+sensor_code[2:0]
+  ↓
+同步 + whole-vector 稳定滤波
+  ↓
+000 = 静音
+001~111 = C4~B4
+  ↓
+note_code[2:0]
+
+当前仓库仍保留已经验证的：
+
+key_in[6:0]
+  ↓
+7-key legacy priority encoder
+  ↓
+note_code
+
+该路径是 legacy baseline，不是最终三传感器硬件模型。
+
+2.2 模拟压力采集链
+
+三个压力传感器的模拟量经 ADS1115 独立采集：
+
+FSR ×3
+  ↓
+TL084 / RC
+  ↓
+ADS1115
+  ↓
+CH0 / CH1 / CH2 raw ADC code
+  ↓
+pressure processing
+  ↓
+三路相对压力数据
+
+这一链负责“按压力度”，不负责决定当前是哪一个音符。
+
+2.3 DDS 数字音频链
+
+音符编码进入 DDS：
+
+note_code
+  ↓
+24-bit DDS phase accumulator
+  ↓
+sine LUT
+  ↓
+12-bit / 8 kS/s sine samples
+  ↓
+MCP4725
+  ↓
+模拟重构滤波
+  ↓
+LM386
+  ↓
+Speaker
+
+当前新增 DDS / MCP4725 设计不得破坏已经工作的：
+
+tone_generator → audio_out
+
+方波基线。
+
+3. 开发计划总览
+顺序	计划	解决的问题	主要依赖	本阶段是否接顶层
+P1	ADS1115 与 MCP4725 可选外设开发计划	I²C master、ADC driver、DAC driver	ISE 工具链	否
+P2	3-bit 传感器编码输入基础设施开发计划	三个 LM393 编码、同步、原子码字滤波	现有同步基础设施	否
+P3	DDS 正弦音频发生器开发计划	8 kS/s、24-bit DDS、12-bit 正弦样点	P1 的统一配置	否
+P4	DDS 到 MCP4725 数字音频链路集成计划	DDS 与 DAC controller 端到端吞吐	P1 + P3	否
+P5	ADS1115 压力数据处理与标定基础设施开发计划	ADC raw → 干净的三路压力数据	P1	否
+
+这些计划的共同原则是：
+
+先做独立 RTL 和可重复仿真，再做顶层和实物集成。
+
+4. 推荐执行顺序
+
+推荐 Agent 严格按照下面的依赖关系推进：
+
+                    ┌─────────────────────┐
+                    │ P1 I²C + ADC / DAC │
+                    └──────┬───────┬──────┘
+                           │       │
+                           │       └──────────────┐
+                           │                      │
+                           ▼                      ▼
+                  P5 Pressure             P3 DDS generator
+                    processing                    │
+                                                 │
+                                                 ▼
+                                      P4 DDS → MCP4725
+
+同时：
+
+P2 3-bit sensor input
+
+与上述两条数据链基本独立，可以在 P1 之后或与 P3 前后独立完成。
+
+推荐实际顺序：
+
+P1  ADS1115 / MCP4725 driver
+ ↓
+完整 verify
+ ↓
+P2  3-bit sensor input
+ ↓
+完整 verify
+ ↓
+P3  DDS sine generator
+ ↓
+完整 verify
+ ↓
+P4  DDS → MCP4725 pipeline
+ ↓
+完整 verify
+ ↓
+P5  ADS1115 pressure processing
+ ↓
+完整 verify
+
+任何阶段出现回归失败：
+
+先修复当前阶段，不得带着 FAIL 继续向后叠加功能。
+
+5. P1 — ADS1115 / MCP4725 可选外设
+
+入口：
+
+ADS1115 与 MCP4725 可选外设开发计划
+
+主要目标：
+
+通用 I²C master
+       ├── ADS1115 controller
+       └── MCP4725 controller
+
+关键设计冻结：
+
+ADC 与 DAC 使用两条独立 I²C 物理总线；
+可复用同一份 i2c_master.v，但必须为两个独立实例；
+ADS1115：
+AIN0 / AIN1 / AIN2；
+single-shot；
+860 SPS；
+PGA ±4.096 V；
+原始 16-bit two's-complement 数据；
+MCP4725：
+12 bit；
+Fast Write only；
+禁止 DDS 写 EEPROM；
+pending buffer + overrun；
+默认 I²C 目标约 333 kHz；
+两个外设默认关闭；
+不增加未确认的顶层 GPIO；
+不修改 UCF；
+不执行 program。
+
+协议实现的第一事实来源：
+
+ADS1115 数据手册
+MCP4725 数据手册
+
+任何寄存器、地址、位域或 I²C 时序问题，均以这两份仓库内手册为准。
+
+6. P2 — 3-bit 传感器编码输入
+
+入口：
+
+3-bit 传感器编码输入基础设施开发计划
+
+真实硬件只有三个压力传感器和三个比较器数字输出。
+
+项目编码冻结为：
+
+3-bit code	note
+000	静音
+001	C4
+010	D4
+011	E4
+100	F4
+101	G4
+110	A4
+111	B4
+
+关键设计不是简单的：
+
+3 × 独立 bit debounce
+
+而是：
+
+3-bit async input
+      ↓
+2FF synchronization
+      ↓
+whole-vector atomic stable filter
+      ↓
+3-bit stable code
+
+三个 bit 必须作为一个完整码字达到稳定条件后一次性提交，避免：
+
+001 → 011 → 111
+
+转换过程中短暂播放错误音符。
+
+本阶段只做 standalone infrastructure，不替换当前 7-key 顶层。
+
+7. P3 — DDS 正弦发生器
+
+入口：
+
+DDS 正弦音频发生器开发计划
+
+目标：
+
+note_code
+   ↓
+24-bit phase accumulator
+   ↓
+sine LUT
+   ↓
+12-bit unsigned samples
+   ↓
+8 kS/s valid
+
+当前冻结值：
+
+项	值
+Sample rate	8 kS/s
+Phase accumulator	24 bit
+Phase address	8 bit
+DAC width	12 bit
+Center	2048 / 12'h800
+Amplitude	1792
+Output range	256～3840
+Mute code	2048
+
+所有 DDS 时序仍运行在系统 clk：
+
+12 MHz clock
+   ↓
+sample clock-enable
+
+禁止产生：
+
+clk_8k
+
+作为第二时钟域。
+
+DDS 本阶段只生成数字样点，不声称已经产生真实模拟正弦波。
+
+8. P4 — DDS → MCP4725 数字链路
+
+入口：
+
+DDS 到 MCP4725 数字音频链路集成计划
+
+该计划不是重新实现 DDS 或 MCP4725，而是验证：
+
+DDS
+ ↓
+12-bit / 8 kS/s
+ ↓
+MCP4725 controller
+ ↓
+I²C
+ ↓
+MCP4725 behavioral model
+
+正常路径的核心验收目标：
+
+Generated : N
+Accepted  : N
+Written   : N
+Mismatch  : 0
+Overrun   : 0
+I2C error : 0
+
+计划要求真实 12 MHz 参数下进行长时间吞吐测试。
+
+DDS 的 8 kS/s 时间轴不能因为：
+
+DAC busy
+
+而暂停，否则会改变音频时间轴和实际频率。
+
+本计划完成只能说明：
+
+端到端数字音频数据链 PASS
+
+不能声称：
+
+MCP4725 实际模拟输出已经验证；
+RC 重构滤波已经验证；
+LM386 输入已经验证；
+扬声器已经验证。
+
+这些结论必须来自之后的实物测试。
+
+9. P5 — ADS1115 压力数据处理
+
+入口：
+
+ADS1115 压力数据处理与标定基础设施开发计划
+
+目标：
+
+ADS1115 raw
+     ↓
+三通道轮询扫描帧
+     ↓
+negative clamp
+     ↓
+zero-offset correction
+     ↓
+pressure_ch0
+pressure_ch1
+pressure_ch2
+
+特别注意：
+
+ADS1115 的 AIN0 / AIN1 / AIN2 是通过内部 MUX 顺序转换的，因此：
+
+三个通道组成的是“一轮扫描帧”，不是严格意义上的三个通道同时采样。
+
+当前没有真实 FSR 校准数据，所以禁止 Agent 猜测：
+
+released offset；
+light / normal / strong threshold；
+full-scale；
+牛顿压力；
+gain normalization。
+
+当前校准状态应保持：
+
+NOT_CALIBRATED
+
+默认 zero offset 为 0，只用于建立数据处理基础设施。
+
+10. 全工程共同不可违反的约束
+
+以下规则优先级高于任意单一计划中的局部实现便利。
+
+10.1 Legacy baseline 必须保持
+
+在真正进行最终集成前：
+
+finger_piano_top
+tone_generator
+audio_out
+现有 UCF
+
+不得因为扩展功能而随意修改。
+
+10.2 不猜板级管脚
+
+任何尚未由用户确认的：
+
+LM393 input pin
+ADS1115 SDA/SCL
+MCP4725 SDA/SCL
+
+均不得自行写 LOC。
+
+不得依赖 MAP 自动分配新增外设 I/O。
+
+10.3 新外设默认不启用
+
+ADS1115、MCP4725、DDS 等新增能力即使已经：
+
+IMPLEMENTED
+SIMULATED
+
+也不能因此自动成为当前板级设计的一部分。
+
+真正启用通常还需要：
+
+top-level port
++
+RTL instance
++
+verified UCF LOC
++
+board wiring
+10.4 只有一个系统时钟域
+
+全工程主时钟：
+
+clk
+
+派生节拍必须使用：
+
+clock enable
+
+不得把：
+
+audio_out
+sample_tick
+I2C SCL
+
+用作新逻辑时钟。
+
+10.5 ISE / Verilog 兼容性
+
+可综合 RTL 以：
+
+Verilog-2001
+
+为目标。
+
+不要无必要使用：
+
+logic
+always_ff
+always_comb
+SystemVerilog-only constructs
+
+项目启用了 synthesis warning 阻断策略，因此最终必须：
+
+XST errors   = 0
+XST warnings = 0
+10.6 仿真 PASS 不能只看退出码
+
+每个 testbench 必须产生明确：
+
+TB_xxx: PASS
+
+或：
+
+TB_xxx: FAIL
+
+工程工具按 passPattern / failPattern 判定。
+
+退出码 0 本身不代表功能 PASS。
+
+10.7 每阶段必须回归
+
+完成每个计划或重要 commit 后：
+
+pwsh -File .\ise.ps1 verify -Project finger_piano
+
+必须重新验证完整工程。
+
+不得只运行新增 TB 后就声称工程通过。
+
+10.8 开发 Agent 不执行板卡写入
+
+正常无人值守开发阶段：
+
+禁止 program -Mode Jtag
+禁止 program -Mode Isf
+
+构建和仿真不需要向 FPGA 写入任何内容。
+
+烧录由用户在明确需要时单独执行。
+
+11. 状态术语
+
+文档与 README 应尽量使用下面的状态，不混淆软件验证和实物验证。
+
+状态	含义
+PLANNED	只有计划，没有实现
+IMPLEMENTED	RTL/代码已实现
+SIMULATED	对应自动仿真已通过
+INTEGRATED	已接入系统顶层
+IMPLEMENTED / STANDALONE	已实现，但尚未接顶层
+NOT_INTEGRATED	尚未进入最终数据链或顶层
+NOT_CALIBRATED	真实硬件校准尚未完成
+NOT_BOARD_TESTED	没有实物验证证据
+PASS	对明确指定的测试对象和测试范围通过
+NOT_TESTED	尚未测试，不等于失败
+
+尤其禁止把：
+
+simulation PASS
+
+写成：
+
+board PASS
+
+也禁止把：
+
+programmingVerified = VERIFIED
+
+解释成：
+
+user design functional = PASS
+12. 今后真正顶层集成前的硬件阻塞项
+
+当前基础设施计划完成后，仍有若干必须由实物信息解除的 blocker。
+
+12.1 三个 LM393 GPIO
+
+需要确认：
+
+sensor bit0 → FPGA ?
+sensor bit1 → FPGA ?
+sensor bit2 → FPGA ?
+
+确认后才能把 legacy：
+
+key_in[6:0]
+
+正式迁移到：
+
+sensor_code_in[2:0]
+12.2 两套 I²C GPIO
+
+由于 ADC 和 DAC 使用独立总线，需要确认四个真实 FPGA GPIO：
+
+ADC_SCL
+ADC_SDA
+
+DAC_SCL
+DAC_SDA
+
+在确认之前不得写 UCF LOC。
+
+12.3 FSR 实物标定
+
+需要实际记录三个传感器：
+
+Released
+Light
+Normal
+Strong
+
+对应的 ADS1115 raw code。
+
+在此之前：
+
+ZERO_OFFSET
+pressure threshold
+pressure normalization
+
+均不得声称完成。
+
+12.4 DAC模拟输出与LM386
+
+数字链通过后还需要实际验证：
+
+MCP4725 VOUT
+ ↓
+RC reconstruction filter
+ ↓
+AC coupling / volume
+ ↓
+LM386
+ ↓
+speaker
+
+需要示波器或实际音频测试。
+
+13. 数据手册
+
+本仓库保存的外设手册属于协议实现依据：
+
+ADS1115 数据手册
+MCP4725 数据手册
+
+涉及下列内容时必须优先查对应手册：
+
+I2C timing
+slave address
+register layout
+ADS1115 Config bits
+ADS1115 conversion format
+MCP4725 Fast Write
+MCP4725 EEPROM command
+electrical limits
+
+不得因为网上示例代码写法不同而覆盖本仓库手册结论。
+
+14. 工具链文档
+
+当前正式维护文档：
+
+ISE 工具链最终状态（Toolchain Freeze v1）
+
+它定义：
+
+doctor
+check
+build
+sim
+verify
+report
+probe
+program -Mode Jtag
+program -Mode Isf
+
+以及工具链的边界、安全模型和当前已验证结论。
+
+工具链已经冻结。
+
+新增课程功能时：
+
+优先使用现有工具，而不是继续给工具链增加命令或烧录模式。
+
+15. 历史文档
+
+历史第一阶段计划已移动到：
+
+archive/手指钢琴ISE工程实施计划.md
+
+该文件用于保留开发历史，不再作为当前事实来源。
+
+当前烧录、时钟、工具链与板卡状态应优先查看：
+
+ISE工具链最终状态.md
+projects/finger_piano/README.md
+当前源码与 project.json
+最新 verify / build / program artifacts
+
+不要从 archive 中恢复已经被后续实测取代的旧结论。
+
+16. Agent 执行规则
+
+如果由自动 Agent 按这些计划连续开发，遵循：
+
+读计划
+ ↓
+确认依赖已满足
+ ↓
+实现最小阶段
+ ↓
+运行单项 simulation
+ ↓
+PASS
+ ↓
+提交独立 commit
+ ↓
+继续下一小阶段
+ ↓
+计划完成
+ ↓
+完整 verify
+
+若任何一步：
+
+FAIL
+
+则：
+
+停止叠加新功能
+ ↓
+定位并修复
+ ↓
+重新验证
+
+不得使用以下方式制造“表面进度”：
+
+禁用失败test
+放宽PASS条件
+删掉旧回归
+忽略XST warning
+绕过UCF门禁
+伪造板级结果
+猜测未确认参数
+17. 文档维护规则
+
+实现计划后，应同步更新：
+
+projects/finger_piano/README.md
+
+记录：
+
+已实现哪些模块；
+哪些 TB PASS；
+哪些模块仍 standalone；
+哪些功能已经进入顶层；
+哪些真实管脚已经确认；
+哪些硬件测试仍 NOT_TESTED；
+实际 verify run 结果。
+
+本文件 doc/README.md 只负责：
+
+导航、架构、依赖关系和全局开发边界。
+
+不要把每一次具体 run ID、资源数量和临时 debug 过程长期堆积在这里。
+
+18. 最终目标
+
+当前所有计划最终希望逐步从：
+
+legacy 7-key digital piano
+        +
+square-wave audio
+
+演进到：
+
+                  ┌── LM393 ×3 ──→ 3-bit note code ────────────┐
+FSR ×3 ── analog ─┤                                              │
+                  └── ADS1115 ──→ pressure data                  │
+                                                                 ↓
+                                                           note / control
+                                                                 │
+                                                                 ↓
+                                                               DDS
+                                                                 ↓
+                                                             MCP4725
+                                                                 ↓
+                                                         reconstruction LPF
+                                                                 ↓
+                                                              LM386
+                                                                 ↓
+                                                              Speaker
+
+但这个最终架构必须通过：
+
+独立模块验证
+→ 数字链集成验证
+→ 顶层集成
+→ 管脚确认
+→ 板上测试
+→ 模拟测量
+
+逐层取得证据。
+
+任何前一层的 PASS，都不能替代后一层的验证。
