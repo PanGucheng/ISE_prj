@@ -23,6 +23,11 @@
       "library": "work"
     },
     {
+      "path": "src/pressure/pressure_frame_capture.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/input/sensor_code_filter.v",
       "language": "verilog",
       "library": "work"
@@ -350,6 +355,17 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
       "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "pressure_frame_capture",
+      "top": "tb_pressure_frame_capture",
+      "sources": [
+        "sim/tb_pressure_frame_capture.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_PRESSURE_FRAME_CAPTURE: PASS",
+      "failPattern": "TB_PRESSURE_FRAME_CAPTURE: FAIL"
     }
   ],
   "verification": {
