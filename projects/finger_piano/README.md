@@ -261,9 +261,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 ## 12. 已知限制与阶段二扩展点
 
-**本阶段明确不实现**：ADC、DDS、显示屏/数码管、PWM 音量、和弦、UART、DCM/PLL、自动演奏器（小星星只是 testbench 输入序列）。**板卡验证状态**：引脚约束已按用户确认的板卡信息填写（P57 12 MHz / P3 / P4–P11 / P12 / P13–P21 / P24–P27，LVCMOS33），实现与 bitstream 已生成，但**仍未真正烧录、未上板、未实测频率**——`program` 至今只跑过只读 preflight（未加 `-ConfirmHardwareWrite`），`userDesignFunctional` 保持 `NOT_TESTED`。
+**本阶段明确不实现**：ADC、DDS、显示屏/数码管、PWM 音量、和弦、UART、DCM/PLL、自动演奏器（小星星只是 testbench 输入序列）。**板卡验证状态**：引脚约束已按用户确认的板卡信息填写（P57 12 MHz / P3 / P4–P11 / P12 / P13–P21 / P24–P27，LVCMOS33），实现与 bitstream 已生成，`-Mode Jtag`（易失，`program -onlyFpga`）与 `-Mode Isf`（非易失，`program -p 1 -e -v`，显式擦除门禁）均已真机跑通（见 §13 第七轮），但**仍未上板实测**——未做断电保持启动测试、未用示波器/频率计实测音高，`userDesignFunctional` 保持 `NOT_TESTED`。
 
-后续扩展的接入位置：
+后续扩展的接入位置（第二阶段的独立计划见 `doc/3bit传感器编码输入基础设施开发计划.md`、`doc/DDS正弦音频发生器开发计划.md`、`doc/DDS到MCP4725数字音频链路集成计划.md`、`doc/ADS1115压力数据处理与标定基础设施开发计划.md`、`doc/ADS1115与MCP4725可选外设开发计划.md`）：
 
 - **显示当前音符/频率**：`note_debug` 已给出音符编码，直接接显示驱动模块；若显示需要刷新时基，用单周期使能 `ce_*` 而非新时钟。
 - **PWM 音量**：在 `tone_generator` 输出之后插入 `pwm_volume`（同 `clk` 域），用高速计数器调制占空比；`audio_out` 语义不变。
@@ -450,7 +450,7 @@ Elapsed time =      7 sec.                          ← 失败时是 65 sec
 
 **5. 状态更新**：仓库已由用户手动改为 **public**；第一阶段软件工程（RTL + 综合 + 仿真 + 文档）完成。
 
-**交付计数**：`projects/finger_piano/` 目录内 **14 个 tracked 文件**；加上 `doc/手指钢琴ISE工程实施计划.md`，**项目相关交付文件共 15 个**。
+**交付计数**：`projects/finger_piano/` 目录内 **14 个 tracked 文件**；加上第一阶段实施计划 `doc/archive/手指钢琴ISE工程实施计划.md`（已归档），**项目相关交付文件共 15 个**。
 
 #### 综合（第二轮，最终 run）
 

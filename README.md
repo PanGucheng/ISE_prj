@@ -465,13 +465,15 @@ Persistent boot requirements:
 }
 ```
 
-### 真实硬件观察（未做任何写入）
+### 真实硬件观察（2026-09-14 当天，未做任何写入）
+
+> **HISTORICAL**：本节是 09-14 当天的原始观察，其中出现的 `CABLE_NOT_FOUND` 是旧工具当时的粗粒度结论。后续实测已把下载线失败细分为 `DIGILENT_ENUM_FAILED`（`no JTAG device was found`）/ `DIGILENT_OPEN_FAILED`（`failed to open device (DmgrOpenEx, erc = 3072)` = `ercConnectionFailed`）/ `CABLE_UNAVAILABLE`，并确认「Windows PnP 里设备存在 **不等于** Adept 能打开」。因此**不再使用「下载线对虚拟机不可见」这一表述**，Adept 层失败也不得说成虚拟机看不见设备。
 
 - 16:19 手工探测时，Digilent JTAG-HS2 **可见**（`found 1 device(s)`），但 `identify` 报 iMPACT 的硬件配置错误（链未识别）。
 - 16:27 / 16:28 通过工具再探测两次，Digilent 插件报 `no JTAG device was found`，即**下载线在两次之间从 fpga-vm 中消失**（USB 透传/硬件状态问题，非工具差异；用同一份脚本手工复跑得到同样结果）。
 - **20:26 / 20:29 `probe` 真实 PASS**：`Cable PASS`、`JTAG chain PASS`、Position 1 = `xc3s50an`、`IDCODE 0x02610093`、`Match YES`（run `probe-20260914-202618-d161523e`、`probe-20260914-202941-bbbebd63`）。
 - **20:48 起下载线又不可见**（`probe-20260914-204823-414a4508`、`probe-20260914-205006-a9df9206` 均为 `CABLE_NOT_FOUND`），同一时段 `program -Mode Jtag` 的 preflight 因此判失败并明确输出 `nothing was written`。这与上面的 USB 透传不稳定一致，属环境问题。
-- **至今没有执行过任何 `program` 写入**：`program` 在 `-ConfirmHardwareWrite` 之外只做 PREVIEW（本次 preflight 未过时甚至连 PREVIEW 段落都不会生成写脚本）；`Mode Isf` 的端到端烧录流程仍需在真实上电板卡上验证。
+- **（HISTORICAL，仅描述 09-14 当天）当天没有执行过任何 `program` 写入**：`program` 在 `-ConfirmHardwareWrite` 之外只做 PREVIEW（本次 preflight 未过时甚至连 PREVIEW 段落都不会生成写脚本）。**该状态已被 09-15 的真机写入取代**：`-Mode Jtag` 连续两次 PASS、`-Mode Isf`（`program -p 1 -e -v`）一次通过，见上文「ISF 写入必须显式擦除」与 `projects/finger_piano/README.md` §13 第七轮。
 - 真实 `design.bit`（finger_piano，54 738 字节）验证了 bitgen 头解析：`bitstream target : xc3s50antqg144 (header: BITGEN; package not in header; speed not in header)   match: YES`。
 
 ## 排错与验证范围
@@ -486,4 +488,4 @@ Persistent boot requirements:
 
 工具自测命令为 `pwsh -NoProfile -File .\tools\test-tools.ps1`，使用隔离目录和模拟 SSH/ISE 验证编排错误处理，不代表真实综合通过。真实传输及远端批处理启动验证使用 `doctor -TransferTest`，只调用 ISE 帮助命令，不综合、不烧录。
 
-另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，板上 P57 的 **12 MHz** 有源晶振为唯一时钟）。其实施计划见 `doc/手指钢琴ISE工程实施计划.md`，工程结构、模块说明、引脚分配、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）、三个 testbench 的六个远端 ISim 用例（默认、极性两种取值、滤波旁路、12 MHz 频率算术，全部 PASS）、静态检查、**带真实引脚约束（P57/P3/P4–P11/P12/P13–P21/P24–P27，LVCMOS33）的实现与 bitstream 生成**（run `20260914-204555-24cabc5e`，MAP/PAR/bitgen 均 0 errors / 0 warnings，`design.bit` 54 738 字节）；`TS_clk = PERIOD 83.33 ns` 实测 **0 timing errors、最差 slack 70.697 ns**（该结论来自本人阅读 `timing.twr`；UCF 没有 `OFFSET IN/OUT`，因此板级 I/O 时序未认证，工具 `summary.txt` 仍为 `NEEDS_REVIEW`）。**尚未真正烧录、未上板、未实测音高**（`program` 只跑过 PREVIEW ONLY）；芯片速度等级仍为占位 `-4`，待用户按丝印确认。
+另一个独立工程是 `projects/finger_piano`（手指钢琴课设：7 键单音电子琴，Spartan-3AN XC3S50AN TQ144，板上 P57 的 **12 MHz** 有源晶振为唯一时钟）。第一阶段的实施计划已归档到 `doc/archive/手指钢琴ISE工程实施计划.md`，第二阶段的 4 份分阶段计划（3-bit LM393 编码输入、DDS 正弦音频发生器、DDS→MCP4725 数字音频链路集成、ADS1115 压力数据处理与标定）与可选外设计划（ADS1115/MCP4725）见 `doc/` 目录，工程结构、模块说明、引脚分配、仿真步骤与验证记录见 `projects/finger_piano/README.md`。该工程当前已完成 XST 综合（0 errors / 0 warnings）、三个 testbench 的六个远端 ISim 用例（默认、极性两种取值、滤波旁路、12 MHz 频率算术，全部 PASS）、静态检查、**带真实引脚约束（P57/P3/P4–P11/P12/P13–P21/P24–P27，LVCMOS33）的实现与 bitstream 生成**（run `20260914-204555-24cabc5e`，MAP/PAR/bitgen 均 0 errors / 0 warnings，`design.bit` 54 738 字节）；`TS_clk = PERIOD 83.33 ns` 实测 **0 timing errors、最差 slack 70.697 ns**（该结论来自本人阅读 `timing.twr`；UCF 没有 `OFFSET IN/OUT`，因此板级 I/O 时序未认证，工具 `summary.txt` 仍为 `NEEDS_REVIEW`）。**烧录已真机跑通**：`-Mode Jtag`（易失）连续两次 PASS（`program-20260915-003257-7ef9c0de`、`program-20260915-003321-faf98f9b`），`-Mode Isf`（非易失，`program -p 1 -e -v`）一次通过（`program-20260915-083244-bf54acda`，`Erase → Program → Verify` 全部成功）；但**板卡功能仍未验证**——未做断电保持启动测试、未实测音高（`userDesignFunctional` 固定为 `NOT_TESTED`，工具永不打印 `BOARD PASS`）。芯片速度等级仍为占位 `-4`，待用户按丝印确认。
