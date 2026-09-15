@@ -8,6 +8,7 @@
     {"path":"src/input/sensor_code_decoder.v","language":"verilog","library":"work"},
     {"path":"src/input/sensor_code_filter.v","language":"verilog","library":"work"},
     {"path":"src/input/sensor_code_frontend.v","language":"verilog","library":"work"},
+    {"path":"src/audio/sine_lut_12bit.v","language":"verilog","library":"work"},
     {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
     {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
     {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
@@ -140,6 +141,15 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_SENSOR_CODE_FRONTEND: PASS",
       "failPattern": "TB_SENSOR_CODE_FRONTEND: FAIL"
+    },
+    {
+      "name": "sine_lut_12bit",
+      "top": "tb_sine_lut_12bit",
+      "sources": ["sim/tb_sine_lut_12bit.v"],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SINE_LUT_12BIT: PASS",
+      "failPattern": "TB_SINE_LUT_12BIT: FAIL"
     }
   ],
   "verification": {
