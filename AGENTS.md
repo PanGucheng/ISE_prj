@@ -49,6 +49,8 @@
 - **下载线配置固定**：Digilent JTAG-HS2、`SN = 210241672559`、`TCK = 10000000 Hz`、`position = 1`；正式 `probe`/`program` 必须用显式 target，`-p auto` 只允许出现在 `probe-diag`。
 - **hardware transaction 架构保留**：local static validation → 一次上传 → remote hardware transaction → 只读 preflight → 立即 program → fetch。两段之间不得插入 SSH 往返 / SFTP / 本地解析 / 数秒 sleep。Adept 冷启动 `DmgrOpenEx erc=3072` 已由事务内只读 preflight retry 吸收，**不需要继续研究 Session 0**。
 - **本轮冻结期间禁止**：改 RTL 功能、改引脚、重写 ISF、调 Windows USB 电源策略、再做 Session 0 A/B、再做几十次 probe 统计、GUI 自动化、新增 programmer backend。
+- **冻结命令集之外的辅助脚本（存在，但不是 `ise.ps1` 命令）**：`tools/make-gui-project.ps1` 在 VM 上生成一份**只给人看的** ISE Project Navigator 工程（`...\<工程>\gui-project\<工程>.xise`，含 src/constraints/sim，默认写成 GBK 供 ISE 编辑器正确显示中文）；`tools/convert-encoding.ps1` 做 UTF-8 ↔ GBK 转换。相关 helper 在 `tools/ise-gui-project.ps1`（被 `ise-tools.ps1` dot-source，仅供上述脚本与自测使用）。
+  **编码规则**：仓库永远是 UTF-8；只允许把 VM 上的 GUI 副本转成 GBK。在 GUI 里改过的文件搬回仓库前必须先 `convert-encoding.ps1` 转回 UTF-8。重新生成会用仓库覆盖副本（先删旧 `.xise` 再建）。
 
 ## JTAG 探测与烧录
 

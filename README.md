@@ -52,7 +52,14 @@
 | `program -Mode Isf` | Spartan-3AN 内部 ISF 持久化写入 |
 | `board-check` | 板卡约束比对（缺少 `board.json` 时 `NOT_CONFIGURED`） |
 
-工具链的完整冻结说明见 **`doc/ISE工具链最终状态.md`**。
+工具链的完整冻结说明见 **`doc/ISE工具链最终状态.md`**（其中的第 12 节说明如何在 ISE 图形界面里打开工程副本）。
+
+想在 ISE 14.7 GUI 里自己打开工程看代码时（可选，不影响工具链）：
+
+```powershell
+pwsh -File .\tools\make-gui-project.ps1 -Project finger_piano   # 生成 gui-project\<工程>.xise（GBK，中文注释不乱码）
+pwsh -File .\tools\convert-encoding.ps1 -Path <文件或目录> -From Gbk -To Utf8   # 把 GUI 里改过的文件转回仓库编码
+```
 
 ## 使用
 

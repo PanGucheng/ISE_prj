@@ -243,3 +243,6 @@ function Receive-Build([string]$Name, [string]$Id) {
 . "$PSScriptRoot\ise-verify.ps1"
 . "$PSScriptRoot\ise-program.ps1"
 . "$PSScriptRoot\ise-probe-diag.ps1"
+# Helper functions only (no command dispatch): an openable ISE GUI project copy and
+# the encoding bridge for the ISE editor. The frozen command set is unchanged.
+. "$PSScriptRoot\ise-gui-project.ps1"

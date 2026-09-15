@@ -1097,8 +1097,48 @@ Assert ($diagIdentity2.Serial -eq '210241672559' -and $diagIdentity2.FrequencyHz
 Assert ($diagIdentity2.Source -match 'project.json') 'the identity source must be recorded'
 Write-Host 'PASS: probe-diag generates read-only layered diagnostics and invents nothing.'
 
+#=============================================================================
+# 10. GUI project helpers (device facts, encoding bridge, Tcl generation)
+#=============================================================================
+$guiFacts = Get-IseGuiDeviceFacts -DeviceString 'xc3s50an-4-tqg144'
+Assert ($guiFacts.Part -eq 'xc3s50an' -and $guiFacts.Package -eq 'tqg144' -and $guiFacts.Speed -eq '-4') 'GUI device facts not parsed'
+Assert ($guiFacts.Family -eq 'Spartan3A and Spartan3AN') "GUI family wrong: $($guiFacts.Family)"
+Assert ((Get-IseGuiDeviceFacts -DeviceString 'xc6slx9-2-tqg144').Family -eq 'Spartan6') 'Spartan-6 family not recognised'
+Assert ((Get-IseGuiDeviceFacts -DeviceString 'xc3s500e-4-fg320').Family -eq 'Spartan3E') 'Spartan-3E family not recognised'
+Expect-Failure { Get-IseGuiDeviceFacts -DeviceString 'not-a-device' } 'Cannot parse device string'
+Assert ($null -eq (Get-IseGuiDeviceFacts -DeviceString 'xc7a35t-1-csg324').Family) 'an unknown family must stay null so the caller is forced to pass -Family'
+Assert ((Test-GuiTextFile 'a.v') -and (Test-GuiTextFile 'a.ucf') -and -not (Test-GuiTextFile 'a.bit')) 'text/binary classification wrong'
+
+# UTF-8 -> GBK -> UTF-8 must preserve Chinese exactly, and the bytes must differ.
+$encSrc = Join-Path $root 'enc-utf8.v'
+$encGbk = Join-Path $root 'enc-gbk.v'
+$encBack = Join-Path $root 'enc-back.v'
+Write-Utf8 $encSrc "// 中文注释测试：滤波去抖，12 MHz`nmodule a; endmodule`n"
+$null = ConvertTo-AnsiFile -Path $encSrc -Destination $encGbk
+$null = ConvertFrom-AnsiFile -Path $encGbk -Destination $encBack
+Assert ((Get-TextSafe $encSrc) -eq (Get-TextSafe $encBack)) 'UTF-8 <-> GBK round trip changed the text'
+Assert ((Get-Item $encGbk).Length -ne (Get-Item $encSrc).Length) 'the GBK file must actually differ from the UTF-8 file'
+Assert ([Text.Encoding]::GetEncoding(936).GetString([IO.File]::ReadAllBytes($encGbk)) -match '中文注释测试') 'the GBK file must decode back to readable Chinese'
+
+$guiTcl = New-GuiProjectTcl -XiseFileName 'p.xise' -Family 'Spartan3A and Spartan3AN' -Part 'xc3s50an' -Package 'tqg144' -Speed '-4' `
+    -SynthesisFiles @('src/top.v', 'src/cfg.vh', 'constraints/t.ucf') -Testbenches @('sim/tb.v') -Top 'top' -IncludeDir 'src'
+Assert ($guiTcl -match 'project new \$proj') 'the Tcl must create a project'
+Assert ($guiTcl -match 'file delete -force \$proj') 'the Tcl must delete a stale project file so regeneration works'
+Assert ($guiTcl -match 'project set family \{Spartan3A and Spartan3AN\}') 'the Tcl must set the family (braced: it contains spaces)'
+Assert ($guiTcl -match 'project set device xc3s50an') 'the Tcl must set the device'
+Assert ($guiTcl -match 'project set package tq144') 'the plain package name must be tried first'
+Assert ($guiTcl -match 'project set package tqg144') 'the Pb-free spelling must be the fallback'
+Assert ($guiTcl -match 'xfile add src/top\.v') 'the Tcl must add the sources'
+Assert ($guiTcl -match 'xfile add sim/tb\.v -view Simulation') 'testbenches must be added in the Simulation view'
+Assert ($guiTcl -match 'Top-Level Module') 'the Tcl must set the top level'
+$guiRunner = New-GuiProjectRunner -TclName 'make_project.tcl'
+Assert ($guiRunner -match 'xtclsh make_project\.tcl') 'the runner must call xtclsh'
+Assert ($guiRunner -match 'call ".*settings32\.bat"') 'the runner must load the ISE environment first'
+Write-Host 'PASS: GUI project helpers parse device facts, bridge encodings and emit valid Tcl.'
+
 Write-Host ''
 Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'
 Write-Host "Test evidence retained: $root"
+
 
 

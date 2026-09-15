@@ -189,3 +189,24 @@ cableDetected / jtagChainDetected / deviceMatched / programmingCompleted / progr
 ```
 
 使用课程设计时不需要理解：iMPACT 批处理脚本、`fuse`、SSH staging 目录、Digilent target 语法、ISF 擦除细节。
+
+## 12. 可选的 GUI 工程副本（**不属于冻结命令集**）
+
+冻结的 `ise.ps1` 命令集合保持十二个不变。如果需要在 **ISE 14.7 图形界面**里打开工程自己看/调试，用下面两个**独立辅助脚本**（它们只读仓库，只写 VM 上的一份「给人看的副本」）：
+
+```powershell
+# 生成可直接用 ISE 打开的人看副本（默认写成 GBK，供 ISE 编辑器正确显示中文）
+pwsh -File .\tools\make-gui-project.ps1 -Project finger_piano
+pwsh -File .\tools\make-gui-project.ps1 -Project finger_piano -Encoding Utf8   # 想保留 UTF-8 时
+
+# 把 ISE 编辑器里改过的文件在编码之间转换（仓库 = UTF-8，GUI 副本 = GBK）
+pwsh -File .\tools\convert-encoding.ps1 -Path <文件或目录> -From Gbk -To Utf8
+pwsh -File .\tools\convert-encoding.ps1 -Path src -From Utf8 -To Gbk -DryRun
+```
+
+- 产物位置：`C:\Users\PanGucheng\ise-builds\<工程>\gui-project\<工程>.xise`（可用 `-RemotePath` 改）。工程里已含 `src/`、`constraints/`、`sim/`，器件/封装/速度、Verilog 包含目录与顶层模块都会设好；脚本生成后会回读 `.xise` 并打印这些属性。
+- **编码规则（重要）**：仓库永远是 **UTF-8**；VM 副本是 **ANSI/GBK(936)**，因为 ISE 14.7 的 HDL 编辑器在中文 Windows 上按 ANSI 读文件，UTF-8 中文注释会显示成乱码（XST 综合不受影响）。**只在副本上转换，绝不改仓库。**
+- **在 GUI 里改过的代码要搬回仓库时必须先转换编码**（`convert-encoding.ps1`），否则会造成新的乱码/编码污染。
+- 重新生成会**用仓库内容覆盖这份副本**（含删除旧 `.xise` 后重建），所以 GUI 里的改动会丢——先转换、搬回去，再重新生成。
+- 这份副本**不参与**工具链：构建、仿真、烧录仍以 `ise.ps1` 与仓库为准，GUI 里编译产生的中间文件只落在 `gui-project\` 内。
+- 已知实现细节：ISE 只接受 `tqg144`（`tq144` 会被拒绝，脚本自动回退）；`project new` 不会覆盖已存在的工程文件，脚本会先删除再建。
