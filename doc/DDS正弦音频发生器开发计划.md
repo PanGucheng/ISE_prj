@@ -1,9 +1,18 @@
-finger_piano DDS 正弦音频发生器开发计划
-0. 最高优先级约束
+# finger_piano DDS 正弦音频发生器开发计划
+
+> **Status**: PLANNED（本计划尚无任何 RTL 落地）
+> **Scope**: standalone DDS 正弦样点 RTL + ISim
+> **Depends on**: P1（`CFG_DAC_SAMPLE_RATE` 等统一配置宏）
+> **Top integration**: NO
+> **UCF changes**: NO
+> **Hardware programming**: FORBIDDEN
+> **Acceptance**: full `verify`（`.\ise.ps1 verify -Project finger_piano`）
+
+## 0. 最高优先级约束
 
 本阶段只开发并验证数字 DDS 正弦样点发生器，不进行最终顶层音频迁移。当前 tone_generator → audio_out 方波路径是已验证 legacy baseline，必须保持不变。DDS 输出为 12-bit 无符号数字样点，未来交给 MCP4725；本阶段不得新增 DAC GPIO、不得修改 UCF、不得实例化 MCP4725 到顶层、不得修改 LM386 接口、不得执行 program。所有新时序逻辑只能使用系统 clk，8 kHz 只能作为 clock-enable/sample-valid，禁止生成第二时钟。每阶段完成后必须运行对应 ISim，最终执行完整 verify -Project finger_piano。
 
-1. 本阶段目标
+## 1. 本阶段目标
 
 新增一条独立的数字音频生成链：
 
@@ -43,7 +52,7 @@ audio_out 方波
 
 IMPLEMENTED / STANDALONE
 NOT_INTEGRATED
-2. 课程指标与工程设计值
+## 2. 课程指标与工程设计值
 
 课程资料支持的要求是：
 
@@ -73,7 +82,7 @@ DAC样点位宽	12 bit unsigned
 
 DDS必须复用该配置，不再创建第二份采样率真值源。
 
-3. 为什么采用 8 kS/s
+## 3. 为什么采用 8 kS/s
 
 最高音：
 
@@ -104,7 +113,7 @@ DDS → MCP4725 → 重构低通 → LM386
 
 8 kS/s 同时给 MCP4725 的独立约333 kHz I²C总线留有发送裕量。
 
-4. 不做哪些事情
+## 4. 不做哪些事情
 
 本阶段明确禁止：
 
@@ -126,7 +135,7 @@ DDS → MCP4725 → 重构低通 → LM386
 
 DDS→MCP4725 联调属于下一份计划。
 
-5. 新增模块建议
+## 5. 新增模块建议
 
 新增：
 
@@ -151,7 +160,7 @@ phase_accumulator.v
 
 第一版保持适度模块化即可。
 
-6. DDS数学原理
+## 6. DDS数学原理
 
 采用标准相位累加 DDS：
 
@@ -171,7 +180,7 @@ $$ \Delta f = \frac{8000}{2^{24}} \approx0.000477Hz $$
 
 远优于课程要求的 1%。
 
-7. 七音 Phase Increment 冻结表
+## 7. 七音 Phase Increment 冻结表
 
 使用课程资料给出的实际两位小数频率，而不是现有方波模块为了整数运算采用的0.1 Hz近似。
 
@@ -193,7 +202,7 @@ $$ 0.001\% $$
 但验收标准仍按课程指标：
 
 $$ \boxed{|error|<1\%} $$
-8. Phase Increment 不允许“神秘硬编码”
+## 8. Phase Increment 不允许“神秘硬编码”
 
 RTL可以使用上表的24位常量，原因是老版本 XST 下直接做：
 
@@ -224,7 +233,7 @@ RTL表错了 + 文档照抄RTL表 + TB也照抄同一表
 
 三者一起错误仍然PASS。
 
-9. 采样 Clock Enable
+## 9. 采样 Clock Enable
 
 12 MHz系统时钟下：
 
@@ -258,7 +267,7 @@ if (sample_tick)
 
 更新DDS。
 
-10. 采样率生成精确定义
+## 10. 采样率生成精确定义
 
 建议：
 
@@ -286,7 +295,7 @@ SYS_CLK_HZ % SAMPLE_RATE_HZ != 0
 
 本阶段 12 MHz / 8 kHz 是精确整除配置。
 
-11. sine_lut_12bit.v
+## 11. sine_lut_12bit.v
 
 不建议写256个完整12位波形值。
 
@@ -308,7 +317,7 @@ $$ 0\sim1792 $$
 
 然后利用四象限对称得到完整256相位。
 
-12. LUT输入输出
+## 12. LUT输入输出
 
 推荐：
 
@@ -327,7 +336,7 @@ phase_addr = phase_acc[23:16]
 40 ~ 7F :  90° ~ <180°
 80 ~ BF : 180° ~ <270°
 C0 ~ FF : 270° ~ <360°
-13. LUT输出采用无符号偏置正弦
+## 13. LUT输出采用无符号偏置正弦
 
 MCP4725不能输出负电压。
 
@@ -352,7 +361,7 @@ FFF
 
 满轨。
 
-14. 为什么中心必须是 12'h800
+## 14. 为什么中心必须是 12'h800
 
 将来 MCP4725 3.3V供电时：
 
@@ -377,7 +386,7 @@ DAC code = 0
 静音冻结为：
 
 $$ \boxed{12'h800} $$
-15. Quarter-wave 索引建议
+## 15. Quarter-wave 索引建议
 
 使用：
 
@@ -413,7 +422,7 @@ phase 192 → 256
 
 TB必须精确验证这四个关键点。
 
-16. LUT生成原则
+## 16. LUT生成原则
 
 LUT magnitude：
 
@@ -433,7 +442,7 @@ $sin
 
 测试代码可以使用 real 做独立检查。
 
-17. LUT TB
+## 17. LUT TB
 
 tb_sine_lut_12bit.v 至少检查：
 
@@ -477,7 +486,7 @@ phase 0→64
 
 必须单调不减。
 
-18. dds_sine_generator.v
+## 18. dds_sine_generator.v
 
 推荐接口：
 
@@ -504,7 +513,7 @@ standalone / future integration config
 
 不是“改成1就启用硬件”。
 
-19. DDS内部状态
+## 19. DDS内部状态
 
 至少：
 
@@ -515,7 +524,7 @@ note_q[2:0]
 
 不要额外生成新时钟。
 
-20. note → phase increment
+## 20. note → phase increment
 
 组合逻辑：
 
@@ -534,7 +543,7 @@ note_code = 0
 phase_inc = 0
 phase_acc = 0
 dac_code  = 2048
-21. Phase更新规则
+## 21. Phase更新规则
 
 仅当：
 
@@ -550,7 +559,7 @@ $$ mod\ 2^{24} $$
 
 禁止自己写昂贵的 % 运算。
 
-22. 音符切换行为
+## 22. 音符切换行为
 
 为了与现有 tone_generator 的可预测行为一致，同时尽量避免从随机幅值启动，定义：
 
@@ -576,7 +585,7 @@ sine(0°) = 2048
 
 开始。
 
-23. 音符切换不能改变8 kHz采样节拍
+## 23. 音符切换不能改变8 kHz采样节拍
 
 重要：
 
@@ -598,7 +607,7 @@ phase
 
 不改变 sample cadence。
 
-24. dac_code_valid
+## 24. dac_code_valid
 
 在 ENABLE=1 时：
 
@@ -619,7 +628,7 @@ note_code = 0
 
 因为 ADC 与 DAC 使用独立 I²C，总线流量不会影响 ADS1115。
 
-25. ENABLE=0行为
+## 25. ENABLE=0行为
 
 当：
 
@@ -635,7 +644,7 @@ phase_acc      = 0
 
 由于本阶段 DDS未实例化顶层，因此默认工程功能完全不变。
 
-26. 与 MCP4725 ready 的关系
+## 26. 与 MCP4725 ready 的关系
 
 本阶段 DDS不要加入 dac_ready 输入。
 
@@ -664,7 +673,7 @@ MCP4725 ready都为1
 
 如果下游异常，则由 MCP4725 controller 的 dac_overrun 报告。
 
-27. 为什么不要“ready拉低就暂停DDS”
+## 27. 为什么不要“ready拉低就暂停DDS”
 
 如果：
 
@@ -688,7 +697,7 @@ ready=0
 
 所以 DDS时间轴必须独立。
 
-28. DDS Testbench总体结构
+## 28. DDS Testbench总体结构
 
 新增：
 
@@ -704,7 +713,7 @@ E. 7 notes frequency
 F. note transition
 G. range
 H. ENABLE=0
-29. Sample cadence测试必须使用真实12 MHz
+## 29. Sample cadence测试必须使用真实12 MHz
 
 必须至少有一个用例：
 
@@ -732,7 +741,7 @@ dac_code_valid
 
 只持续1个系统时钟。
 
-30. 七音频率测试可以降系统仿真时钟
+## 30. 七音频率测试可以降系统仿真时钟
 
 DDS输出频率由：
 
@@ -760,7 +769,7 @@ $$ 1MHz/8kHz=125 $$
 
 sample cadence 的板上真实性测试必须另有 12 MHz 用例。
 
-31. 七音必须全部实测
+## 31. 七音必须全部实测
 
 不能只测：
 
@@ -789,7 +798,7 @@ B4
 440.00
 493.88
 
-32. 频率外部验证方法
+## 32. 频率外部验证方法
 
 TB不能仅检查：
 
@@ -816,7 +825,7 @@ $$ f_{meas} = \frac{N_{crossing}}{N_{samples}}f_s $$
 然后：
 
 $$ \left| \frac{f_{meas}-f_{nom}}{f_{nom}} \right|<1\% $$
-33. 再增加 Phase Increment 独立检查
+## 33. 再增加 Phase Increment 独立检查
 
 为了避免零交叉统计分辨率较低，同时验证DDS核心参数，TB可以用 real 独立计算：
 
@@ -839,7 +848,7 @@ RTL仍不得使用 real。
 phase increment数学检查
 +
 实际DAC sample零交叉检查
-34. Range测试
+## 34. Range测试
 
 整个仿真期间：
 
@@ -857,7 +866,7 @@ Z
 静音必须：
 
 12'h800
-35. Note transition测试
+## 35. Note transition测试
 
 例如：
 
@@ -877,7 +886,7 @@ mute
 后续使用新 phase increment；
 mute后所有有效样点为 12'h800；
 不出现超出 [256,3840] 的数字值。
-36. Phase wrap测试
+## 36. Phase wrap测试
 
 24-bit：
 
@@ -898,7 +907,7 @@ valid节拍不变；
 
 不得使用 % 16777216。
 
-37. 推荐 project.json 用例
+## 37. 推荐 project.json 用例
 
 建议新增：
 
@@ -912,7 +921,7 @@ dds_sine_generator_disabled	tb_dds_sine_generator	ENABLE=0
 
 TB_SINE_LUT_12BIT: PASS
 TB_DDS_SINE_GENERATOR: PASS
-38. 现有仿真零修改
+## 38. 现有仿真零修改
 
 当前已经存在的 legacy 用例：
 
@@ -929,7 +938,7 @@ $$ \boxed{\text{零修改}} $$
 
 全部必须继续 PASS。
 
-39. 不修改现有 frequency_table.md
+## 39. 不修改现有 frequency_table.md
 
 现有：
 
@@ -951,7 +960,7 @@ dds_frequency_table.md
 
 基础功能：整数分频方波
 扩展功能：DDS正弦波
-40. dds_frequency_table.md 必须记录
+## 40. dds_frequency_table.md 必须记录
 
 至少包含：
 
@@ -971,7 +980,7 @@ LUT中心/幅度；
 
 Phase increment表只适用于8 kS/s，不能只修改采样率宏而继续沿用旧表。
 
-41. 第一版不要做“任意采样率自动算phase increment”
+## 41. 第一版不要做“任意采样率自动算phase increment”
 
 原因是：
 
@@ -991,7 +1000,7 @@ f × 2^24
 
 重新生成7项表即可。
 
-42. 第一版不要使用乘法器计算正弦
+## 42. 第一版不要使用乘法器计算正弦
 
 禁止：
 
@@ -1007,7 +1016,7 @@ Taylor
 
 查表是最合适方案。
 
-43. 不实现动态音量缩放
+## 43. 不实现动态音量缩放
 
 目前：
 
@@ -1039,7 +1048,7 @@ DDS核心只负责：
 
 准确地产生标准幅值正弦样点。
 
-44. 综合要求
+## 44. 综合要求
 
 新增 RTL 必须：
 
@@ -1063,7 +1072,7 @@ clk
 
 一个有效时钟。
 
-45. 资源要求
+## 45. 资源要求
 
 这是 XC3S50AN 小器件，因此要特别检查：
 
@@ -1077,7 +1086,7 @@ ROM inference
 
 但 DDS module本身必须通过XST语法检查和 standalone仿真。
 
-46. LUT实现如果产生异常资源或XST warning
+## 46. LUT实现如果产生异常资源或XST warning
 
 禁止：
 
@@ -1097,7 +1106,7 @@ XST 0 warning
 
 3072 bit左右的DDS数据不值得为了“必须BRAM”增加工具链风险。
 
-47. 配置宏建议
+## 47. 配置宏建议
 
 在：
 
@@ -1120,7 +1129,7 @@ CFG_DDS_SAMPLE_RATE
 
 输出位宽第一版固定12位，不必伪参数化。
 
-48. 与第一份 ADC/DAC 计划的依赖关系
+## 48. 与第一份 ADC/DAC 计划的依赖关系
 
 本计划依赖第一计划提供的：
 
@@ -1138,7 +1147,7 @@ DDS计划
 
 先完成第一计划对应配置提交，再开始 DDS；不要临时在 DDS 模块中硬写第二份 8000 真值源。
 
-49. 与第二份3-bit计划的关系
+## 49. 与第二份3-bit计划的关系
 
 DDS只接受：
 
@@ -1164,7 +1173,7 @@ note_code
 
 二者不得耦合。
 
-50. 提交顺序
+## 50. 提交顺序
 
 建议严格拆为以下 commits。
 
@@ -1252,7 +1261,7 @@ DDS hardware PASS
 
 因为还没有接 MCP4725。
 
-51. 最终验收清单
+## 51. 最终验收清单
 
 Agent结束本计划时必须满足：
 

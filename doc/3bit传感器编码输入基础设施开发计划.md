@@ -1,8 +1,16 @@
-finger_piano 3-bit 传感器编码输入基础设施开发计划
+# finger_piano 3-bit 传感器编码输入基础设施开发计划
+
+> **Status**: PLANNED（本计划尚无任何 RTL 落地）
+> **Scope**: standalone 3-bit 传感器输入 RTL + ISim（legacy 7-key 顶层保持不动）
+> **Depends on**: 现有同步/滤波基础设施（`key_sync` / `key_filter`）；与 P1 独立
+> **Top integration**: NO
+> **UCF changes**: NO
+> **Hardware programming**: FORBIDDEN
+> **Acceptance**: full `verify`（`.\ise.ps1 verify -Project finger_piano`）
 
 本阶段只开发并验证 3-bit 传感器编码输入基础设施，不进行最终顶层迁移。当前 key_in[6:0] → note_encoder 路径是已验证 legacy baseline，必须保持不变。真实硬件采用 3 个 LM393 输出组成 3-bit 编码，项目冻结编码为 000=静音，001~111=唱名1~7。三位编码必须先经两级同步，再使用 whole-vector atomic stable filter；禁止简单复用现有逐bit key_filter 作为最终码字滤波。新增 RTL 可以进入 project.json 接受 XST/ISim 验证，但不得增加未约束顶层端口、不得修改 UCF、不得执行 program。每个阶段完成后运行对应 simulation，最终必须执行完整 verify -Project finger_piano，任何回归失败必须先修复，不得带着失败继续叠加功能。
 
-1. 本阶段目标
+## 1. 本阶段目标
 
 为 projects/finger_piano 增加真实硬件所需的 3 路 LM393 数字输入 → 3-bit 编码 → note_code[2:0] 输入基础设施，并通过 ISim 完成独立验证。
 
@@ -38,7 +46,7 @@ $$ \boxed{note\_code=sensor\_code} $$
 
 课程资料只要求采样后的数据编码产生 1～7 音，并给出 3 路 0/1 采样验收；上述二进制编码次序属于本项目设计冻结。
 
-2. 本阶段必须保持的 legacy baseline
+## 2. 本阶段必须保持的 legacy baseline
 
 当前远端工程已经验证的路径仍然是：
 
@@ -74,7 +82,7 @@ audio_out            不改
 
 作为可综合但尚未接入现有顶层的独立 RTL 存在。
 
-3. 明确不做
+## 3. 明确不做
 
 本计划禁止：
 
@@ -90,7 +98,7 @@ audio_out            不改
 不改变 12 MHz 系统时钟；
 不把本计划与 ADC/DAC commit 混在一起；
 不为了赶进度绕过已有 verify 门禁。
-4. 为什么不能直接把现有 key_filter 改成 WIDTH=3
+## 4. 为什么不能直接把现有 key_filter 改成 WIDTH=3
 
 现有：
 
@@ -137,7 +145,7 @@ $$ \boxed{\text{whole-vector atomic filtering}} $$
 
 整个 3-bit 向量连续稳定达到门限后，三个 bit 一次性更新。
 
-5. 新的数字输入架构
+## 5. 新的数字输入架构
 
 最终准备好的独立模块链：
 
@@ -180,7 +188,7 @@ clk
 
 不得使用 sensor input 作为时钟。
 
-6. 新增文件
+## 6. 新增文件
 
 建议：
 
@@ -204,7 +212,7 @@ finger_piano_top.v
 constraints/finger_piano.ucf
 note_encoder.v
 tone_generator.v
-7. sensor_code_decoder.v
+## 7. sensor_code_decoder.v
 
 功能：
 
@@ -255,7 +263,7 @@ TB容易核对；
 
 XST 即使最终把它优化成连线也没有问题。
 
-8. sensor_code_filter.v
+## 8. sensor_code_filter.v
 
 这是本计划最重要的新模块。
 
@@ -283,7 +291,7 @@ stable register
 不能：
 
 三个 bit 三个独立 counter
-9. vector filter 精确定义
+## 9. vector filter 精确定义
 
 定义：
 
@@ -301,7 +309,7 @@ FP_FILTER_CNT_WIDTH = 24
 
 足够使用。
 
-10. Filter行为
+## 10. Filter行为
 
 必须保证：
 
@@ -337,7 +345,7 @@ code_stable
 
 这种由于 bit 独立滤波造成的短暂错误 note。
 
-11. 推荐 FSM/算法
+## 11. 推荐 FSM/算法
 
 内部建议：
 
@@ -387,7 +395,7 @@ STABLE_CYCLES
 后：
 
 必须更新
-12. Filter bypass
+## 12. Filter bypass
 
 和当前 key_filter 一样，支持：
 
@@ -405,7 +413,7 @@ generate
 
 使 bypass 综合为纯直通。
 
-13. sensor_code_frontend.v
+## 13. sensor_code_frontend.v
 
 用于把三个基础模块组合成未来可直接接顶层的完整前端。
 
@@ -443,7 +451,7 @@ key_sync.v
 
 不得重新复制一个几乎相同的 synchronizer。
 
-14. 输入极性
+## 14. 输入极性
 
 当前模拟设计约定 LM393 输出：
 
@@ -471,7 +479,7 @@ wire [2:0] sensor_normalized =
 
 的统一逻辑。
 
-15. CDC要求
+## 15. CDC要求
 
 三个 LM393 输出对于 FPGA：
 
@@ -499,7 +507,7 @@ vector filter
 也不能：
 
 LM393 → FPGA逻辑直接用
-16. 为什么2FF后仍然需要vector filter
+## 16. 为什么2FF后仍然需要vector filter
 
 两级同步解决的是：
 
@@ -523,7 +531,7 @@ whole-vector stable filter
 
 必须两个都存在。
 
-17. tb_sensor_code_decoder.v
+## 17. tb_sensor_code_decoder.v
 
 必须遍历全部：
 
@@ -552,7 +560,7 @@ TB_SENSOR_CODE_DECODER: FAIL
 
 不能只依赖仿真退出码0。
 
-18. tb_sensor_code_filter.v
+## 18. tb_sensor_code_filter.v
 
 必须覆盖以下情况：
 
@@ -587,7 +595,7 @@ off-by-one	N−1不更新，N更新
 
 出现在 code_stable。
 
-19. Filter TB允许使用缩短参数
+## 19. Filter TB允许使用缩短参数
 
 为了避免 ISim 测试过慢，可以例如使用：
 
@@ -605,7 +613,7 @@ $$ STABLE\_CYCLES=10 $$
 
 这一用例验证的是数字算法，因此不需要强制使用板上 12 MHz。
 
-20. tb_sensor_code_frontend.v
+## 20. tb_sensor_code_frontend.v
 
 需要验证完整：
 
@@ -635,7 +643,7 @@ decoder
 
 检查最终 note 不产生短暂 3。
 
-21. Active-low测试
+## 21. Active-low测试
 
 必须至少再运行一次：
 
@@ -659,7 +667,7 @@ sensor_code_frontend_low
 
 而不是只靠代码审阅。
 
-22. 推荐新增 simulation 项
+## 22. 推荐新增 simulation 项
 
 最终可以加入：
 
@@ -675,7 +683,7 @@ TB_ACTIVE_HIGH=0
 
 覆盖。
 
-23. project.json 修改
+## 23. project.json 修改
 
 将新增可综合 RTL 加入：
 
@@ -706,7 +714,7 @@ finger_piano_top.v
 
 全部成立。
 
-24. 本阶段不要实例化到顶层
+## 24. 本阶段不要实例化到顶层
 
 即使新模块全部完成：
 
@@ -731,7 +739,7 @@ sensor_code_in[2:0]
 
 不猜板级约束原则。
 
-25. 综合要求
+## 25. 综合要求
 
 因为这些 RTL 会加入工程 sources，即便当前顶层不实例化，也必须：
 
@@ -756,7 +764,7 @@ failOnSynthesisWarnings=true
 
 不能用 warning 换进度。
 
-26. 不新增新的系统时钟常量
+## 26. 不新增新的系统时钟常量
 
 禁止出现：
 
@@ -778,7 +786,7 @@ parameter integer SYS_CLK_HZ = `SYS_CLK_HZ
 
 保持现有工程风格。
 
-27. 建议暂时复用现有滤波参数
+## 27. 建议暂时复用现有滤波参数
 
 本阶段不需要再增加一套：
 
@@ -803,7 +811,7 @@ SENSOR_CODE_STABLE_MS
 
 本阶段不要提前增加无实测依据的配置项。
 
-28. 不要增加“非法编码”逻辑
+## 28. 不要增加“非法编码”逻辑
 
 三位输入总共有：
 
@@ -830,7 +838,7 @@ invalid_code
 
 逻辑。
 
-29. 提交顺序
+## 29. 提交顺序
 
 建议严格分为：
 
@@ -910,7 +918,7 @@ README只需要增加一节：
 IMPLEMENTED/STANDALONE
 NOT_INTEGRATED
 BOARD PINS TODO
-30. 最终验收标准
+## 30. 最终验收标准
 
 Agent结束时必须逐项核对：
 
@@ -945,7 +953,7 @@ Agent结束时必须逐项核对：
 
 [ ] 未执行program
 [ ] 未混入ADC/DAC修改
-31. 明天才允许做的真正顶层迁移
+## 31. 明天才允许做的真正顶层迁移
 
 当用户确认：
 
@@ -988,7 +996,7 @@ README
 
 并释放原七键输入中的四个不再使用的 FPGA I/O。
 
-32. 顶层迁移后的目标结构
+## 32. 顶层迁移后的目标结构
 
 最终基础功能应该成为：
 

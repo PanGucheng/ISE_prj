@@ -1,9 +1,18 @@
-finger_piano DDS → MCP4725 数字音频链路集成计划
-0. 最高优先级约束
+# finger_piano DDS → MCP4725 数字音频链路集成计划
+
+> **Status**: PLANNED（本计划尚无任何 RTL 落地）
+> **Scope**: DDS → MCP4725 数字链集成 RTL + ISim（含行为模型与 0 drop / 0 overrun 吞吐测试）
+> **Depends on**: P1 + P3
+> **Top integration**: NO
+> **UCF changes**: NO
+> **Hardware programming**: FORBIDDEN
+> **Acceptance**: full `verify`（`.\ise.ps1 verify -Project finger_piano`）
+
+## 0. 最高优先级约束
 
 本阶段只验证 DDS → MCP4725 controller → I²C → MCP4725行为模型 的完整数字音频链路，不进行板级启用。finger_piano_top、现有 tone_generator → audio_out 方波路径、UCF 和烧录流程必须保持不变。不得新增未约束顶层端口，不得执行 program。DDS保持固定8 kS/s时间轴，禁止因MCP4725 busy而暂停、拉伸或重定时DDS。正常配置必须证明所有DDS样点均被MCP4725 controller接受并形成对应Fast Write，达到0 drop / 0 overrun。
 
-1. 前置依赖
+## 1. 前置依赖
 
 本计划不是重新实现 DDS 或 MCP4725 driver。
 
@@ -28,7 +37,7 @@ MCP4725 standalone PASS
 
 先完成对应计划，不得在本计划里复制、临时重写或旁路它。
 
-2. 本阶段目标
+## 2. 本阶段目标
 
 建立独立音频 pipeline：
 
@@ -54,7 +63,7 @@ $$ \boxed{\text{DDS产生的每一个样点，都正确到达MCP4725}} $$
 正常路径必须满足：
 
 $$ \boxed{0\ drop,\ 0\ overrun,\ 0\ protocol\ error} $$
-3. 本阶段冻结参数
+## 3. 本阶段冻结参数
 参数	值
 系统时钟	12 MHz
 DDS采样率	8 kS/s
@@ -70,7 +79,7 @@ DDS下游策略	固定时间轴，不等待ready
 
 MCP4725 Fast Write 使用地址字节加两个数据字节，正常DDS期间只更新 DAC Register，不应写 EEPROM。MCP4725 数据手册把 Fast Write 与 EEPROM 写入明确区分；本项目继续只使用 Fast Write。
 
-4. 为什么这一层必须单独验证
+## 4. 为什么这一层必须单独验证
 
 DDS standalone PASS 只能证明：
 
@@ -101,7 +110,7 @@ I²C busy导致DDS时间轴变化。
 
 本计划就是专门验证这些接口边界。
 
-5. 新增集成模块
+## 5. 新增集成模块
 
 建议新增：
 
@@ -113,7 +122,7 @@ projects/finger_piano/src/audio/
 本阶段不实例化进：
 
 finger_piano_top.v
-6. 推荐接口
+## 6. 推荐接口
 module dds_mcp4725_pipeline #(
     parameter integer SYS_CLK_HZ = `SYS_CLK_HZ,
     parameter integer SAMPLE_RATE_HZ = `CFG_DAC_SAMPLE_RATE,
@@ -143,7 +152,7 @@ dac_ready_debug
 
 不要增加对基础钢琴功能不必要的控制输入。
 
-7. 模块内部只能直接连接已有模块
+## 7. 模块内部只能直接连接已有模块
 
 结构：
 
@@ -170,7 +179,7 @@ dds_sine_generator
 
 pipeline 只负责正确连接和状态汇总。
 
-8. DDS不得等待DAC
+## 8. DDS不得等待DAC
 
 这一条冻结。
 
@@ -209,7 +218,7 @@ DAC = 必须跟得上producer
 而不是：
 
 DAC busy → 暂停DDS
-9. ready 的用途
+## 9. ready 的用途
 
 虽然 DDS不能被ready阻塞，但 pipeline 必须观察：
 
@@ -226,7 +235,7 @@ dac_overrun = 1
 正常默认配置下：
 
 $$ \boxed{这个条件永远不能出现} $$
-10. 理论吞吐预算
+## 10. 理论吞吐预算
 
 DDS样点间隔：
 
@@ -260,7 +269,7 @@ $$ 81\mu s $$
 
 必须由12 MHz真实参数的ISim端到端吞吐测试证明。
 
-11. Pipeline不增加额外buffer
+## 11. Pipeline不增加额外buffer
 
 mcp4725_ctrl 已经按照第一计划具有：
 
@@ -282,7 +291,7 @@ MCP4725本身实际上跟不上实时采样率
 
 应修I²C实现/时序或重新评估采样率，而不是靠堆FIFO隐藏问题。
 
-12. 新增行为模型能力
+## 12. 新增行为模型能力
 
 现有：
 
@@ -305,7 +314,7 @@ captured_code = 新DAC码
 
 模型不需要产生真实模拟电压。
 
-13. 强制验证“发送值 == DDS值”
+## 13. 强制验证“发送值 == DDS值”
 
 testbench不能只检查：
 
@@ -339,7 +348,7 @@ expected == actual
 重复旧值；
 丢一个样点后整体错位；
 byte拆分错误。
-14. Scoreboard深度
+## 14. Scoreboard深度
 
 正常状态理论上只需要极小深度。
 
@@ -353,7 +362,7 @@ reg [11:0] expected_samples [0:4095];
 
 不允许因为TB方便而增加FIFO。
 
-15. 必测的基本序列
+## 15. 必测的基本序列
 
 至少运行：
 
@@ -378,7 +387,7 @@ mute  → 回到12'h800
 每一阶段：
 
 sample_count == write_count
-16. 七音都必须进入Pipeline
+## 16. 七音都必须进入Pipeline
 
 DDS standalone已经验证七音频率。
 
@@ -404,7 +413,7 @@ note_code任意值
 
 都不会触发pipeline边界bug。
 
-17. 真实吞吐压力测试
+## 17. 真实吞吐压力测试
 
 必须新增一个：
 
@@ -438,7 +447,7 @@ $$ 4096\times1500 = 6,144,000 $$
 
 对于夜间ISim是完全合理的。
 
-18. 吞吐PASS条件
+## 18. 吞吐PASS条件
 
 4096样点结束后必须：
 
@@ -456,7 +465,7 @@ scoreboard_errors = 0
 即：
 
 $$ \boxed{4096/4096/4096} $$
-19. 事务延迟测量
+## 19. 事务延迟测量
 
 TB建议记录每个：
 
@@ -485,7 +494,7 @@ $$ \boxed{max\ latency <125\mu s} $$
 
 下一次 DDS valid 到来前 controller 必须已经具备接受新样点的能力。
 
-20. ready时序检查
+## 20. ready时序检查
 
 每一次：
 
@@ -505,7 +514,7 @@ FAIL
 
 即使 controller 后来恢复也不能算正常吞吐PASS。
 
-21. 样点顺序验证
+## 21. 样点顺序验证
 
 输入：
 
@@ -538,7 +547,7 @@ S2
 
 所以 scoreboard比较必须严格保持序号。
 
-22. 音符切换边界
+## 22. 音符切换边界
 
 DDS计划规定：
 
@@ -561,7 +570,7 @@ note变化
 
 也不能漏掉原定的下一个sample。
 
-23. 静音行为
+## 23. 静音行为
 
 DDS静音：
 
@@ -589,7 +598,7 @@ if mute
 
 以后若为了降低I²C流量做“静音只写一次”，必须另开计划，并重新验证恢复时相位/时序。
 
-24. Reset行为
+## 24. Reset行为
 
 rst_n_sync=0 时：
 
@@ -608,7 +617,7 @@ MCP4725 ctrl:
 第一个 sample 按8k节拍出现；
 第一个note有效样点行为符合DDS定义；
 总线不能产生半截事务。
-25. Mid-transaction reset
+## 25. Mid-transaction reset
 
 必须专门刺激：
 
@@ -631,7 +640,7 @@ pending清除
 
 延续旧事务剩余字节。
 
-26. 错误注入：Address NACK
+## 26. 错误注入：Address NACK
 
 行为模型增加一次：
 
@@ -651,7 +660,7 @@ mcp4725_ctrl
 
 不能因为DAC错误而停止系统时钟或卡DDS。
 
-27. 错误后的策略
+## 27. 错误后的策略
 
 本阶段不实现自动重传。
 
@@ -672,7 +681,7 @@ mcp4725_ctrl
 TB要证明：
 
 错误不会造成永久busy
-28. 错误测试与正常吞吐测试必须分开
+## 28. 错误测试与正常吞吐测试必须分开
 
 不能在：
 
@@ -695,7 +704,7 @@ write_count == sample_count
 
 两者分别判定。
 
-29. Overrun故障测试
+## 29. Overrun故障测试
 
 还必须人为制造：
 
@@ -720,7 +729,7 @@ pending中的旧样点不能被新样点覆盖。
 
 这项是故障测试，不是正常8kHz路径。
 
-30. 禁止 EEPROM 命令的端到端检查
+## 30. 禁止 EEPROM 命令的端到端检查
 
 行为模型或总线monitor必须确认整个pipeline运行期间：
 
@@ -738,7 +747,7 @@ DAC Register + EEPROM
 
 MCP4725 EEPROM 写周期远慢于实时音频路径，因此 DDS 路径绝不允许使用EEPROM写。
 
-31. 总线地址检查
+## 31. 总线地址检查
 
 所有写事务必须：
 
@@ -756,7 +765,7 @@ MCP4725 EEPROM 写周期远慢于实时音频路径，因此 DDS 路径绝不允
 
 地址不是 controller 内散落的硬编码0x60。
 
-32. Pipeline ENABLE
+## 32. Pipeline ENABLE
 
 建议 pipeline 自身提供：
 
@@ -780,7 +789,7 @@ dac_overrun=0
 
 pipeline宏仍不是系统级“启用DAC”的开关，因为当前pipeline尚未进入顶层。
 
-33. 配置来源
+## 33. 配置来源
 
 继续复用：
 
@@ -802,7 +811,7 @@ pipeline_dac_addr
 
 模块参数可以覆盖宏以支持TB。
 
-34. I²C timing仍由MCP controller/master负责
+## 34. I²C timing仍由MCP controller/master负责
 
 pipeline不计算：
 
@@ -825,7 +834,7 @@ I2C_ADDR
 
 避免重复时序算法。
 
-35. 新增 Testbench
+## 35. 新增 Testbench
 
 建议：
 
@@ -838,7 +847,7 @@ sim/models/mcp4725_model.v
 只扩展已有模型，不另复制：
 
 mcp4725_audio_model.v
-36. Pipeline TB至少包含六组测试
+## 36. Pipeline TB至少包含六组测试
 A. Reset / idle
 
 检查：
@@ -890,7 +899,7 @@ F. 错误/overrun恢复
 不死锁
 总线释放
 后续可恢复
-37. 推荐新增 simulations
+## 37. 推荐新增 simulations
 
 建议 project.json 增加：
 
@@ -908,7 +917,7 @@ TB_DDS_MCP4725_PIPELINE: PASS
 
 预期错误被正确处理。
 
-38. 是否需要再次测量七音频率
+## 38. 是否需要再次测量七音频率
 
 需要做传输后抽检，但不用像DDS standalone那样跑特别长。
 
@@ -940,7 +949,7 @@ $$ |error|<1\% $$
 
 数据经过controller和I²C以后，波形时间顺序仍然正确。
 
-39. 最终输出仍然是数字样点，不声称“模拟正弦已验证”
+## 39. 最终输出仍然是数字样点，不声称“模拟正弦已验证”
 
 本计划结束后只能说：
 
@@ -963,7 +972,7 @@ LM386
 
 实测。
 
-40. 本阶段不实现模拟重构滤波器
+## 40. 本阶段不实现模拟重构滤波器
 
 后续硬件链会是：
 
@@ -981,7 +990,7 @@ MCP4725数字写入
 
 为止。
 
-41. project.json集成
+## 41. project.json集成
 
 将：
 
@@ -1004,7 +1013,7 @@ finger_piano_top.v
 
 被引用模块先于引用模块。
 
-42. 现有顶层仍然不实例化Pipeline
+## 42. 现有顶层仍然不实例化Pipeline
 
 即：
 
@@ -1022,7 +1031,7 @@ I/O数量不应增加
 
 也不会因为DAC管脚未确认而影响当前 UCF。
 
-43. 旧回归必须全部保持
+## 43. 旧回归必须全部保持
 
 所有已有：
 
@@ -1037,7 +1046,7 @@ DDS standalone
 
 本计划禁止为了使新pipeline通过而修改旧测试期望。
 
-44. 综合警告仍为零容忍
+## 44. 综合警告仍为零容忍
 
 项目已有：
 
@@ -1055,7 +1064,7 @@ XST warning > 0
 
 但源码本身必须通过XST解析/检查。
 
-45. Pipeline状态输出
+## 45. Pipeline状态输出
 
 建议只保留真正有价值的：
 
@@ -1073,7 +1082,7 @@ phase_debug
 
 仿真可以通过层级引用观察内部状态。
 
-46. 未来顶层启用时的边界
+## 46. 未来顶层启用时的边界
 
 本计划完成以后，未来真正接入顶层只需：
 
@@ -1091,7 +1100,7 @@ dac_i2c_sda
 但本计划：
 
 不做这个动作
-47. 提交顺序
+## 47. 提交顺序
 
 建议严格分成以下 commits。
 
@@ -1170,7 +1179,7 @@ IMPLEMENTED
 SIMULATED
 NOT_TOP_INTEGRATED
 NOT_BOARD_TESTED
-48. 最终验收清单
+## 48. 最终验收清单
 
 Agent结束时必须逐项满足：
 
