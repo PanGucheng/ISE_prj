@@ -67,22 +67,6 @@ module ads1115_ctrl #(
 );
 
     //-------------------------------------------------------------------------
-    // ENABLE = 0:纯直连关闭分支,零 I2C 活动,总线无驱动(保持 Z)
-    //-------------------------------------------------------------------------
-    generate
-        if (ENABLE == 0) begin : GEN_OFF
-
-            assign adc_ch0_raw      = 16'h0000;
-            assign adc_ch1_raw      = 16'h0000;
-            assign adc_ch2_raw      = 16'h0000;
-            assign adc_sample_valid = 1'b0;
-            assign adc_busy         = 1'b0;
-            assign adc_error        = 1'b0;
-            assign error_code       = 3'd0;
-
-        end else begin : GEN_ADC
-
-    //-------------------------------------------------------------------------
     // I2C 时序参数(强制公式 + 默认 18+18 分层规则)
     //-------------------------------------------------------------------------
     localparam integer Q_LOW   = 1000000000 / 1300;    // 拟合 1e9/1300ns
@@ -156,6 +140,20 @@ module ads1115_ctrl #(
                      S_VALID    = 5'd24,  // 一帧完成,adc_sample_valid 脉冲
                      S_ERR_STOP = 5'd25,  // 错误收尾:补发 STOP 关闭事务
                      S_ERR      = 5'd26;  // adc_error 脉冲并回 IDLE
+
+    // ENABLE = 0:纯直连关闭分支,零 I2C 活动,总线无驱动(保持 Z)
+    generate
+        if (ENABLE == 0) begin : GEN_OFF
+
+            assign adc_ch0_raw      = 16'h0000;
+            assign adc_ch1_raw      = 16'h0000;
+            assign adc_ch2_raw      = 16'h0000;
+            assign adc_sample_valid = 1'b0;
+            assign adc_busy         = 1'b0;
+            assign adc_error        = 1'b0;
+            assign error_code       = 3'd0;
+
+        end else begin : GEN_ADC
 
     //-------------------------------------------------------------------------
     // 状态寄存器与中间量(先声明后使用)

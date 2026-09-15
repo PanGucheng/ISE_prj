@@ -65,17 +65,6 @@ module mcp4725_ctrl #(
     //-------------------------------------------------------------------------
     // ENABLE = 0:纯直连关闭分支,零 I2C 活动,总线无驱动(保持 Z)
     //-------------------------------------------------------------------------
-    generate
-        if (ENABLE == 0) begin : GEN_OFF
-
-            assign dac_code_ready = 1'b0;   // 关闭态无人接收(不置 overrun)
-            assign dac_busy       = 1'b0;
-            assign dac_error      = 1'b0;
-            assign dac_overrun    = 1'b0;
-            assign error_code     = 3'd0;
-
-        end else begin : GEN_DAC
-
     //-------------------------------------------------------------------------
     // I2C 时序参数(强制公式 + 默认 18+18 分层规则;BUF 用 MCP 的 1300ns)
     //-------------------------------------------------------------------------
@@ -115,6 +104,17 @@ module mcp4725_ctrl #(
                      S_STOP     = 4'd5,   // STOP,释放 pending 槽
                      S_ERR_STOP = 4'd6,   // 错误收尾:补发 STOP
                      S_ERR      = 4'd7;   // dac_error 脉冲并回 IDLE
+
+    generate
+        if (ENABLE == 0) begin : GEN_OFF
+
+            assign dac_code_ready = 1'b0;   // 关闭态无人接收(不置 overrun)
+            assign dac_busy       = 1'b0;
+            assign dac_error      = 1'b0;
+            assign dac_overrun    = 1'b0;
+            assign error_code     = 3'd0;
+
+        end else begin : GEN_DAC
 
     //-------------------------------------------------------------------------
     // 状态寄存器(先声明后使用)
