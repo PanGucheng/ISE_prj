@@ -29,12 +29,14 @@
 | P2 3-bit input | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P3 DDS | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P4 DDS → MCP4725 | SIMULATED（IMPLEMENTED / STANDALONE，端到端数字链通过，未接顶层） | NO | NO |
-| P5 Pressure processor | PLANNED | NO | NO |
+| P5 Pressure processor | SIMULATED（IMPLEMENTED / STANDALONE，零点未实测 NOT_CALIBRATED，未接顶层） | NO | NO |
 
-目前仓库里真正能跑通的仍然是 **legacy baseline**（7-key 方波电子琴）；P1 的
-i2c_master / ads1115_ctrl / mcp4725_ctrl 已实现并通过全量仿真与综合
-（verify-20260916-014501-de164af3 Overall PASS，232 FF / 20 I/O 与基线一致），
-但默认关闭、未接顶层、未上板。P2~P5 尚无 RTL 落地。
+**P1~P5 五份计划已全部实现并通过全量仿真与综合**（最新全量:
+verify-20260916-031854-e3c00f1e Overall PASS,25 个仿真全部 PASS,综合
+0 errors / 0 warnings / 0 latches,232 FF / 20 IOs 与 legacy 基线一致）。
+五个扩展阶段全部是 standalone 基础设施:默认关闭、未接顶层、未上板;
+真正接入 `finger_piano_top` 的顶层迁移(含 3 个 LM393 输入与两套 I²C 共
+7 个新引脚的逐脚确认)必须在用户确认管脚后按 §31 的迁移计划单独执行。
 
 ### 0.2 事实来源优先级（冲突时以此为准）
 

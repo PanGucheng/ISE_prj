@@ -333,7 +333,49 @@ LM386 未验证(§39/§40)。
 
 
 
+### 12.5 压力数据处理(P5,IMPLEMENTED / SIMULATED / ZERO CALIBRATION NOT MEASURED / NOT_TOP_INTEGRATED)
+
+P5 六个提交(A~F)已落地:`src/pressure/` 三模块 ——
+`pressure_frame_capture.v`(三通道轮询扫描帧原子锁存,frame_valid 单 clk)、
+`pressure_channel_corrector.v`(负码钳 0、不取绝对值、零点减法、下溢饱和,
+输出 15 bit unsigned)、`pressure_processor.v`(三通道包装,valid 与数据
+同沿),外加 `sim/tb_ads1115_pressure_pipeline.v`(ADS1115 模型 → driver →
+processor 全链路)。刻意不做:阈值分级、压力融合、归一化、电压/牛顿换算、
+stale timeout。三个 `CFG_PRESSURE_CHx_ZERO` 默认 0(**UNMEASURED DEFAULT**),
+标定方法与全部 TODO 表格见
+[pressure_calibration.md](pressure_calibration.md)(STATUS = NOT_CALIBRATED)。
+验收:25 个仿真全 PASS,含端到端用例(负码/1000/2500 + 零点 0/100/200 →
+0/900/2300 经真实 I2C driver)。
+
 ## 13. 验证记录
+
+### 第十二轮:P5 压力数据处理基础设施(frame capture / corrector / processor,2026-09-16)
+
+**未改任何 legacy RTL、顶层端口与 UCF**;新增 `src/pressure/` 三个模块、
+三个 TB、一个全链路 TB 与 `pressure_calibration.md`。提交序列:
+`p5a`(78e8de0)→ `p5b`(ad284a2)→ `p5c`(a83f47c)→ `p5d`(d025f6e)→
+全量 verify → 标定文档与本文档(`p5f`)。
+
+- `pressure_frame_capture`:三通道轮询扫描帧**原子**锁存(§7),frame_valid
+  严格 1 clk,无 valid 时帧保持,无假 valid。
+- `pressure_channel_corrector`:负码一律钳 0(**不取绝对值**,§23),
+  零点减法 + 下溢饱和(无 unsigned 绕回),输出 15 bit unsigned;
+  计划 §22 的 9 行真值表全过(20 checks)。
+- `pressure_processor`:三通道包装(方案 A,§18),pressure_valid 与新帧
+  同沿对齐(§17);通道独立性 TB(只改 CH0 只变 P0,§26)。
+- **全链路 TB**:ads1115_model(FFFF/1000/2500)→ ads1115_ctrl →
+  processor,零点 0/100/200 → P=(0,900,2300)(§47),负码经真实 I2C
+  字节序后仍正确钳 0。
+- 明确未做(§14/§15/§20/§21/§36~§38):满量程、阈值分级、归一化、
+  电压/牛顿换算、压力融合、音量/音高映射、stale timeout、ENABLE 宏。
+- 标定:`pressure_calibration.md` STATUS = NOT_CALIBRATED,全部 TODO 为
+  真实 TODO,零点宏默认 0(UNMEASURED)。
+
+**验收**:verify-20260916-031854-e3c00f1e Overall PASS:综合 0 errors /
+0 warnings / 0 latches,232 FF / 20 IOs;25 个仿真全部 PASS(legacy 6 +
+P1 3 + P2 4 + P3 4 + P4 4 + P5 4)。P5 状态:**SIMULATED /
+NOT_TOP_INTEGRATED / ZERO CALIBRATION NOT MEASURED / NOT_BOARD_TESTED**。
+
 
 ### 第十一轮:P4 DDS→MCP4725 端到端数字音频链路(pipeline / 吞吐 / 错误恢复,2026-09-16)
 
