@@ -273,7 +273,27 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 **已排除**：下载线选择方式（`-p auto` 同样失败，选项 A 实测）、bitstream 文件（与成功那次同一 SHA-256）、命令序列（转录前缀逐行相同）、Flash 写保护、工具判定层（工具如实报 FAIL）。
 
-**下一步唯一允许的 ISF 测试**（已固化进工具，尚未执行）：`assignFile` + **`program -p 1 -e -v`**，并要求日志出现 `Erasing device...` 与 `Erasure completed successfully.` 后才采信编程/校验结果；任一步失败立即停止、绝不自动重试。只有 verify PASS 后才做断电启动测试，且断电启动结论单独记录。
+**下一步唯一允许的 ISF 测试**（已固化进工具）：`assignFile` + **`program -p 1 -e -v`**，并要求日志出现 `Erasing device...` 与 `Erasure completed successfully.` 后才采信编程/校验结果；任一步失败立即停止、绝不自动重试。只有 verify PASS 后才做断电启动测试，且断电启动结论单独记录。
+
+**已执行并成功（2026-09-15 08:32，run `program-20260915-083244-bf54acda`）**：加上显式 `-e` 后，同一份 `design.bit`、同一条下载线、同一个位置，一次写入通过：
+
+```
+'1': Erasing device...  done.
+'1': Erasure completed successfully.
+'1': Programming Flash...done.
+'1': Programming completed successfully.
+'1': Verifying device...done.
+'1': Verification completed successfully.
+'1': Programmed successfully.
+INFO:iMPACT - '1': Checking done pin....done.      ← 没有出现 "DONE did not go high"
+Elapsed time =      7 sec.                          ← 失败时是 65 sec
+```
+
+`run.json`：`result = PASS`、`programmingCompleted = PASS`、`programmingVerified = VERIFIED`、`preflightState = COMPLETE`、`cableSerialSeen = 210241672559`（无 mismatch）、`programAttempts = 2`（**第 1 次是只读 preflight 冷启动失败、未写入**，第 2 次完成唯一一次写入）。
+
+**根因（有对照证据）**：此前 `program -p N -v` 的**隐式擦除没有真正擦净**，于是在未擦净的内容上编程 → 编程自称成功而回读第 0 页失配、FPGA 启动 CRC 错误。同一镜像、同一下载线、同一工具，**唯一差别是加了 `-e`**，结果由恒定失败变为通过。因此工具的 ISF 路径固定为 `program -p N -e -v` 并强制擦除门禁。
+
+**结论 B（断电重启持久启动）：仍未测试**，必须在上面 verify PASS 之后再单独进行，且不得从 programming PASS 推导。
 
 ### 第六轮：时钟改为 12 MHz + 引脚约束确认 + 实现/bitstream（2026-09-14）
 
