@@ -304,7 +304,49 @@ P2 五个提交(A~E)已落地:`src/input/` 下的 `sensor_code_decoder.v`
 输入引脚待用户逐脚确认,见 doc/README.md §12.2);legacy 7-key 路径零改动,
 综合仍为 232 FF / 20 I/O。验收:verify-20260916-015815-edd2f5fa 全量 PASS。
 
+### 12.3 DDS 正弦音频发生器(P3,IMPLEMENTED / SIMULATED / NOT_INTEGRATED / NOT_BOARD_TESTED)
+
+P3 六个提交(A~F)已落地:`src/audio/sine_lut_12bit.v`(quarter-wave
+65×11 bit 查表,256 相位合成,范围 256~3840,中心 2048)、
+`src/audio/dds_sine_generator.v`(24 bit 相位累加器 + 8 kS/s clock-enable
+采样节拍,12 MHz 下 SAMPLE_DIV=1500;音符切换相位归零且**不改变采样节拍**,
+静音持续输出 0x800;无 ready 输入,时间轴独立)、
+`projects/finger_piano/dds_frequency_table.md`(七音 phase increment 冻结表,
+与方波 frequency_table.md 分开维护)。验收:17 个仿真全 PASS——七音零交叉
+实测误差全部 ≤0.4%,phase increment 与独立 real 数学计算逐位一致,12 MHz
+下 50 个 valid 间隔全部精确 1500 拍,ENABLE=0 恒 0x800/valid=0。
+**尚未连接 MCP4725(P4),不得声称 DDS 硬件已验证。**
+
 ## 13. 验证记录
+
+### 第十轮:P3 DDS 正弦音频发生器(LUT / DDS 核心 / 七音验证,2026-09-16)
+
+**未改任何 legacy RTL、顶层端口与 UCF**;新增 `src/audio/` 两个模块、
+两个 TB、`dds_frequency_table.md`。提交序列:`p3a`(20c230b)→
+`p3b`(20ae0a2)→ `p3c`(3f7cd03)→ `p3d`(b0c9ee4)→ `p3e`(fb00f7b)→
+本文档(`p3f`)。
+
+- `sine_lut_12bit`:quarter-wave 65×11 bit 常量 case(离线脚本生成的
+  round(1792·sin(kπ/128)),RTL 无 real/$sin),四象限合成 12 bit 偏置
+  正弦;TB 全 256 相位遍历:范围/四关键点/反对称 ±1LSB/单调不减/
+  独立 real 数学复核(708 checks)。
+- `dds_sine_generator`:SAMPLE_DIV=1500(12 MHz/8 kHz 精确整除),
+  相位仅在 sample_tick 前进(24 bit 自然溢出),音符切换相位归零且
+  **采样节拍不变**,静音持续 0x800,无 ready 输入(时间轴独立),
+  ENABLE=0 无任何计数器。
+- 七音实测:8192 样点/音零交叉测频,误差全部 ≤0.4%;phase increment
+  与独立 real 计算逐位一致(548657/615871/691284/732388/822063/922747/
+  1035741);12 MHz 下 50 个 valid 间隔全部精确 1500 拍且 1 clk 宽;
+  全程 dac_code ∈ [256,3840] 无 X。
+- 本轮踩过并修掉:XST 再次拒绝 generate 内 localparam(SAMPLE_DIV 移到
+  模块作用域);TB 首稿漏写时钟生成器与 DUT 实例(未入库即被拦截)。
+
+**验收**:verify-20260916-023327-306facb2 Overall PASS:综合 0 errors /
+0 warnings / 0 latches,232 FF / 20 IOs;17 个仿真全部 PASS(legacy 6 +
+P1 3 + P2 4 + P3 4)。P3 状态:**SIMULATED / NOT_INTEGRATED /
+NOT_BOARD_TESTED**(DDS→MCP4725 链路属 P4;不得声称 DDS 硬件已验证)。
+
+
 
 ### 第九轮:P2 3-bit 传感器输入基础设施(decoder / filter / frontend,2026-09-16)
 

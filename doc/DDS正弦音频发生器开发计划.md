@@ -1,12 +1,23 @@
 # finger_piano DDS 正弦音频发生器开发计划
 
-> **Status**: PLANNED（本计划尚无任何 RTL 落地）
+> **Status**: IMPLEMENTED / STANDALONE（已仿真通过,未接顶层,未上板）
 > **Scope**: standalone DDS 正弦样点 RTL + ISim
 > **Depends on**: P1（`CFG_DAC_SAMPLE_RATE` 等统一配置宏）
 > **Top integration**: NO
 > **UCF changes**: NO
 > **Hardware programming**: FORBIDDEN
 > **Acceptance**: full `verify`（`.\ise.ps1 verify -Project finger_piano`）
+>
+> **落地记录（2026-09-16）**:Commit A 频率表（20c230b）、B sine LUT
+> （20ae0a2）、C DDS 核心（3f7cd03）、D 七音验证（b0c9ee4）、E 集成全量
+> verify（fb00f7b,verify-20260916-023327-306facb2 Overall PASS:综合 0/0,
+> 232 FF / 20 IOs,17 个仿真全 PASS）、F 文档(本条)。文件:
+> `src/audio/{sine_lut_12bit,dds_sine_generator}.v` +
+> `sim/tb_{sine_lut_12bit,dds_sine_generator}.v` +
+> `projects/finger_piano/dds_frequency_table.md`;新增仿真 sine_lut_12bit /
+> dds_sine_generator / dds_sine_generator_12m / dds_sine_generator_disabled。
+> 七音实测误差全部 ≤0.4%（12 MHz 节拍 50 个间隔全部精确 1500 拍）。
+> DDS→MCP4725 集成属 P4 计划。
 
 ## 0. 最高优先级约束
 
