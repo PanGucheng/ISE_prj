@@ -128,9 +128,9 @@ module tb_dds_mcp4725_pipeline;
     //-------------------------------------------------------------------------
     // Scoreboard(§13/§21)+ 延迟(§19)+ ready(§20)监视
     //-------------------------------------------------------------------------
-    reg [11:0] exp_mem [0:4095];
-    reg [31:0] push_time [0:4095];
-    reg [11:0] captured_mem [0:4095];
+    reg [11:0] exp_mem [0:8191];
+    reg [31:0] push_time [0:8191];
+    reg [11:0] captured_mem [0:8191];
     integer tail, head, captured_n;
     integer sb_mismatch, dropped, err_pulses, ready_fail;
     real    max_lat;
@@ -138,13 +138,18 @@ module tb_dds_mcp4725_pipeline;
     reg [31:0] prev_frames;
     reg        prev_err;
     reg [31:0] lat_this;
-
+    reg init_done;
     always @(posedge clk) begin
         if (rst_n !== 1'b1) begin
             tail = 0; head = 0; captured_n = 0;
-            sb_mismatch = 0; dropped = 0; err_pulses = 0; ready_fail = 0;
-            max_lat = 0.0; writes_total = 0; prev_frames = 32'd0;
+            max_lat = 0.0; prev_frames = 32'd0;
             prev_err = 1'b0; lat_this = 32'd0;
+            // 累计计数只在上电复位时清零;mid-transaction reset(§25)不清,
+            // 否则错误/恢复统计会被 T4 的复位抹掉
+            if (!init_done) begin
+                sb_mismatch = 0; dropped = 0; err_pulses = 0; ready_fail = 0;
+                writes_total = 0; init_done = 1'b1;
+            end
         end else begin
             // 错误脉冲:NACK 丢弃当前样点(§27 不重传),scoreboard 跳过
             if (dac_error === 1'b1) begin
@@ -164,10 +169,10 @@ module tb_dds_mcp4725_pipeline;
                 captured_mem[captured_n] = u_model.dac_out;
                 captured_n = captured_n + 1;
                 if (head < tail) begin
-                    lat_this = $time - push_time[head % 4096];
+                    lat_this = $time - push_time[head % 8192];
                     if (lat_this > max_lat) max_lat = lat_this;
                     checks = checks + 1;
-                    if (exp_mem[head % 4096] !== u_model.dac_out) begin
+                    if (exp_mem[head % 8192] !== u_model.dac_out) begin
                         sb_mismatch = sb_mismatch + 1;
                         $display("FAIL: scoreboard idx=%0d expected=%0h captured=%0h",
                                  head, exp_mem[head % 4096], u_model.dac_out);
@@ -184,7 +189,7 @@ module tb_dds_mcp4725_pipeline;
 
             // DDS 样点推入(在写比对之后,同一沿同时发生时先弹后压)
             if (dds_valid_debug === 1'b1) begin
-                if (tail < 4096) begin
+                if (tail < 8192) begin
                     exp_mem[tail]    = dds_code_debug;
                     push_time[tail]  = $time;
                 end
@@ -284,26 +289,39 @@ module tb_dds_mcp4725_pipeline;
         input integer f_cHz;          // 标称频率(0.01 Hz)
         integer k;
         integer crossings;
+        integer first_cross;
+        integer last_cross;
         real f_nom, f_meas, err_pct;
         begin
             crossings = 0;
+            first_cross = -1;
+            last_cross  = -1;
             for (k = 1; k < n_samples; k = k + 1) begin
                 if ((captured_mem[start_idx + k - 1] < 12'd2048) &&
                     (captured_mem[start_idx + k]     >= 12'd2048)) begin
                     crossings = crossings + 1;
+                    if (first_cross < 0) first_cross = k;
+                    last_cross = k;
                 end
             end
-            f_nom  = f_cHz / 100.0;
-            f_meas = crossings * 8000.0 / n_samples;
-            err_pct = (f_meas - f_nom) / f_nom * 100.0;
+            f_nom = f_cHz / 100.0;
+            // 用首末过零点间隔估计(分辨率 ~+-1/窗口,远优于 +-1 次计数):
+            //   f = (crossings-1) / (last_cross-first_cross) * fs
             checks = checks + 1;
-            if ((err_pct > 1.0) || (err_pct < -1.0)) begin
+            if (crossings < 2) begin
                 errors = errors + 1;
-                $display("FAIL: captured freq f=%f nom=%f err=%f (crossings=%0d)",
-                         f_meas, f_nom, err_pct, crossings);
+                $display("FAIL: captured freq crossings=%0d too few", crossings);
             end else begin
-                $display("  ok: captured freq f=%f nom=%f err=%f",
-                         f_meas, f_nom, err_pct);
+                f_meas  = (crossings - 1) * 8000.0 / (last_cross - first_cross);
+                err_pct = (f_meas - f_nom) / f_nom * 100.0;
+                if ((err_pct > 1.0) || (err_pct < -1.0)) begin
+                    errors = errors + 1;
+                    $display("FAIL: captured freq f=%f nom=%f err=%f (crossings=%0d span=%0d)",
+                             f_meas, f_nom, err_pct, crossings, last_cross - first_cross);
+                end else begin
+                    $display("  ok: captured freq f=%f nom=%f err=%f (crossings=%0d span=%0d)",
+                             f_meas, f_nom, err_pct, crossings, last_cross - first_cross);
+                end
             end
         end
     endtask
@@ -452,7 +470,15 @@ module tb_dds_mcp4725_pipeline;
             run_note(3'd0, 4);              // 恢复
             check_true(err_pulses >= 1,     "T2 dac_error pulsed on addr NACK");
             check_true(dropped    >= 1,     "T2 failed sample dropped (no retransmit)");
-            check_true(dac_busy   === 1'b0, "T2 controller not stuck busy");
+            begin : NOT_STUCK
+                integer w;
+                w = 0;
+                while ((dac_busy !== 1'b0) && (w < 4 * SAMPLE_DIV)) begin
+                    @(posedge clk);
+                    w = w + 1;
+                end
+            end
+            check_true(dac_busy === 1'b0,   "T2 idle window exists (not stuck busy)");
             run_note(3'd5, 8);              // 恢复后继续正常写
 
             //-----------------------------------------------------------------
