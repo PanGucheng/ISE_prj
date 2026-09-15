@@ -89,4 +89,16 @@
 `define CFG_ADS1115_PGA       3'b001
 `define CFG_ADS1115_DR        3'b111
 
+//-----------------------------------------------------------------------------
+// P5 压力数据处理零点宏(三通道,默认全 0)。
+//
+// **UNMEASURED DEFAULT —— 不是 CALIBRATED!** 真实 FSR 的释放零点尚未实测,
+// 禁止凭感觉填写;实测方法与标定表格见 projects/finger_piano/
+// pressure_calibration.md(§32:候选方法 ZERO = released_max + margin,
+// margin 由实测噪声确定后再填)。
+//-----------------------------------------------------------------------------
+`define CFG_PRESSURE_CH0_ZERO   15'd0
+`define CFG_PRESSURE_CH1_ZERO   15'd0
+`define CFG_PRESSURE_CH2_ZERO   15'd0
+
 `endif // FINGER_PIANO_CFG_VH

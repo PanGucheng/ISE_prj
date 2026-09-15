@@ -33,6 +33,11 @@
       "library": "work"
     },
     {
+      "path": "src/pressure/pressure_processor.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/input/sensor_code_filter.v",
       "language": "verilog",
       "library": "work"
@@ -382,6 +387,17 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_PRESSURE_CHANNEL_CORRECTOR: PASS",
       "failPattern": "TB_PRESSURE_CHANNEL_CORRECTOR: FAIL"
+    },
+    {
+      "name": "pressure_processor",
+      "top": "tb_pressure_processor",
+      "sources": [
+        "sim/tb_pressure_processor.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_PRESSURE_PROCESSOR: PASS",
+      "failPattern": "TB_PRESSURE_PROCESSOR: FAIL"
     }
   ],
   "verification": {
