@@ -4,6 +4,7 @@
   "sources": [
     {"path":"src/periph/i2c_master.v","language":"verilog","library":"work"},
     {"path":"src/periph/ads1115_ctrl.v","language":"verilog","library":"work"},
+    {"path":"src/periph/mcp4725_ctrl.v","language":"verilog","library":"work"},
     {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
     {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
     {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
@@ -91,6 +92,15 @@
       "timeoutSeconds": 240,
       "passPattern": "TB_ADS1115_CTRL: PASS",
       "failPattern": "TB_ADS1115_CTRL: FAIL"
+    },
+    {
+      "name": "mcp4725_ctrl",
+      "top": "tb_mcp4725_ctrl",
+      "sources": ["sim/tb_mcp4725_ctrl.v", "sim/models/mcp4725_model.v"],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_MCP4725_CTRL: PASS",
+      "failPattern": "TB_MCP4725_CTRL: FAIL"
     }
   ],
   "verification": {
