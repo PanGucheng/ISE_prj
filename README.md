@@ -6,6 +6,15 @@
 
 本机已确认安装 `C:\Program Files\PowerShell\7\pwsh.exe`，版本 7.6.5。如果新终端未识别 pwsh，可直接使用该绝对路径；不依赖 Codex 的缓存运行时。入口通过 `#Requires -Version 7.0` 拒绝旧版本 PowerShell。
 
+## finger_piano 当前开发入口
+
+手指钢琴（`projects/finger_piano`）的目标架构、五份开发计划的依赖顺序、扩展功能与 Agent 工作边界见：
+
+- **[`doc/README.md`](doc/README.md)** —— 架构地图、P1~P5 计划索引、当前实施状态、事实来源优先级
+- **[`projects/finger_piano/AGENTS.md`](projects/finger_piano/AGENTS.md)** —— 该项目专属规则：真实硬件是 3 传感器而不是 7 键、legacy baseline 不得改写、不得猜引脚、何时才允许 `program`
+
+任务涉及 `finger_piano` 时，**先读这两个入口，再读具体计划文档**。
+
 ## 日常流程（Toolchain Freeze v1）
 
 **只需要这五条命令。** 底层细节（iMPACT 批处理、`fuse`、SSH staging 目录、Digilent target 语法、ISF 擦除顺序）都由工具负责，使用课程设计时不需要理解它们。

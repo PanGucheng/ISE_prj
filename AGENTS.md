@@ -34,7 +34,7 @@
 - 单个仿真用 `pwsh -File .\ise.ps1 sim -Project <名称> -Test <名称>`。用例定义在 project.json 的 `simulations` 段（`name/top/sources/generics/timeoutSeconds/passPattern/failPattern`，可加 `enabled`）；testbench 绝不加入综合 `sources`。
 - sim 的判据是日志出现 `passPattern`：退出码 0 不算通过，既无 PASS 也无 FAIL 视为 FAIL；generic 覆盖只在 fuse 阶段生效，每次参数组合重新 fuse；超时会终止本地 SSH 会话并判 FAIL。
 - `pwsh -File .\ise.ps1 report -Project <名称> (-RunId <id> | -Latest) [-Json]` 只读取已有 artifacts，不重新构建；`timing` 在有人实际阅读 timing.twr 之前只能是 `NOT_RUN`/`NEEDS_REVIEW`，不得据此声称时序通过。
-- implement 是否应当被阻止由 project.json 的 `verification.expectImplementationBlocked` 决定（当前为 `true`）。verify 以此判定 EXPECTED BLOCK 是否 PASS，工具内不写工程名特例。
+- implement 是否应当被阻止**只以目标工程当前 `project.json` 的 `verification.expectImplementationBlocked` 为准**。该字段随工程进展变化（`finger_piano` 已由 `true` 改为 `false`），Agent **每次工作前必须重新读取该字段**，不得在本文件中依赖硬编码的「当前值」。verify 以此判定 EXPECTED BLOCK 是否 PASS，工具内不写工程名特例。
 - `board-check` 目前只在缺少 `board.json` 时输出 `BOARD_CHECK: NOT_CONFIGURED`，存在时输出 `BOARD_CHECK: NOT_IMPLEMENTED`；不得猜测引脚，不得自动设置 `constraintsReviewed=true`。（烧录已实现，见 `program`；`board-check` 仍是占位入口。）
 - 工具自测 `pwsh -NoProfile -File .\tools\test-tools.ps1` 覆盖失败路径（fuse 失败、超时、无 PASS 模式、failPattern、门禁两个方向、report 缺文件、旧工程兼容），使用隔离目录与模拟远端，不代表真实综合或真实仿真。
 
