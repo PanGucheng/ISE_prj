@@ -398,6 +398,18 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_PRESSURE_PROCESSOR: PASS",
       "failPattern": "TB_PRESSURE_PROCESSOR: FAIL"
+    },
+    {
+      "name": "ads1115_pressure_pipeline",
+      "top": "tb_ads1115_pressure_pipeline",
+      "sources": [
+        "sim/tb_ads1115_pressure_pipeline.v",
+        "sim/models/ads1115_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_ADS1115_PRESSURE_PIPELINE: PASS",
+      "failPattern": "TB_ADS1115_PRESSURE_PIPELINE: FAIL"
     }
   ],
   "verification": {
