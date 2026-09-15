@@ -252,6 +252,29 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 
 ## 13. 验证记录
 
+### 第七轮：JTAG 烧录稳定性 + ISF 写入只读诊断（2026-09-14 ~ 09-15）
+
+**易失 JTAG 路径（`-Mode Jtag`，`program -onlyFpga`）已实测稳定**：连续两次真机 PASS，`Programming device` / `Completed downloading bit file to device` / `DONEIN=1` / `CRC error=0`，且**无 `Programming Flash`、无 SPI access core**；并读回 `MODE pins M[2:0] = 011`。下载线已固定为
+`cableSerial = 210241672559`、`cableFrequencyHz = 10000000`（来自 52 条真实成功转录，非默认值），正式路径不再使用 `-p auto`；preflight 与写入合并进**同一个远端 `hardware_transaction.cmd`**，两者之间无 sleep/SSH/SFTP。
+
+**内部 ISF 写入当前存在未解决问题（写入自称成功、校验恒定失败）**：
+
+| 时间 | 命令 | 结果 |
+|---|---|---|
+| 09-14 21:14 / 21:18 | `assignFile` + `program -p 1 -v` | ✅ `Verification completed successfully`，DONE 拉高 |
+| 09-15 08:06 / 08:10（pinned）/ 08:14（auto） | 同上 | ❌ `Programming completed successfully` → **`Verify failed on page 0`** → `DONE did not go high`，`Elapsed time = 65 sec`（成功那次 6 sec） |
+
+三次失败转录逐字节相同；独立只读 `verify -p 1 -spi` 亦报 `Verify failed on page 0`，故**内容确实与 bitstream 不一致**（不是 in-step 校验误报）。只读诊断结论：
+
+- `readStatusRegister -p 1 -flash`：`Device Density Bits: 0011` → 按 XCN14003/AR59572 的对应关系为 **X-FAB ISF，1 Mbit**（非 UMC）；`Sector Protection enabled = 0`、全部 sector `NOT SECURED`/`NOT LOCKED DOWN` → **无写保护**。
+- `blankCheck -p 1 -spi`：`Part is not blank`（Flash 里有内容）。
+- `readStatusRegister -p 1 -fpga`（未加载 SPI core 时）：`CRC error = 1`、`CFG_RDY(INIT_B) = 0`、`DONEIN = 0` → **从 Flash 启动以 CRC 错误失败**。
+- 环境/补丁：`MYXILINX` 与 `ISE_XCN14003_patch` **均未设置**，ISE 安装内无任何 `*patch*` 文件，`impact` 为 `Release 14.7 - iMPACT P.20131013`，`spartan3a\data` 全部为 2013/10/13 基准文件 → **未安装 XCN14003 补丁**；因器件判定为 X-FAB，该补丁（针对 X-FAB→UMC 算法变更）在本例中按判定树不需要。
+
+**已排除**：下载线选择方式（`-p auto` 同样失败，选项 A 实测）、bitstream 文件（与成功那次同一 SHA-256）、命令序列（转录前缀逐行相同）、Flash 写保护、工具判定层（工具如实报 FAIL）。
+
+**下一步唯一允许的 ISF 测试**（已固化进工具，尚未执行）：`assignFile` + **`program -p 1 -e -v`**，并要求日志出现 `Erasing device...` 与 `Erasure completed successfully.` 后才采信编程/校验结果；任一步失败立即停止、绝不自动重试。只有 verify PASS 后才做断电启动测试，且断电启动结论单独记录。
+
 ### 第六轮：时钟改为 12 MHz + 引脚约束确认 + 实现/bitstream（2026-09-14）
 
 **这是本工程第一次产生真实引脚约束与 bitstream**，但**仍然没有烧录、没有上板**。

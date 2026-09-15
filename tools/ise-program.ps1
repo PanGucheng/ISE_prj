@@ -452,13 +452,16 @@ function New-ImpactProgramScript {
     $lines.Add(('assignFile -p {0} -file "{1}"' -f $Position, $RemoteBitFile))
     if ($Mode -eq 'Isf') {
         # Spartan-3AN internal In-System Flash. Measured on ISE 14.7: assigning the
-        # bitstream to the device and using `program -v` downloads the SPI access
-        # core (spartan3a/data/xc3s50an_spi.cor), prints "Programming Flash" plus
-        # sector/page addresses, and then verifies the flash in the same step
-        # ("Verification completed successfully"). `assignFileToAttachedFlash`
-        # is a DIFFERENT model - it is for an external SPI/BPI PROM and fails here
-        # with "No attached device found at position '1'".
-        $lines.Add(('program -p {0} -v' -f $Position))
+        # bitstream to the device and using `program -e -v` erases, programs and then
+        # verifies the internal flash in one step. `-e` forces the erase phase, and
+        # the tool requires its markers ("Erasing device..." then "Erasure completed
+        # successfully.") before it will believe any programming result. A previous
+        # write without `-e` self-reported "Programming completed successfully" while
+        # the flash verifies failed at page 0, which is why the erase phase is now
+        # explicit and gated. `assignFileToAttachedFlash` is a DIFFERENT model - it is
+        # for an external SPI/BPI PROM and fails here with
+        # "No attached device found at position '1'".
+        $lines.Add(('program -p {0} -e -v' -f $Position))
     } elseif ($DeviceHasInternalConfigFlash) {
         # Volatile FPGA configuration on a device whose flash would otherwise be
         # chosen: `-onlyFpga` is what selects "Program FPGA only". Measured: with
@@ -1166,7 +1169,7 @@ function Invoke-Program {
         # transaction may be retried - immediately, not after a multi-second sleep
         # (measured: idling makes the next Adept open more likely to fail).
         # Everything else (any write evidence, timeout, dropped session) stops here.
-        $anyWriteEvidence = [bool]($programText -match '(?i)(Programming Flash|Programming device|Programmed successfully|Programming completed successfully|Completed downloading bit file|Verifying device)')
+        $anyWriteEvidence = [bool]($programText -match '(?i)(Erasing device|Erasure completed|Programming Flash|Programming device|Programmed successfully|Programming completed successfully|Completed downloading bit file|Verifying device)')
         $cableUnavailable = ((Test-TranscriptCableUnavailable $probeText) -or (Test-TranscriptCableUnavailable $programText))
         $retryable = ($cableUnavailable -and -not $anyWriteEvidence -and -not $step.TimedOut -and -not $step.Error -and $attempt -lt $cfg.CableRetryAttempts)
         if ($retryable -and $preflightState -eq 'PREFLIGHT_FAILED') {
@@ -1214,6 +1217,14 @@ function Invoke-Program {
     $flashWriteEvidence = @([regex]::Matches($programText, '(?im)^.*(SPI access core|Programming Flash|is in sector \d|is in page \d).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
     $nonVolatileWrite = ($Mode -eq 'Jtag' -and $flashWriteEvidence.Count -gt 0)
     $programSuccessMarker = [bool]($programText -match '(?i)(program(ming)?\s+(operation\s+)?(completed|successful|succeeded)|Programmed successfully|Completed downloading bit file to device)')
+    # -Mode Isf runs `program -e -v`: the erase phase must really happen and finish
+    # before the programming/verification result means anything. Measured failure
+    # mode that motivates this gate: without -e the transcript still said
+    # "Programming completed successfully" while the flash then failed its verify.
+    $eraseStarted = [bool]($programText -match '(?i)Erasing device')
+    $eraseOk = [bool]($programText -match '(?i)Erasure completed successfully')
+    $eraseFailed = [bool]($programText -match '(?i)(Erasure failed|Erase failed|erase error)')
+    $eraseGateOk = ($Mode -ne 'Isf') -or ($eraseStarted -and $eraseOk -and -not $eraseFailed)
     # The transcripts must name the cable we pinned. ANY other serial - in the
     # preflight or in the write - means the transaction talked to a different cable,
     # which is a hard failure.
@@ -1228,6 +1239,7 @@ function Invoke-Program {
     if ($programStep.TimedOut) { $statuses.programmingCompleted = 'TIMEOUT' }
     elseif ($interrupted) { $statuses.programmingCompleted = 'PROGRAM_STATE_UNKNOWN' }
     elseif ($programErrors.Count -gt 0) { $statuses.programmingCompleted = 'FAIL' }
+    elseif (-not $eraseGateOk) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($serialMismatch) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($cableFailures.Count -gt 0 -and -not $programSuccessMarker) { $statuses.programmingCompleted = 'FAIL' }
     elseif ($nonVolatileWrite) { $statuses.programmingCompleted = 'FAIL' }
@@ -1236,6 +1248,11 @@ function Invoke-Program {
     else { $statuses.programmingCompleted = 'FAIL' }
     foreach ($c in $cableFailures) { $programErrors += ('cable: ' + $c) }
     if ($nonVolatileWrite) { $programErrors += 'MODE VIOLATION: -Mode Jtag asked for a volatile FPGA configuration (-onlyFpga) but the transcript shows internal flash programming; the device non-volatile flash was modified.' }
+    if (-not $eraseGateOk) {
+        if (-not $eraseStarted) { $programErrors += 'ERASE PHASE MISSING: -Mode Isf requires `program -e`; the transcript never printed "Erasing device...". No programming result is accepted.' }
+        elseif ($eraseFailed) { $programErrors += 'ERASE FAILED: the transcript reports an erase failure, so the flash may be partially erased. Nothing is retried automatically.' }
+        else { $programErrors += 'ERASE NOT CONFIRMED: "Erasing device..." appeared but "Erasure completed successfully." did not. No programming result is accepted.' }
+    }
     if ($serialMismatch) { $programErrors += ('CABLE MISMATCH: the transcript names cable SN ' + $actualSerial + ' but programming.cableSerial is ' + $cfg.CableSerial + '.') }
     if ($preflightState -eq 'PREFLIGHT_FAILED') { $programErrors += 'PREFLIGHT_FAILED: the remote preflight did not verify the chain, so program.cmd was never executed.' }
 
@@ -1334,6 +1351,10 @@ function Invoke-Program {
     } else {
         $summary.Add('')
         $summary.Add('This was a NON-VOLATILE write to the Spartan-3AN internal In-System Flash.')
+        $summary.Add('  Sequence: assignFile -> program -e -v, so the erase phase is explicit and is')
+        $summary.Add('  gated: "Erasing device..." and "Erasure completed successfully." must both appear')
+        $summary.Add('  before any programming/verification result is accepted.')
+        $summary.Add(('  Erase phase    : ' + $(if ($eraseStarted) { 'seen' } else { 'MISSING' }) + ' / ' + $(if ($eraseOk) { 'completed' } else { 'not confirmed' }) + $(if ($eraseFailed) { ' / FAILED' } else { '' })))
         $summary.Add('  Verification comes from the program step itself (`program -v`); the ISF boot')
         $summary.Add('  requirement is MODE pins M[2:0] = 011 with VCCAUX = 3.3 V.')
     }

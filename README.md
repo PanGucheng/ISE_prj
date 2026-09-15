@@ -209,7 +209,7 @@ pwsh -File .\ise.ps1 program -Project finger_piano -Mode Isf  -BitFile .\design.
 | 模式 | 含义 | 掉电后 | iMPACT 命令 |
 |---|---|---|---|
 | `-Mode Jtag` | 通过 JTAG 配置 FPGA 本体 | **VOLATILE**，掉电丢失 | `assignFile -p N -file x.bit` + `program -p N -onlyFpga` |
-| `-Mode Isf` | 编程 Spartan-3AN **内部 In-System Flash（ISF）** | **NON-VOLATILE**，上电自动配置 | `assignFile -p N -file x.bit` + `program -p N -v` |
+| `-Mode Isf` | 编程 Spartan-3AN **内部 In-System Flash（ISF）** | **NON-VOLATILE**，上电自动配置 | `assignFile -p N -file x.bit` + **`program -p N -e -v`** |
 
 **这里的关键（全部由真机实测得到，2026-09-14，XC3S50AN）**：同一个 `assignFile` + `program`，加不加 `-onlyFpga` 是**两件完全不同的事**：
 
@@ -261,6 +261,19 @@ hardware_transaction.cmd
 - 重试发生在**同一个远端事务内部**，且退避是 **150 ms 而不是几秒**；
 - 只有「转录里完全没有写入迹象」时才允许重试（`programming.cableRetryAttempts`，默认 3）；一旦出现 `Programming device` / `Programming Flash` / `Completed downloading` / `Programmed successfully` / `Verifying` / `TIMEOUT` / SSH 中断，**绝不重试**；
 - 事务用 `exit /b 2`（preflight 失败）与 `exit /b 3`（环境失败）表达**预期结果**，工具据 `run.status` 判定，不会误当成 `PROGRAM_STATE_UNKNOWN`。
+
+### ISF 写入必须显式擦除并受门禁约束
+
+`-Mode Isf` 使用 **`program -p N -e -v`**（`-e` = erase）。实测教训：不带 `-e` 的 `program -p N -v` 会在同一份转录里打印
+`Programming completed successfully`，随后 `Verifying device...Verify failed on page 0` —— 写入自称成功、内容却是错的。
+
+因此工具的判定加了**硬门禁**：
+1. 必须出现 `Erasing device...`；
+2. 必须出现 `Erasure completed successfully.`；
+3. 且不得出现 erase 失败行。
+
+**只有通过这三条，才会去采信 `Programming Flash...` / `Programming completed successfully` / `Verification completed successfully`。**
+擦除阶段只要启动过，就视为「已经动过 Flash」→ **绝不自动重试写入**（`TIMEOUT`/`PROGRAM_STATE_UNKNOWN` 同样不重试）。摘要会明确输出 `Erase phase : seen / completed`。
 
 ### 下载线失败必须分层报告
 

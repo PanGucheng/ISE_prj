@@ -71,7 +71,7 @@ $script:Scenario = 'pass'   # pass | fusefail | simfail | no-pattern | fail-patt
 $script:Mode = 'success'    # success | failure | disconnect (build flow)
 $script:SynthWarnings = 0   # XST warning count written into the mock synthesis report
 $script:ProgProbe = 'ok'     # ok | nocable | mismatch | twoDevices
-$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail | cable | flash | verified | verifyfail | status
+$script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail | cable | flash | verified | verifyfail | status | noerase | erasefail
 $script:ProgVerify = 'ok'    # legacy mock (the program flow no longer runs a verify step)
 $script:ProbeDevice = 'xc3s50an'
 $script:ProbeIdcode = '02610093'
@@ -185,14 +185,33 @@ function New-FakeProgramLog {
         }
         'verified' {
             return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Erasing device...done.`n" +
+                "'1': Erasure completed successfully.`n" +
                 "'1': Programming Flash...done.`n" +
                 "'1': Programming completed successfully.`n" +
                 "'1': Verifying device...done.`n" +
                 "'1': Verification completed successfully.`n" +
                 "'1': Programmed successfully.`n")
         }
+        'noerase' {
+            # A `program -v` transcript without `-e`: it self-reports programming
+            # success but never erased, which is the measured failure mode.
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Programming Flash...done.`n" +
+                "'1': Programming completed successfully.`n" +
+                "'1': Verifying device...Verify failed on page 0.`n" +
+                "'1': Verification Terminated...done.`n")
+        }
+        'erasefail' {
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Erasing device...`n" +
+                "ERROR:iMPACT:1234 - Erasure failed on sector 0.`n" +
+                "'1': Erasure failed.`n")
+        }
         'verifyfail' {
             return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Erasing device...done.`n" +
+                "'1': Erasure completed successfully.`n" +
                 "'1': Programming completed successfully.`n" +
                 "'1': Verifying device...Verify failed on page 0.`n" +
                 "'1': Verification Terminated...done.`n")
@@ -218,6 +237,8 @@ function New-FakeProgramLog {
         }
         default {
             return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Erasing device...done.`n" +
+                "'1': Erasure completed successfully.`n" +
                 "INFO:iMPACT - programming device '1'`nProgramming operation completed successfully`n")
         }
     }
@@ -780,7 +801,8 @@ Assert ($jtagScript -match '(?m)^closeCable\r?$') 'JTAG script must close the ca
 $isfScript = New-ImpactProgramScript -Mode Isf -Position 2 -RemoteBitFile 'C:\r\work\d.bit' -CableArgument $snTarget -DeviceHasInternalConfigFlash
 Assert ($isfScript -match 'setCable -target "digilent_plugin DEVICE=SN:210241672559 FREQUENCY=10000000"') 'ISF script must pin the same cable as the preflight'
 Assert ($isfScript -match 'assignFile -p 2 -file') 'ISF script must assign the bitstream to the device'
-Assert ($isfScript -match 'program -p 2 -v') 'ISF script must program with the in-step flash verify'
+Assert ($isfScript -match 'program -p 2 -e -v') 'ISF script must force the erase phase with -e and verify'
+Assert ($isfScript -notmatch 'program -p 2 -v$') 'ISF must not fall back to the un-gated program -v'
 Assert ($isfScript -notmatch 'assignFileToAttachedFlash') 'the internal ISF is not an "attached" flash (that command answers "No attached device found")'
 Assert ($isfScript -notmatch '\-spi') 'the internal ISF flow does not use -spi'
 Assert ($isfScript -notmatch 'onlyFpga') 'ISF mode must not use -onlyFpga'
@@ -889,7 +911,8 @@ Assert ($isfSummary -match 'VCCAUX = 3.3 V') 'ISF boot requirement VCCAUX missin
 Assert ($isfSummary -match 'NON-VOLATILE') 'ISF persistence not stated'
 $isfCmd = Get-TextSafe "$($isfRun.RunDir)/generated/program.cmd"
 Assert ($isfCmd -match 'assignFile -p 1 -file') 'ISF program.cmd must assign the bitstream to the device'
-Assert ($isfCmd -match 'program -p 1 -v') 'ISF program.cmd must use the in-step flash verify'
+Assert ($isfCmd -match 'program -p 1 -e -v') 'ISF program.cmd must use the gated erase+program+verify sequence'
+Assert ($isfSummary -match 'Erase phase    : seen / completed') 'the erase phase must be reported in the summary'
 Assert ($isfCmd -notmatch 'attach') 'the internal ISF is not an attached flash'
 $isfJson = Get-Content "$($isfRun.RunDir)/run.json" -Raw | ConvertFrom-Json
 Assert ($isfJson.mode -eq 'Isf') 'ISF mode not recorded'
@@ -1077,4 +1100,5 @@ Write-Host 'PASS: probe-diag generates read-only layered diagnostics and invents
 Write-Host ''
 Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'
 Write-Host "Test evidence retained: $root"
+
 
