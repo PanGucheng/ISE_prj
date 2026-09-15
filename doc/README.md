@@ -37,11 +37,11 @@ pwsh -File .\ise.ps1 verify -Project finger_piano
 
 除非明确进入人工板级验证阶段，否则开发 Agent 不得执行 program。
 
-2. 当前总体架构
+## 2. 当前总体架构
 
 最终目标系统分为三条逻辑上相互独立的数据链。
 
-2.1 数字音符选择链
+### 2.1 数字音符选择链
 
 真实硬件最终采用三个 LM393 比较器输出组成 3-bit 编码：
 
@@ -70,7 +70,7 @@ note_code
 
 该路径是 legacy baseline，不是最终三传感器硬件模型。
 
-2.2 模拟压力采集链
+### 2.2 模拟压力采集链
 
 三个压力传感器的模拟量经 ADS1115 独立采集：
 
@@ -88,7 +88,7 @@ pressure processing
 
 这一链负责“按压力度”，不负责决定当前是哪一个音符。
 
-2.3 DDS 数字音频链
+### 2.3 DDS 数字音频链
 
 音符编码进入 DDS：
 
@@ -114,19 +114,20 @@ tone_generator → audio_out
 
 方波基线。
 
-3. 开发计划总览
-顺序	计划	解决的问题	主要依赖	本阶段是否接顶层
-P1	ADS1115 与 MCP4725 可选外设开发计划	I²C master、ADC driver、DAC driver	ISE 工具链	否
-P2	3-bit 传感器编码输入基础设施开发计划	三个 LM393 编码、同步、原子码字滤波	现有同步基础设施	否
-P3	DDS 正弦音频发生器开发计划	8 kS/s、24-bit DDS、12-bit 正弦样点	P1 的统一配置	否
-P4	DDS 到 MCP4725 数字音频链路集成计划	DDS 与 DAC controller 端到端吞吐	P1 + P3	否
-P5	ADS1115 压力数据处理与标定基础设施开发计划	ADC raw → 干净的三路压力数据	P1	否
+## 3. 开发计划总览
+| 顺序 | 计划 | 解决的问题 | 主要依赖 | 本阶段是否接顶层 |
+|---|---|---|---|---|
+| P1 | ADS1115 与 MCP4725 可选外设开发计划 | I²C master、ADC driver、DAC driver | ISE 工具链 | 否 |
+| P2 | 3-bit 传感器编码输入基础设施开发计划 | 三个 LM393 编码、同步、原子码字滤波 | 现有同步基础设施 | 否 |
+| P3 | DDS 正弦音频发生器开发计划 | 8 kS/s、24-bit DDS、12-bit 正弦样点 | P1 的统一配置 | 否 |
+| P4 | DDS 到 MCP4725 数字音频链路集成计划 | DDS 与 DAC controller 端到端吞吐 | P1 + P3 | 否 |
+| P5 | ADS1115 压力数据处理与标定基础设施开发计划 | ADC raw → 干净的三路压力数据 | P1 | 否 |
 
 这些计划的共同原则是：
 
 先做独立 RTL 和可重复仿真，再做顶层和实物集成。
 
-4. 推荐执行顺序
+## 4. 推荐执行顺序
 
 推荐 Agent 严格按照下面的依赖关系推进：
 
@@ -175,7 +176,7 @@ P5  ADS1115 pressure processing
 
 先修复当前阶段，不得带着 FAIL 继续向后叠加功能。
 
-5. P1 — ADS1115 / MCP4725 可选外设
+## 5. P1 — ADS1115 / MCP4725 可选外设
 
 入口：
 
@@ -215,7 +216,7 @@ MCP4725 数据手册
 
 任何寄存器、地址、位域或 I²C 时序问题，均以这两份仓库内手册为准。
 
-6. P2 — 3-bit 传感器编码输入
+## 6. P2 — 3-bit 传感器编码输入
 
 入口：
 
@@ -225,15 +226,16 @@ MCP4725 数据手册
 
 项目编码冻结为：
 
-3-bit code	note
-000	静音
-001	C4
-010	D4
-011	E4
-100	F4
-101	G4
-110	A4
-111	B4
+| 3-bit code | note |
+|---|---|
+| 000 | 静音 |
+| 001 | C4 |
+| 010 | D4 |
+| 011 | E4 |
+| 100 | F4 |
+| 101 | G4 |
+| 110 | A4 |
+| 111 | B4 |
 
 关键设计不是简单的：
 
@@ -257,7 +259,7 @@ whole-vector atomic stable filter
 
 本阶段只做 standalone infrastructure，不替换当前 7-key 顶层。
 
-7. P3 — DDS 正弦发生器
+## 7. P3 — DDS 正弦发生器
 
 入口：
 
@@ -277,15 +279,16 @@ sine LUT
 
 当前冻结值：
 
-项	值
-Sample rate	8 kS/s
-Phase accumulator	24 bit
-Phase address	8 bit
-DAC width	12 bit
-Center	2048 / 12'h800
-Amplitude	1792
-Output range	256～3840
-Mute code	2048
+| 项 | 值 |
+|---|---|
+| Sample rate | 8 kS/s |
+| Phase accumulator | 24 bit |
+| Phase address | 8 bit |
+| DAC width | 12 bit |
+| Center | 2048 / 12'h800 |
+| Amplitude | 1792 |
+| Output range | 256～3840 |
+| Mute code | 2048 |
 
 所有 DDS 时序仍运行在系统 clk：
 
@@ -301,7 +304,7 @@ clk_8k
 
 DDS 本阶段只生成数字样点，不声称已经产生真实模拟正弦波。
 
-8. P4 — DDS → MCP4725 数字链路
+## 8. P4 — DDS → MCP4725 数字链路
 
 入口：
 
@@ -349,7 +352,7 @@ LM386 输入已经验证；
 
 这些结论必须来自之后的实物测试。
 
-9. P5 — ADS1115 压力数据处理
+## 9. P5 — ADS1115 压力数据处理
 
 入口：
 
@@ -389,11 +392,11 @@ NOT_CALIBRATED
 
 默认 zero offset 为 0，只用于建立数据处理基础设施。
 
-10. 全工程共同不可违反的约束
+## 10. 全工程共同不可违反的约束
 
 以下规则优先级高于任意单一计划中的局部实现便利。
 
-10.1 Legacy baseline 必须保持
+### 10.1 Legacy baseline 必须保持
 
 在真正进行最终集成前：
 
@@ -404,7 +407,7 @@ audio_out
 
 不得因为扩展功能而随意修改。
 
-10.2 不猜板级管脚
+### 10.2 不猜板级管脚
 
 任何尚未由用户确认的：
 
@@ -416,7 +419,7 @@ MCP4725 SDA/SCL
 
 不得依赖 MAP 自动分配新增外设 I/O。
 
-10.3 新外设默认不启用
+### 10.3 新外设默认不启用
 
 ADS1115、MCP4725、DDS 等新增能力即使已经：
 
@@ -434,7 +437,7 @@ RTL instance
 verified UCF LOC
 +
 board wiring
-10.4 只有一个系统时钟域
+### 10.4 只有一个系统时钟域
 
 全工程主时钟：
 
@@ -452,7 +455,7 @@ I2C SCL
 
 用作新逻辑时钟。
 
-10.5 ISE / Verilog 兼容性
+### 10.5 ISE / Verilog 兼容性
 
 可综合 RTL 以：
 
@@ -471,7 +474,7 @@ SystemVerilog-only constructs
 
 XST errors   = 0
 XST warnings = 0
-10.6 仿真 PASS 不能只看退出码
+### 10.6 仿真 PASS 不能只看退出码
 
 每个 testbench 必须产生明确：
 
@@ -485,7 +488,7 @@ TB_xxx: FAIL
 
 退出码 0 本身不代表功能 PASS。
 
-10.7 每阶段必须回归
+### 10.7 每阶段必须回归
 
 完成每个计划或重要 commit 后：
 
@@ -495,7 +498,7 @@ pwsh -File .\ise.ps1 verify -Project finger_piano
 
 不得只运行新增 TB 后就声称工程通过。
 
-10.8 开发 Agent 不执行板卡写入
+### 10.8 开发 Agent 不执行板卡写入
 
 正常无人值守开发阶段：
 
@@ -506,21 +509,22 @@ pwsh -File .\ise.ps1 verify -Project finger_piano
 
 烧录由用户在明确需要时单独执行。
 
-11. 状态术语
+## 11. 状态术语
 
 文档与 README 应尽量使用下面的状态，不混淆软件验证和实物验证。
 
-状态	含义
-PLANNED	只有计划，没有实现
-IMPLEMENTED	RTL/代码已实现
-SIMULATED	对应自动仿真已通过
-INTEGRATED	已接入系统顶层
-IMPLEMENTED / STANDALONE	已实现，但尚未接顶层
-NOT_INTEGRATED	尚未进入最终数据链或顶层
-NOT_CALIBRATED	真实硬件校准尚未完成
-NOT_BOARD_TESTED	没有实物验证证据
-PASS	对明确指定的测试对象和测试范围通过
-NOT_TESTED	尚未测试，不等于失败
+| 状态 | 含义 |
+|---|---|
+| PLANNED | 只有计划，没有实现 |
+| IMPLEMENTED | RTL/代码已实现 |
+| SIMULATED | 对应自动仿真已通过 |
+| INTEGRATED | 已接入系统顶层 |
+| IMPLEMENTED / STANDALONE | 已实现，但尚未接顶层 |
+| NOT_INTEGRATED | 尚未进入最终数据链或顶层 |
+| NOT_CALIBRATED | 真实硬件校准尚未完成 |
+| NOT_BOARD_TESTED | 没有实物验证证据 |
+| PASS | 对明确指定的测试对象和测试范围通过 |
+| NOT_TESTED | 尚未测试，不等于失败 |
 
 尤其禁止把：
 
@@ -537,11 +541,11 @@ programmingVerified = VERIFIED
 解释成：
 
 user design functional = PASS
-12. 今后真正顶层集成前的硬件阻塞项
+## 12. 今后真正顶层集成前的硬件阻塞项
 
 当前基础设施计划完成后，仍有若干必须由实物信息解除的 blocker。
 
-12.1 三个 LM393 GPIO
+### 12.1 三个 LM393 GPIO
 
 需要确认：
 
@@ -555,8 +559,8 @@ key_in[6:0]
 
 正式迁移到：
 
-sensor_code_in[2:0]
-12.2 两套 I²C GPIO
+sensor_async[2:0]（3-bit 计划中 `sensor_code_frontend` 的顶层输入名；其输出为 `sensor_code_stable[2:0]` 与 `note_code[2:0]`）
+### 12.2 两套 I²C GPIO
 
 由于 ADC 和 DAC 使用独立总线，需要确认四个真实 FPGA GPIO：
 
@@ -568,7 +572,7 @@ DAC_SDA
 
 在确认之前不得写 UCF LOC。
 
-12.3 FSR 实物标定
+### 12.3 FSR 实物标定
 
 需要实际记录三个传感器：
 
@@ -587,7 +591,7 @@ pressure normalization
 
 均不得声称完成。
 
-12.4 DAC模拟输出与LM386
+### 12.4 DAC模拟输出与LM386
 
 数字链通过后还需要实际验证：
 
@@ -603,7 +607,7 @@ speaker
 
 需要示波器或实际音频测试。
 
-13. 数据手册
+## 13. 数据手册
 
 本仓库保存的外设手册属于协议实现依据：
 
@@ -623,7 +627,7 @@ electrical limits
 
 不得因为网上示例代码写法不同而覆盖本仓库手册结论。
 
-14. 工具链文档
+## 14. 工具链文档
 
 当前正式维护文档：
 
@@ -632,14 +636,18 @@ ISE 工具链最终状态（Toolchain Freeze v1）
 它定义：
 
 doctor
+new
 check
 build
+fetch
 sim
 verify
 report
 probe
+probe-diag
 program -Mode Jtag
 program -Mode Isf
+board-check
 
 以及工具链的边界、安全模型和当前已验证结论。
 
@@ -649,7 +657,7 @@ program -Mode Isf
 
 优先使用现有工具，而不是继续给工具链增加命令或烧录模式。
 
-15. 历史文档
+## 15. 历史文档
 
 历史第一阶段计划已移动到：
 
@@ -666,7 +674,7 @@ projects/finger_piano/README.md
 
 不要从 archive 中恢复已经被后续实测取代的旧结论。
 
-16. Agent 执行规则
+## 16. Agent 执行规则
 
 如果由自动 Agent 按这些计划连续开发，遵循：
 
@@ -709,7 +717,7 @@ FAIL
 绕过UCF门禁
 伪造板级结果
 猜测未确认参数
-17. 文档维护规则
+## 17. 文档维护规则
 
 实现计划后，应同步更新：
 
@@ -731,7 +739,7 @@ projects/finger_piano/README.md
 
 不要把每一次具体 run ID、资源数量和临时 debug 过程长期堆积在这里。
 
-18. 最终目标
+## 18. 最终目标
 
 当前所有计划最终希望逐步从：
 
