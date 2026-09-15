@@ -317,7 +317,52 @@ P3 六个提交(A~F)已落地:`src/audio/sine_lut_12bit.v`(quarter-wave
 下 50 个 valid 间隔全部精确 1500 拍,ENABLE=0 恒 0x800/valid=0。
 **尚未连接 MCP4725(P4),不得声称 DDS 硬件已验证。**
 
+### 12.4 DDS → MCP4725 数字音频链路(P4,IMPLEMENTED / SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED)
+
+P4 六个提交(A~F)已落地:`src/audio/dds_mcp4725_pipeline.v`(纯结构化
+集成层:DDS 固定 8 kS/s 时间轴直连 mcp4725_ctrl,无第二采样计数器、无
+FIFO、无 ready 反馈进入 DDS)+ `sim/tb_dds_mcp4725_pipeline.v`(scoreboard
+逐样点比对 + 全局 ready/延迟/范围/EEPROM 监视,4 个仿真入口)。验收
+(verify-20260916-030251-5159ebcd,21 个仿真全 PASS):12 MHz 真实参数下
+7168 样点全部 生成/接受/Fast Write(0 drop / 0 overrun / 0 scoreboard
+错误),ready 在每个 valid 时为 1,最大事务延迟 1014 clk < 1500 clk,
+捕获流频率抽检 C4 −0.02% / A4 +0.01% / B4 +0.04%,地址可参数化(0x61
+验证),NACK 丢弃样点不重传且可恢复,mid-transaction reset 干净恢复,
+EEPROM 写全程 0。状态:**端到端数字音频流 PASS**;模拟输出/重构滤波/
+LM386 未验证(§39/§40)。
+
+
+
 ## 13. 验证记录
+
+### 第十一轮:P4 DDS→MCP4725 端到端数字音频链路(pipeline / 吞吐 / 错误恢复,2026-09-16)
+
+**未改任何 legacy RTL、顶层端口与 UCF**;新增 `src/audio/dds_mcp4725_pipeline.v`
+(纯结构化集成层)与 `sim/tb_dds_mcp4725_pipeline.v`。提交序列:
+`p4a`(5f4b95b)→ `p4b`(9e93a09)→ `p4c/d`(54879d2)→ 全量 verify →
+本文档(`p4f`)。
+
+- **吞吐(真实 12 MHz / 8 kS/s / ~333 kHz I2C)**:7168 样点
+  (mute 512 + C4 2048 + A4 2048 + B4 2048 + mute 512)全部
+  生成 / 被 controller 接受 / 完成 Fast Write;0 drop / 0 overrun /
+  0 dac_error;scoreboard 逐样点 0 mismatch;ready 在每个 valid 采样沿
+  均为 1;最大事务延迟 1014 clk < 1500 clk 采样周期。
+- **频率抽检(观察点在 I2C 后的模型捕获流,首末过零点间隔估计)**:
+  C4 −0.019% / A4 +0.009% / B4 +0.039%。
+- **错误与恢复**:地址 NACK、数据 NACK → dac_error 脉冲、当拍样点丢弃
+  (不重传过时音频)、controller 恢复 idle、后续样点继续;过载注入
+  (独立 controller 高速刺激)→ overrun 置位且 pending 不被覆盖;
+  mid-transaction reset → 总线释放、busy=0、复位后完整新帧;
+  地址参数化经 0x61 验证;EEPROM 写全程 0。
+- 本轮踩过并修掉:scoreboard 数组 4096 深度小于 7168 样点序列(回绕假错);
+  过零计数 ±1 量化(±1.5%)超 1% 预算 → 改首末过零点间隔估计(±0.05%);
+  mid-tx reset 误清错误统计(累计计数只在上电复位清零)。
+
+**验收**:verify-20260916-030251-5159ebcd Overall PASS:综合 0 errors /
+0 warnings / 0 latches,232 FF / 20 IOs;21 个仿真全部 PASS(legacy 6 +
+P1 3 + P2 4 + P3 4 + P4 4)。P4 状态:端到端**数字**音频流 PASS;
+**SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED**——模拟输出、重构
+滤波、LM386、扬声器均未验证。
 
 ### 第十轮:P3 DDS 正弦音频发生器(LUT / DDS 核心 / 七音验证,2026-09-16)
 

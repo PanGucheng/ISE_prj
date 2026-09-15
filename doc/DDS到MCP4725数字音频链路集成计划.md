@@ -1,12 +1,23 @@
 # finger_piano DDS → MCP4725 数字音频链路集成计划
 
-> **Status**: PLANNED（本计划尚无任何 RTL 落地）
+> **Status**: IMPLEMENTED / STANDALONE（端到端数字链已仿真,未接顶层,未上板）
 > **Scope**: DDS → MCP4725 数字链集成 RTL + ISim（含行为模型与 0 drop / 0 overrun 吞吐测试）
 > **Depends on**: P1 + P3
 > **Top integration**: NO
 > **UCF changes**: NO
 > **Hardware programming**: FORBIDDEN
 > **Acceptance**: full `verify`（`.\ise.ps1 verify -Project finger_piano`）
+>
+> **落地记录（2026-09-16）**:Commit A pipeline wrapper(5f4b95b)、B 端到端
+> scoreboard TB(9e93a09)、C/D 真实吞吐+错误恢复(54879d2)、E 全量 verify、
+> F 文档(本条)。验收:verify-20260916-030251-5159ebcd Overall PASS(综合
+> 0 errors / 0 warnings / 0 latches,232 FF / 20 IOs,21 个仿真全 PASS)。
+> 吞吐:12 MHz 真实参数下 7168 样点全部 生成/接受/Fast Write,0 drop /
+> 0 overrun / 0 scoreboard 错误;ready 在每个 valid 时均为 1;最大事务延迟
+> 1014 clk < 1500 clk 采样周期;捕获流频率抽检 C4 −0.02% / A4 +0.01% /
+> B4 +0.04%;地址参数化用 0x61 验证;mid-transaction reset 可恢复;
+> EEPROM 写全程为 0。文件:`src/audio/dds_mcp4725_pipeline.v` +
+> `sim/tb_dds_mcp4725_pipeline.v`(4 个仿真入口)。
 
 ## 0. 最高优先级约束
 

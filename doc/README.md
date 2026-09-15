@@ -28,7 +28,7 @@
 | P1 ADC/DAC drivers | SIMULATED（IMPLEMENTED / STANDALONE，默认关闭） | NO | NO |
 | P2 3-bit input | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P3 DDS | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
-| P4 DDS → MCP4725 | PLANNED | NO | NO |
+| P4 DDS → MCP4725 | SIMULATED（IMPLEMENTED / STANDALONE，端到端数字链通过，未接顶层） | NO | NO |
 | P5 Pressure processor | PLANNED | NO | NO |
 
 目前仓库里真正能跑通的仍然是 **legacy baseline**（7-key 方波电子琴）；P1 的
