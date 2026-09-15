@@ -6,6 +6,7 @@
     {"path":"src/periph/ads1115_ctrl.v","language":"verilog","library":"work"},
     {"path":"src/periph/mcp4725_ctrl.v","language":"verilog","library":"work"},
     {"path":"src/input/sensor_code_decoder.v","language":"verilog","library":"work"},
+    {"path":"src/input/sensor_code_filter.v","language":"verilog","library":"work"},
     {"path":"src/reset_sync.v",     "language":"verilog", "library":"work"},
     {"path":"src/key_sync.v",       "language":"verilog", "library":"work"},
     {"path":"src/key_filter.v",     "language":"verilog", "library":"work"},
@@ -111,6 +112,15 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_SENSOR_CODE_DECODER: PASS",
       "failPattern": "TB_SENSOR_CODE_DECODER: FAIL"
+    },
+    {
+      "name": "sensor_code_filter",
+      "top": "tb_sensor_code_filter",
+      "sources": ["sim/tb_sensor_code_filter.v"],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SENSOR_CODE_FILTER: PASS",
+      "failPattern": "TB_SENSOR_CODE_FILTER: FAIL"
     }
   ],
   "verification": {
