@@ -34,36 +34,38 @@ module audio_gain_12bit (
     //-------------------------------------------------------------------------
     wire signed [12:0] delta = $signed({1'b0, sample_in}) - 13'sd2048;
 
-    // 算术右移(floor):负数向 -inf 截断,与 TB 参考模型一致
-    wire signed [12:0] delta_half = delta  >>> 1;
-    wire signed [12:0] delta_quar = delta  >>> 2;
-    wire signed [12:0] delta_eigh = delta  >>> 3;
+    // 算术右移(floor):负数向 -inf 截断,与 TB 参考模型一致。
+    // 移位结果 ∈ [-1024,1023],12-bit signed 无损容纳(§19 卫生:
+    // 不留恒 0/冗余符号位,避免 Xst:646 trim warning)。
+    wire signed [11:0] delta_half = delta >>> 1;
+    wire signed [11:0] delta_quar = delta >>> 2;
+    wire signed [11:0] delta_eigh = delta >>> 3;
 
-    reg  signed [13:0] scaled;
+    reg  signed [11:0] scaled;
 
     //-------------------------------------------------------------------------
     // shift/add 增益表(P8 §6):0、δ/8、δ/4、δ/4+δ/8、δ/2、δ/2+δ/8、
-    // δ/2+δ/4、δ-δ/8。case 全分支完整赋值,无锁存器。
+    // δ/2+δ/4、δ-δ/8。12-bit signed([-2048,2047])足以容纳全部中间和
+    // (最大 |δ-δ/8| = 1792),case 全分支完整赋值,无锁存器。
     //-------------------------------------------------------------------------
     always @(*) begin
         case (volume_level)
-            3'd0:    scaled = 14'sd0;
+            3'd0:    scaled = 12'sd0;
             3'd1:    scaled = delta_eigh;
             3'd2:    scaled = delta_quar;
-            3'd3:    scaled = {delta_quar[12], delta_quar} + {delta_eigh[12], delta_eigh};
+            3'd3:    scaled = delta_quar + delta_eigh;
             3'd4:    scaled = delta_half;
-            3'd5:    scaled = {delta_half[12], delta_half} + {delta_eigh[12], delta_eigh};
-            3'd6:    scaled = {delta_half[12], delta_half} + {delta_quar[12], delta_quar};
-            default: scaled = {delta[12], delta} - {delta_eigh[12], delta_eigh};
+            3'd5:    scaled = delta_half + delta_eigh;
+            3'd6:    scaled = delta_half + delta_quar;
+            default: scaled = delta - delta_eigh;
         endcase
     end
 
     //-------------------------------------------------------------------------
-    // 中心回加:数学范围 [0, 4095](见文件头),14-bit 中间量直接截取低
-    // 12 位即为最终结果,无 wrap。
+    // 中心回加:数学范围 [0, 4095](见文件头),直接截断到 12-bit 输出
+    // 即为全值——不引入宽位中间信号,避免恒 0 高位被 XST trim 出
+    // "assigned but never used" warning(allowlist 卫生)。
     //-------------------------------------------------------------------------
-    wire signed [13:0] centered = 14'sd2048 + scaled;
-
-    assign sample_out = centered[11:0];
+    assign sample_out = 14'sd2048 + scaled;
 
 endmodule
