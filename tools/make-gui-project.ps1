@@ -80,6 +80,22 @@ try {
         -SynthesisFiles $synthesis -Testbenches $tbFiles -Top $top -IncludeDir $includeDir)
     Write-Utf8 (Join-Path $staging 'run_xtclsh.cmd') (New-GuiProjectRunner -TclName 'make_project.tcl')
 
+    # ISE's own HDL hierarchy parser and the ISim/fuse flow do NOT read
+    # "Verilog Include Directories" (that is a Synthesis Options / XST -vlgincdir
+    # setting); they only search the PROJECT directory by default. Place a copy of
+    # every include file at the project root so `include "name.vh" resolves in the
+    # ISE GUI simulation view too (measured on ISE 14.7).
+    $rootIncludes = New-Object System.Collections.Generic.List[string]
+    foreach ($inc in $includeFiles) {
+        if (-not $inc) { continue }
+        $staged = Join-Path $staging $inc
+        if (Test-Path -LiteralPath $staged) {
+            $name = Split-Path -Leaf $inc
+            Copy-Item -LiteralPath $staged -Destination (Join-Path $staging $name) -Force
+            $rootIncludes.Add($name)
+        }
+    }
+
     # ---- upload and generate ------------------------------------------------
     $remote = $(if ($RemotePath) { $RemotePath.TrimEnd('/') } else { "$script:RemoteRoot/$Project/gui-project" })
     $win = $remote.Replace('/', '\')
@@ -96,6 +112,9 @@ try {
     foreach ($f in @('make_project.tcl', 'run_xtclsh.cmd')) {
         $local = Join-Path $staging $f
         if (Test-Path -LiteralPath $local) { Invoke-Sftp @("put `"$($local.Replace('\','/'))`" `"$remote/$f`"") }
+    }
+    foreach ($f in $rootIncludes) {
+        Invoke-Sftp @("put `"$((Join-Path $staging $f).Replace('\','/'))`" `"$remote/$f`"")
     }
     $null = Invoke-SshTimed ('cmd /d /c "' + $win + '\run_xtclsh.cmd"') 300
 

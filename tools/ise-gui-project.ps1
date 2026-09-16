@@ -107,7 +107,9 @@ function New-GuiProjectTcl {
         $lines.Add(('if {[catch {xfile add ' + $f + ' -view Simulation} msg]} { if {[catch {xfile add ' + $f + '} msg2]} { puts "WARN: ' + $f + ' : $msg2" } }'))
     }
     if ($IncludeDir) {
-        $lines.Add(('if {[catch {project set "Verilog Include Directories" "' + $IncludeDir + '"} msg]} { puts "NOTE: include dirs: $msg" }'))
+        # Absolute path: a relative include dir is not reliably resolved by ISE's
+        # hierarchy parser / simulation view (measured on ISE 14.7).
+        $lines.Add(('if {[catch {project set "Verilog Include Directories" "[file normalize [file join [pwd] ' + $IncludeDir + ']]"} msg]} { puts "NOTE: include dirs: $msg" }'))
     }
     if ($Top) {
         $lines.Add(('if {[catch {project set "Top-Level Module" ' + $Top + '} msg]} { puts "NOTE: top module: $msg" }'))

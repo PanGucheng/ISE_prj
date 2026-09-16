@@ -70,6 +70,13 @@ pwsh -File .\tools\make-gui-project.ps1 -Project finger_piano   # 生成 gui-pro
 pwsh -File .\tools\convert-encoding.ps1 -Path <文件或目录> -From Gbk -To Utf8   # 把 GUI 里改过的文件转回仓库编码
 ```
 
+生成时会额外把 `includeFiles`（如 `finger_piano_cfg.vh`）复制一份到工程根目录：
+ISE 14.7 的层次解析器和 ISim/fuse 在 Simulation 视图下**不读** `Verilog Include
+Directories`（那是 Synthesis Options / XST `-vlgincdir`），只默认搜索**工程目录**，
+所以 `include "finger_piano_cfg.vh"` 需要在工程根就能找到，否则 GUI 里无法仿真。
+该副本只存在于 VM 的只读视图工程里，仓库不受影响。改动 `finger_piano_cfg.vh` 后
+需要重新运行本脚本。
+
 ## 使用
 
 在 PowerShell 中运行：

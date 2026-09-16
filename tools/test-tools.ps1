@@ -1180,6 +1180,7 @@ Assert ($guiTcl -match 'project set package tqg144') 'the Pb-free spelling must 
 Assert ($guiTcl -match 'xfile add src/top\.v') 'the Tcl must add the sources'
 Assert ($guiTcl -match 'xfile add sim/tb\.v -view Simulation') 'testbenches must be added in the Simulation view'
 Assert ($guiTcl -match 'Top-Level Module') 'the Tcl must set the top level'
+Assert ($guiTcl -match 'file normalize \[file join \[pwd\] src\]') 'the include dir must be resolved to an absolute path for the ISE simulation view'
 $guiRunner = New-GuiProjectRunner -TclName 'make_project.tcl'
 Assert ($guiRunner -match 'xtclsh make_project\.tcl') 'the runner must call xtclsh'
 Assert ($guiRunner -match 'call ".*settings32\.bat"') 'the runner must load the ISE environment first'
