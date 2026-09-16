@@ -96,6 +96,11 @@
       "path": "src/finger_piano_top.v",
       "language": "verilog",
       "library": "work"
+    },
+    {
+      "path": "src/finger_piano_stage2_top.v",
+      "language": "verilog",
+      "library": "work"
     }
   ],
   "includeDirs": [
