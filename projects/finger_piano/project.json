@@ -552,6 +552,79 @@
     "forbiddenEdgeSignals": [
       "clk_2m",
       "audio_out"
+    ],
+    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (2026-09-16, top=finger_piano_stage2_top). The 12-pin top has no consumer for the P6A status/debug/pressure outputs (sensor_code_stable, pressure_ch0/1/2, pressure_valid, adc_error/dac_error/dac_overrun, DDS/MCP debug ports), so XST legitimately trims that hierarchy. Baseline: Xst:2677=155, Xst:646=2, Xst:1710=4, Xst:1895=5, total 166. Any other warning, new path, or changed per-entry count fails verify.",
+    "synthesisWarningAllowlist": [
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <u_sys/u_pressure/u_capture/",
+        "expected": 49
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <u_sys/GEN_DAC_ON\\.u_dac_pipeline/GEN_PIPE\\.u_dac/",
+        "expected": 18
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.u_i2c/",
+        "expected": 8
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.(r_busy|r_error|r_errcode_\\d|r_sample_valid|err_code_q_\\d|raw_hi_\\d|raw_lo_\\d|ch[012]_q_\\d+)>",
+        "expected": 73
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <GEN_ADC\\.poll_hi_\\d+>",
+        "expected": 7
+      },
+      {
+        "id": "Xst:646",
+        "pattern": "Signal <GEN_ADC\\.poll_hi",
+        "expected": 1
+      },
+      {
+        "id": "Xst:646",
+        "pattern": "Signal <GEN_ADC\\.poll_lo>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <GEN_ADC\\.m_wdata_2>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <GEN_DDS\\.phase_inc_20>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <rd_nack>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "u_dac/GEN_DAC\\.u_i2c/is_read",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "FF/Latch <GEN_ADC\\.m_wdata_3>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "FF/Latch <GEN_DDS\\.phase_inc_2[123]>",
+        "expected": 3
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "u_dac/GEN_DAC\\.m_cmd_0",
+        "expected": 1
+      }
     ]
   },
   "programming": {

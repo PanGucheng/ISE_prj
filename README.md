@@ -176,6 +176,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 fetch -Project demo -Run
   "verification": {
     "expectImplementationBlocked": true,
     "failOnSynthesisWarnings": true,
+    "synthesisWarningAllowlist": [
+      { "id": "Xst:2677", "pattern": "Node <u_sys/u_pressure/u_capture/", "expected": 49 }
+    ],
     "clockName": "clk",
     "resetNames": ["rst_n", "rst_n_sync"],
     "forbiddenEdgeSignals": ["clk_2m", "audio_out"]
@@ -188,6 +191,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 fetch -Project demo -Run
 - `passPattern`/`failPattern` 用字面量子串匹配转录日志；两者都是纯文本，不参与任何 shell 拼接。
 - `verification.expectImplementationBlocked` 决定 implement 门禁的期望值：`true` 时「被阻止」才算 PASS，未来 UCF 补齐后改成 `false`，工具内没有工程名特例。
 - `verification.failOnSynthesisWarnings`（可选）为 `true` 时，XST warning 数 > 0 会让 verify 的 synthesis 与 overall 判 FAIL；**不配置时保持旧行为**（只报告 warning 数，不影响结论）。`report` 永远是纯事实输出，不受该策略影响。
+- `verification.synthesisWarningAllowlist`（可选，需与 `failOnSynthesisWarnings=true` 同用）是一份**人工审阅过**的 XST 精简告警白名单：`{ id, pattern, expected }`，`pattern` 是匹配 warning 正文的正则，`expected` 是该条在本设计上审阅确认的出现次数。verify 逐条分类原始 `synthesis.srp`（**不改写报告**）：命中白名单的算 allowed，其余 warning、新出现的路径/类别、或任一条 `expected` 计数发生变化都判 FAIL 并写入 `verification.json`。这是为「有意被综合器裁掉的仿真专用 debug/status 层级」准备的窄口径例外，不是全局静音，工具内没有工程名特例。
 - `verification.clockName`/`resetNames` 定义唯一时钟域；`forbiddenEdgeSignals` 是**绝不允许出现在 `posedge`/`negedge` 上的信号**（不是「不允许出现」——`audio_out` 仍是合法输出网）。
 
 ### sim

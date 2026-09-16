@@ -70,6 +70,7 @@ endmodule
 $script:Scenario = 'pass'   # pass | fusefail | simfail | no-pattern | fail-pattern | timeout
 $script:Mode = 'success'    # success | failure | disconnect (build flow)
 $script:SynthWarnings = 0   # XST warning count written into the mock synthesis report
+$script:SynthWarningLines = @()   # raw WARNING:Xst lines written into the mock synthesis report
 $script:ProgProbe = 'ok'     # ok | nocable | mismatch | twoDevices
 $script:ProgProgram = 'ok'   # ok | timeout | interrupted | fail | cable | flash | verified | verifyfail | status | noerase | erasefail
 $script:ProgVerify = 'ok'    # legacy mock (the program flow no longer runs a verify step)
@@ -286,6 +287,7 @@ function Invoke-Ssh([string]$RemoteCommand) {
                 Write-Utf8 "$script:Remote/out/design.ngc" 'MOCK OUTPUT, NOT A REAL NETLIST'
                 Write-Utf8 "$script:Remote/out/synth.exitcode" '0'
                 Write-Utf8 "$script:Remote/out/synthesis.srp" ("MOCK SYNTHESIS REPORT (unit test fixture, not a real XST run)`n" +
+                    $(if ($script:SynthWarningLines.Count -gt 0) { (($script:SynthWarningLines -join "`n") + "`n") } else { '' }) +
                     "Number of errors   :    0 (   0 filtered)`n" +
                     "Number of warnings :    $($script:SynthWarnings) (   0 filtered)`n" +
                     "# Registers                                            : 231`n" +
@@ -667,6 +669,53 @@ Assert ($vWarnIgnored.result -eq 'PASS') 'warnings must not fail verification wh
 Assert ($vWarnIgnored.synthesis.warnings -eq 3) 'warning count should still be reported'
 Assert ($vWarnIgnored.synthesis.failOnWarnings -eq $false) 'failOnWarnings default should be false'
 Assert ($vWarnIgnored.synthesis.warningsBlocking -eq $false) 'warningsBlocking should be false without the flag'
+
+# verification.synthesisWarningAllowlist -> audited trims are allowed, everything else is fatal
+$script:SynthWarningLines = @(
+    'WARNING:Xst:2677 - Node <u_sys/u_pressure/u_capture/frame_valid> of sequential type is unconnected in block <finger_piano_stage2_top>.',
+    'WARNING:Xst:646 - Signal <GEN_ADC.poll_lo> is assigned but never used. This unconnected signal will be trimmed during the optimization process.'
+)
+$script:SynthWarnings = 2
+Write-FixtureConfig 'fixture' @{ constraintsReviewed = $true; verification = [ordered]@{ expectImplementationBlocked = $false; failOnSynthesisWarnings = $true; synthesisWarningAllowlist = @(
+    [ordered]@{ id = 'Xst:2677'; pattern = 'Node <u_sys/u_pressure/u_capture/'; expected = 1 },
+    [ordered]@{ id = 'Xst:646'; pattern = 'Signal <GEN_ADC\.poll_lo>'; expected = 1 }
+); clockName = 'clk'; resetNames = @('rst_n', 'rst_n_sync'); forbiddenEdgeSignals = @('clk_2m', 'audio_out') } }
+$vAllow = Invoke-Verification -ProjectName 'fixture'
+Assert ($vAllow.result -eq 'PASS') "audited warnings must not fail verification, got $($vAllow.result)"
+Assert ($vAllow.synthesis.warningsAllowed -eq 2) "allowed warning count not audited, got $($vAllow.synthesis.warningsAllowed)"
+Assert ((@($vAllow.synthesis.warningsUnexpected)).Count -eq 0) 'unexpected warnings must be empty when the allowlist matches'
+Assert ($vAllow.synthesis.warningsBlocking -eq $false) 'audited warnings must not be blocking'
+
+# a new warning path/class outside the allowlist is fatal
+$script:SynthWarningLines = @(
+    'WARNING:Xst:2677 - Node <u_sys/u_pressure/u_capture/frame_valid> of sequential type is unconnected in block <finger_piano_stage2_top>.',
+    'WARNING:Xst:2677 - Node <u_sys/regression/new_signal> of sequential type is unconnected in block <finger_piano_stage2_top>.'
+)
+$script:SynthWarnings = 2
+Write-FixtureConfig 'fixture' @{ constraintsReviewed = $true; verification = [ordered]@{ expectImplementationBlocked = $false; failOnSynthesisWarnings = $true; synthesisWarningAllowlist = @(
+    [ordered]@{ id = 'Xst:2677'; pattern = 'Node <u_sys/u_pressure/u_capture/'; expected = 1 }
+); clockName = 'clk'; resetNames = @('rst_n', 'rst_n_sync'); forbiddenEdgeSignals = @('clk_2m', 'audio_out') } }
+Expect-Failure { Invoke-Verification -ProjectName 'fixture' } 'Verification FAILED'
+$vAllowUnexpected = Get-LatestVerification 'fixture'
+Assert ($vAllowUnexpected.result -eq 'FAIL') 'an unexpected warning must fail verification'
+Assert ((@($vAllowUnexpected.synthesis.warningsUnexpected)).Count -eq 1) 'unexpected warning not recorded'
+Assert ($vAllowUnexpected.synthesis.warningsBlocking -eq $true) 'unexpected warning must be blocking'
+
+# a changed count for an audited entry is fatal until reviewed
+$script:SynthWarningLines = @(
+    'WARNING:Xst:2677 - Node <u_sys/u_pressure/u_capture/frame_valid> of sequential type is unconnected in block <finger_piano_stage2_top>.',
+    'WARNING:Xst:646 - Signal <GEN_ADC.poll_lo> is assigned but never used. This unconnected signal will be trimmed during the optimization process.'
+)
+$script:SynthWarnings = 2
+Write-FixtureConfig 'fixture' @{ constraintsReviewed = $true; verification = [ordered]@{ expectImplementationBlocked = $false; failOnSynthesisWarnings = $true; synthesisWarningAllowlist = @(
+    [ordered]@{ id = 'Xst:2677'; pattern = 'Node <u_sys/u_pressure/u_capture/'; expected = 2 },
+    [ordered]@{ id = 'Xst:646'; pattern = 'Signal <GEN_ADC\.poll_lo>'; expected = 1 }
+); clockName = 'clk'; resetNames = @('rst_n', 'rst_n_sync'); forbiddenEdgeSignals = @('clk_2m', 'audio_out') } }
+Expect-Failure { Invoke-Verification -ProjectName 'fixture' } 'Verification FAILED'
+$vAllowDrift = Get-LatestVerification 'fixture'
+Assert ($vAllowDrift.result -eq 'FAIL') 'a changed allowlist count must fail verification'
+Assert ((@($vAllowDrift.synthesis.warningCountMismatch)).Count -eq 1) 'count drift not recorded'
+$script:SynthWarningLines = @()
 $script:SynthWarnings = 0
 Write-FixtureConfig 'fixture' @{}
 Write-Host 'PASS: verify aggregates synthesis, static checks and simulations, and honours expectImplementationBlocked in both directions.'

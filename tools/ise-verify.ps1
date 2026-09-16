@@ -169,6 +169,66 @@ function Get-StaticCheckFacts {
     }
 }
 
+#-----------------------------------------------------------------------------
+# Synthesis warning audit.
+#
+# XST reports the raw warning count in synthesis.srp; this tool leaves that
+# report untouched. The gate below classifies every WARNING:Xst line against an
+# explicit, reviewed allowlist from project.json
+# (verification.synthesisWarningAllowlist): a list of
+#   { "id": "Xst:2677", "pattern": "<regex over the warning text>", "expected": N }
+# entries. Only warnings that match an entry are "allowed"; an unmatched
+# warning, a missing report line, or a per-entry count that differs from the
+# audited baseline all fail the gate. There is no project-name special case here.
+#-----------------------------------------------------------------------------
+function Get-XstWarningAudit {
+    param(
+        [AllowNull()][string]$ReportText,
+        [AllowNull()]$Allowlist
+    )
+    $warnings = New-Object System.Collections.Generic.List[object]
+    if (-not [string]::IsNullOrEmpty($ReportText)) {
+        foreach ($m in [regex]::Matches($ReportText, 'WARNING:Xst:(\d+)\s*-\s*(.+)')) {
+            $warnings.Add([pscustomobject]@{ Id = 'Xst:' + $m.Groups[1].Value; Detail = $m.Groups[2].Value.Trim() })
+        }
+    }
+    $entries = @()
+    if ($Allowlist) { $entries = @($Allowlist) }
+    $counts = New-Object int[] $entries.Count
+    $allowed = New-Object System.Collections.Generic.List[object]
+    $unexpected = New-Object System.Collections.Generic.List[object]
+
+    foreach ($w in $warnings) {
+        $matched = $false
+        for ($i = 0; $i -lt $entries.Count; $i++) {
+            $e = $entries[$i]
+            if ($e.id -and ($w.Id -ne [string]$e.id)) { continue }
+            if ($e.pattern -and ($w.Detail -notmatch [string]$e.pattern)) { continue }
+            $counts[$i] = $counts[$i] + 1
+            $matched = $true
+            break
+        }
+        if ($matched) { $allowed.Add($w) } else { $unexpected.Add($w) }
+    }
+
+    $mismatch = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $e = $entries[$i]
+        if ($e.PSObject.Properties['expected'] -and ($null -ne $e.expected)) {
+            if ($counts[$i] -ne [int]$e.expected) {
+                $mismatch.Add(("allowlist entry id={0} pattern='{1}': expected {2}, saw {3}" -f $e.id, $e.pattern, $e.expected, $counts[$i]))
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Total         = $warnings.Count
+        Allowed       = $allowed.Count
+        Unexpected    = @($unexpected | ForEach-Object { $_.Id + ' - ' + $_.Detail })
+        CountMismatch = @($mismatch)
+    }
+}
+
 function Invoke-StaticChecks {
     param([Parameter(Mandatory)][string]$ProjectName)
     $p = Read-Project $ProjectName 'synth'
@@ -269,16 +329,47 @@ function Invoke-Verification {
     # When it is not configured the historical behaviour is kept (warnings are
     # reported but do not fail verification).
     $failOnWarnings = $false
+    $warningAllowlist = @()
     if ($p) {
         $vFlag = $p.Config.PSObject.Properties['verification']
-        if ($vFlag -and $vFlag.Value -and $vFlag.Value.PSObject.Properties['failOnSynthesisWarnings']) {
-            $failOnWarnings = [bool]$vFlag.Value.failOnSynthesisWarnings
+        if ($vFlag -and $vFlag.Value) {
+            if ($vFlag.Value.PSObject.Properties['failOnSynthesisWarnings']) {
+                $failOnWarnings = [bool]$vFlag.Value.failOnSynthesisWarnings
+            }
+            if ($vFlag.Value.PSObject.Properties['synthesisWarningAllowlist'] -and $vFlag.Value.synthesisWarningAllowlist) {
+                $warningAllowlist = @($vFlag.Value.synthesisWarningAllowlist)
+            }
         }
     }
-    $warningsBlocking = ($failOnWarnings -and $synthFacts -and $null -ne $synthFacts.Warnings -and $synthFacts.Warnings -gt 0)
-    if ($warningsBlocking) {
-        $synthResult = 'FAIL'
-        $notes.Add("synthesis: $($synthFacts.Warnings) warning(s) and verification.failOnSynthesisWarnings=true")
+
+    # Classify the raw XST warnings (report left untouched) against the audited
+    # allowlist. With no allowlist configured the historical behaviour applies:
+    # any warning is fatal when failOnSynthesisWarnings=true.
+    $warningAudit = $null
+    if ($p -and $synthRunId) {
+        $srpText = Get-TextSafe (Join-Path "$root\projects\$ProjectName\artifacts\$synthRunId\results" 'synthesis.srp')
+        $warningAudit = Get-XstWarningAudit -ReportText $srpText -Allowlist $warningAllowlist
+    }
+
+    $warningsBlocking = $false
+    if ($failOnWarnings -and $synthFacts -and $null -ne $synthFacts.Warnings -and $synthFacts.Warnings -gt 0) {
+        if ($warningAllowlist.Count -eq 0) {
+            $warningsBlocking = $true
+            $notes.Add("synthesis: $($synthFacts.Warnings) warning(s) and verification.failOnSynthesisWarnings=true")
+        } else {
+            $unexpectedCount = @($warningAudit.Unexpected).Count
+            $mismatchCount = @($warningAudit.CountMismatch).Count
+            $parseGap = ($warningAudit.Total -lt [int]$synthFacts.Warnings)
+            if ($unexpectedCount -gt 0 -or $mismatchCount -gt 0 -or $parseGap) {
+                $warningsBlocking = $true
+                if ($unexpectedCount -gt 0) { $notes.Add("synthesis: $unexpectedCount unexpected warning(s) outside the reviewed allowlist") }
+                if ($mismatchCount -gt 0) { $notes.Add("synthesis: allowlist count(s) changed and need review: " + (@($warningAudit.CountMismatch) -join '; ')) }
+                if ($parseGap) { $notes.Add("synthesis: parsed $($warningAudit.Total) WARNING:Xst line(s) but XST reported $($synthFacts.Warnings)") }
+            } else {
+                $notes.Add("synthesis: $($warningAudit.Allowed) audited benign warning(s) allowed; unexpected = 0")
+            }
+        }
+        if ($warningsBlocking) { $synthResult = 'FAIL' }
     }
 
     # 4. simulations ---------------------------------------------------------
@@ -367,6 +458,10 @@ function Invoke-Verification {
             exitCode   = $(if ($synthFacts) { $synthFacts.ExitCode } else { $null })
             failOnWarnings    = $failOnWarnings
             warningsBlocking  = $warningsBlocking
+            warningAllowlistConfigured = ($warningAllowlist.Count -gt 0)
+            warningsAllowed   = $(if ($warningAudit) { $warningAudit.Allowed } else { $null })
+            warningsUnexpected = $(if ($warningAudit) { @($warningAudit.Unexpected) } else { @() })
+            warningCountMismatch = $(if ($warningAudit) { @($warningAudit.CountMismatch) } else { @() })
         }
         simulationResult = $simulationResult
         simulations   = @($simResults | ForEach-Object {
@@ -419,6 +514,11 @@ function Invoke-Verification {
     Show-ResultLine 'errors' $(if ($synthFacts -and $null -ne $synthFacts.Errors) { [string]$synthFacts.Errors } else { 'NOT_AVAILABLE' })
     Show-ResultLine 'warnings' $(if ($synthFacts -and $null -ne $synthFacts.Warnings) { [string]$synthFacts.Warnings } else { 'NOT_AVAILABLE' })
     Show-ResultLine 'warnings policy' $(if ($failOnWarnings) { 'blocking (failOnSynthesisWarnings=true)' } else { 'reported only' })
+    if ($warningAllowlist.Count -gt 0) {
+        Show-ResultLine 'warnings audited' $(if ($warningAudit) { "$($warningAudit.Allowed) allowed / $(@($warningAudit.Unexpected).Count) unexpected" } else { 'NOT_AVAILABLE' })
+        foreach ($u in @($warningAudit.Unexpected)) { Write-Host "    unexpected: $u" }
+        foreach ($c in @($warningAudit.CountMismatch)) { Write-Host "    count drift: $c" }
+    }
     Show-ResultLine 'latches' $(if ($synthFacts) { [string]$synthFacts.Latches } else { 'NOT_AVAILABLE' })
     Show-ResultLine 'result' $synthResult
     Write-Host ''
@@ -454,6 +554,7 @@ function Invoke-Verification {
         "Static checks: $($static.Result) (errors=$(@($static.Errors).Count), warnings=$(@($static.Warnings).Count))"
         "Synthesis: $synthResult (run=$synthRunId)"
         "Synthesis warnings: $(if ($synthFacts) { $synthFacts.Warnings } else { 'n/a' }) (failOnSynthesisWarnings=$failOnWarnings)"
+        "Synthesis warnings audit: $(if ($warningAllowlist.Count -gt 0 -and $warningAudit) { "$($warningAudit.Allowed) allowed / $(@($warningAudit.Unexpected).Count) unexpected / $(@($warningAudit.CountMismatch).Count) count-drift" } else { 'no allowlist (all warnings fatal when policy is blocking)' })"
         "Simulation: $simulationResult"
         "Implementation gate: $($gate.Result) (expectedBlocked=$($gate.ExpectedBlocked), actualBlocked=$($gate.ActualBlocked))"
         'Timing: NOT_RUN/NEEDS_REVIEW (verify never certifies timing)'
