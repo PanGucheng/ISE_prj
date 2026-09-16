@@ -1,6 +1,6 @@
 {
   "device": "xc3s50an-4-tqg144",
-  "top": "finger_piano_top",
+  "top": "finger_piano_stage2_top",
   "sources": [
     {
       "path": "src/periph/i2c_master.v",
