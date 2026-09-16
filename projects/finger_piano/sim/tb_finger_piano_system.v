@@ -200,6 +200,54 @@ module tb_finger_piano_system;
     end
 
     //-------------------------------------------------------------------------
+    // ADS 转换源注入(P6 §22):模型每次转换完成按参数装载 conv_val 之后,
+    // TB 在下一拍覆盖为 src*_tb,使每帧读数为 TB 控制的确定值。默认值与
+    // 模型参数一致(1000/2000/3000),因此除 MODE 1 显式修改 src0 外,
+    // 所有模式的压力链行为不变。仿真专用(层次引用模型内部寄存器)。
+    //-------------------------------------------------------------------------
+    reg        os_q;
+    reg        os_qq;
+    reg [15:0] src0_tb;
+    reg [15:0] src1_tb;
+    reg [15:0] src2_tb;
+    reg        adc_bus_viol;
+    reg        dac_bus_viol;
+    integer    g;
+
+    always @(posedge clk) begin
+        if (rst_n !== 1'b1) begin
+            os_q  = 1'b1;
+            os_qq = 1'b1;
+        end else begin
+            os_qq = os_q;
+            os_q  = u_adc_model.os_busy;
+            if ((os_q === 1'b0) && (os_qq === 1'b1)) begin
+                case (u_adc_model.mux_q)
+                    3'b100:  u_adc_model.conv_val = src0_tb;
+                    3'b101:  u_adc_model.conv_val = src1_tb;
+                    3'b110:  u_adc_model.conv_val = src2_tb;
+                    default: ;
+                endcase
+            end
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // 关闭侧总线静默监视(P6 §28):ENABLE=0 的链路不得有任何总线活动
+    //-------------------------------------------------------------------------
+    always @(posedge clk) begin
+        if (rst_n !== 1'b1) begin
+            adc_bus_viol = 1'b0;
+            dac_bus_viol = 1'b0;
+        end else begin
+            if ((ADC_ON == 0) && ((adc_scl !== 1'b1) || (adc_sda !== 1'b1)))
+                adc_bus_viol = 1'b1;
+            if ((DAC_ON == 0) && ((dac_scl !== 1'b1) || (dac_sda !== 1'b1)))
+                dac_bus_viol = 1'b1;
+        end
+    end
+
+    //-------------------------------------------------------------------------
     // 检查任务
     //-------------------------------------------------------------------------
     task check_eq32;
@@ -333,7 +381,9 @@ module tb_finger_piano_system;
             found  = 0;
             start_k = -1;
             k0     = 0;
-            while ((k0 <= 64) && (found == 0)) begin
+            // 上限 200:窗口起点可能因 stimulus 等待(注入生效需数帧)而
+            // 落在音符开始后百余个样点处
+            while ((k0 <= 200) && (found == 0)) begin
                 phase = (k0 * inc) % 16777216;
                 ok_cnt = 0;
                 j      = w0;
@@ -552,6 +602,277 @@ module tb_finger_piano_system;
     endtask
 
     //-------------------------------------------------------------------------
+    // MODE 1 — dual I2C + 双向解耦(P6 §20/§22/§23)
+    //-------------------------------------------------------------------------
+    task run_dual;
+        integer base;
+        begin
+            @(posedge clk);
+            rst_n = 1'b1;
+
+            // 链路就绪
+            g_wait_pvalid(2, 4000000);
+
+            //-------------------------------------------------------------
+            // §22:压力数据剧变不得影响当前音符与 DAC 输出
+            //-------------------------------------------------------------
+            drive_sensor(3'd1);
+            wait_stable(3'd1);
+            skip_frames(16);
+            base = pvalid_cnt;
+
+            src0_tb = 16'd500;
+            g_wait_pvalid(base + 3, 4000000);
+            check_eq32(p_ch0, 15'd500, "CH0 source 500 -> pressure_ch0");
+            check_eq32(note_code, 3'd1, "note stays C4 while CH0 changes");
+
+            src0_tb = 16'd5000;
+            g_wait_pvalid(base + 6, 4000000);
+            check_eq32(p_ch0, 15'd5000, "CH0 source 5000 -> pressure_ch0");
+            check_eq32(note_code, 3'd1, "note stays C4 while CH0 changes");
+
+            src0_tb = 16'd20000;
+            g_wait_pvalid(base + 9, 4000000);
+            check_eq32(p_ch0, 15'd20000, "CH0 source 20000 -> pressure_ch0");
+            check_eq32(note_code, 3'd1, "note stays C4 while CH0 changes");
+
+            check_eq32(p_ch1, 15'd2000, "CH1 unaffected by CH0 injection");
+            check_eq32(p_ch2, 15'd3000, "CH2 unaffected by CH0 injection");
+            collect_frames(512);
+            check_note_wave(1, 512);   // DAC 流仍为 C4
+
+            //-------------------------------------------------------------
+            // §23:音符快速切换不得破坏 ADC 扫描
+            //-------------------------------------------------------------
+            drive_sensor(3'd7);
+            wait_stable(3'd7);
+            base = pvalid_cnt;
+            g_wait_pvalid(base + 2, 4000000);
+            check_true((pvalid_cnt - base) >= 2, "ADC frames keep flowing (note 7)");
+
+            drive_sensor(3'd2);
+            wait_stable(3'd2);
+            base = pvalid_cnt;
+            g_wait_pvalid(base + 2, 4000000);
+            check_true((pvalid_cnt - base) >= 2, "ADC frames keep flowing (note 2)");
+
+            drive_sensor(3'd5);
+            wait_stable(3'd5);
+            base = pvalid_cnt;
+            g_wait_pvalid(base + 2, 4000000);
+            check_true((pvalid_cnt - base) >= 2, "ADC frames keep flowing (note 5)");
+
+            //-------------------------------------------------------------
+            // §20:双总线同时工作,零错误
+            //-------------------------------------------------------------
+            check_true(u_adc_model.stop_cnt > 0, "ADC bus transactions > 0");
+            check_true(u_dac_model.frame_cnt > 0, "DAC bus transactions > 0");
+            check_eq32(adc_err_cnt,  0, "adc_error count == 0");
+            check_eq32(dac_err_cnt,  0, "dac_error count == 0");
+            check_eq32(dac_over_cnt, 0, "dac_overrun count == 0");
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
+    // MODE 2 — 错误隔离 + 事务中复位(P6 §24/§25)
+    //-------------------------------------------------------------------------
+    task wait_both_in_txn;
+        input integer limit;
+        integer g;
+        begin
+            g = 0;
+            while (((u_adc_model.in_txn !== 1'b1) ||
+                    (u_dac_model.byte_active !== 1'b1)) && (g < limit)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            check_true((u_adc_model.in_txn === 1'b1) &&
+                       (u_dac_model.byte_active === 1'b1),
+                       "both masters mid-transaction when reset hits");
+        end
+    endtask
+
+    task run_err_iso;
+        integer dac_base;
+        integer pvalid_base;
+        integer adc_err_base;
+        integer dac_err_base;
+        begin
+            @(posedge clk);
+            rst_n = 1'b1;
+            g_wait_pvalid(2, 4000000);
+
+            //-------------------------------------------------------------
+            // §24 正向:ADC 总线地址 NACK,DAC 必须不受影响
+            //-------------------------------------------------------------
+            adc_nack_addr = 1'b1;
+            adc_err_base  = adc_err_cnt;
+            pvalid_base   = pvalid_cnt;
+            g = 0;
+            while ((adc_err_cnt < adc_err_base + 3) && (g < 4000000)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            check_true(adc_err_cnt >= adc_err_base + 3, "ADC NACK: errors raised");
+            check_eq32(pvalid_cnt, pvalid_base, "ADC NACK: no bogus pressure frames");
+            dac_base = u_dac_model.frame_cnt;
+            g = 0;
+            while ((u_dac_model.frame_cnt < dac_base + 5) && (g < 4000000)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            check_true(u_dac_model.frame_cnt >= dac_base + 5,
+                       "ADC NACK: DAC keeps writing");
+            check_eq32(dac_err_cnt,  0, "ADC NACK: dac_error stays 0");
+            check_eq32(dac_over_cnt, 0, "ADC NACK: overrun stays 0");
+            adc_nack_addr = 1'b0;
+            pvalid_base = pvalid_cnt;
+            g_wait_pvalid(pvalid_base + 1, 4000000);
+            check_eq32(p_ch0, 15'd1000, "ADC recovers after NACK release");
+
+            //-------------------------------------------------------------
+            // §24 反向:DAC 数据 NACK,ADC 帧与 pressure_valid 不受影响
+            //-------------------------------------------------------------
+            adc_err_base = adc_err_cnt;   // 阶段 A 的错误已计入新基线
+            dac_err_base = dac_err_cnt;
+            dac_nack_data = 1'b1;
+            g = 0;
+            while ((dac_err_cnt < dac_err_base + 3) && (g < 4000000)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            check_true(dac_err_cnt >= dac_err_base + 3, "DAC NACK: errors raised");
+            pvalid_base = pvalid_cnt;
+            g = 0;
+            while ((pvalid_cnt < pvalid_base + 2) && (g < 4000000)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            check_true(pvalid_cnt >= pvalid_base + 2,
+                       "DAC NACK: ADC frames keep flowing");
+            check_eq32(adc_err_cnt, adc_err_base, "DAC NACK: adc_error stays 0");
+            dac_nack_data = 1'b0;
+
+            //-------------------------------------------------------------
+            // §25:两总线都在事务中时复位
+            //-------------------------------------------------------------
+            drive_sensor(3'd1);
+            wait_stable(3'd1);
+            wait_both_in_txn(8000000);
+
+            @(negedge clk);
+            rst_n        = 1'b0;
+            sensor_async = 3'd0;
+            repeat (16) @(posedge clk);
+
+            check_true((u_adc_model.in_txn === 1'b0) &&
+                       (u_dac_model.byte_active === 1'b0),
+                       "reset: both models out of transaction");
+            check_true((adc_scl === 1'b1) && (adc_sda === 1'b1) &&
+                       (dac_scl === 1'b1) && (dac_sda === 1'b1),
+                       "reset: both buses released high");
+            check_eq32(note_code,          3'd0, "reset: note back to mute");
+            check_eq32(sensor_code_stable, 3'd0, "reset: stable code back to 000");
+            check_eq32(p_ch0, 15'd0, "reset: pressure outputs cleared");
+            check_eq32(p_ch1, 15'd0, "reset: pressure outputs cleared");
+            check_eq32(p_ch2, 15'd0, "reset: pressure outputs cleared");
+            check_eq32(p_valid,  1'b0, "reset: pressure_valid low");
+            // 复位清空错误脉冲计数;再保持复位一段时间,确认无杂散脉冲
+            check_eq32(adc_err_cnt, 0, "reset: adc_error count cleared");
+            check_eq32(dac_err_cnt, 0, "reset: dac_error count cleared");
+            adc_err_base = adc_err_cnt;
+            dac_err_base = dac_err_cnt;
+            repeat (2000) @(posedge clk);
+            check_eq32(adc_err_cnt, adc_err_base, "reset hold: no spurious adc_error");
+            check_eq32(dac_err_cnt, dac_err_base, "reset hold: no spurious dac_error");
+
+            @(negedge clk);
+            rst_n = 1'b1;
+            $display("  info: reset released, expecting full restart");
+
+            pvalid_base = pvalid_cnt;
+            g_wait_pvalid(pvalid_base + 2, 4000000);
+            check_eq32(p_ch0, 15'd1000, "restart: full ADC scan resumes");
+            check_eq32(p_ch1, 15'd2000, "restart: full ADC scan resumes");
+            check_eq32(p_ch2, 15'd3000, "restart: full ADC scan resumes");
+
+            seg_mute_en = 1'b1;
+            dac_base    = u_dac_model.frame_cnt;
+            g = 0;
+            while ((u_dac_model.frame_cnt < dac_base + 64) && (g < 4000000)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            seg_mute_en = 1'b0;
+            check_true(u_dac_model.frame_cnt >= dac_base + 64,
+                       "restart: DAC resumes Fast Writes");
+            check_eq32(mute_bad, 0, "restart: DAC stream is clean mute 0x800");
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
+    // MODE 4/5/6 — ENABLE 组合(P6 §28)
+    //-------------------------------------------------------------------------
+    task run_disabled;
+        begin
+            @(posedge clk);
+            rst_n = 1'b1;
+            repeat (400000) @(posedge clk);   // 4 ms 双总线静默观察窗
+
+            check_true((u_adc_model.stop_cnt == 0) && (u_dac_model.frame_cnt == 0),
+                       "both buses silent with ADC=DAC=off");
+            check_eq32(pvalid_cnt,   0, "no pressure frames with ADC off");
+            check_eq32(adc_err_cnt,  0, "adc_error stays 0");
+            check_eq32(dac_err_cnt,  0, "dac_error stays 0");
+            check_eq32(dac_over_cnt, 0, "overrun stays 0");
+
+            // sensor 前端不受 ENABLE 影响
+            drive_sensor(3'd1);
+            wait_stable(3'd1);
+            check_eq32(note_code, 3'd1, "sensor path alive with ADC=DAC=off");
+            drive_sensor(3'd0);
+            wait_stable(3'd0);
+
+            check_eq32(adc_bus_viol, 0, "ADC bus never driven");
+            check_eq32(dac_bus_viol, 0, "DAC bus never driven");
+        end
+    endtask
+
+    task run_adc_only;
+        begin
+            @(posedge clk);
+            rst_n = 1'b1;
+            g_wait_pvalid(3, 4000000);
+            check_eq32(p_ch0, 15'd1000, "ADC-only: pressure correct");
+            check_eq32(p_ch1, 15'd2000, "ADC-only: pressure correct");
+            check_eq32(p_ch2, 15'd3000, "ADC-only: pressure correct");
+
+            check_eq32(u_dac_model.frame_cnt, 0, "ADC-only: DAC bus silent");
+            check_eq32(dac_err_cnt,  0, "ADC-only: dac_error stays 0");
+            check_eq32(dac_over_cnt, 0, "ADC-only: overrun stays 0");
+            check_eq32(dac_bus_viol, 0, "ADC-only: DAC bus never driven");
+        end
+    endtask
+
+    task run_dac_only;
+        begin
+            @(posedge clk);
+            rst_n = 1'b1;
+
+            drive_sensor(3'd1);
+            wait_stable(3'd1);
+            skip_frames(16);
+            collect_frames(384);
+            check_note_wave(1, 384);
+
+            check_eq32(pvalid_cnt,  0, "DAC-only: no pressure frames");
+            check_eq32(adc_err_cnt, 0, "DAC-only: adc_error stays 0");
+            check_true(u_dac_model.frame_cnt > 0, "DAC-only: DAC bus active");
+            check_eq32(adc_bus_viol, 0, "DAC-only: ADC bus never driven");
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
     // 主流程
     //-------------------------------------------------------------------------
     initial begin
@@ -564,6 +885,13 @@ module tb_finger_piano_system;
         dac_nack_data = 1'b0;
         sensor_async  = 3'd0;
         seg_mute_en   = 1'b0;
+        adc_bus_viol  = 1'b0;
+        dac_bus_viol  = 1'b0;
+        // 与 ADS 模型参数一致:除 MODE 1 外注入为恒等覆盖
+        src0_tb       = 16'd1000;
+        src1_tb       = 16'd2000;
+        src2_tb       = 16'd3000;
+        g             = 0;
 
         $display("TB_FINGER_PIANO_SYSTEM: start (mode=%0d adc_on=%0d dac_on=%0d)",
                  TB_MODE, ADC_ON, DAC_ON);
@@ -573,6 +901,15 @@ module tb_finger_piano_system;
 
         case (TB_MODE)
             0: run_basic;
+            1: run_dual;
+            2: run_err_iso;
+            3: begin
+                errors = errors + 1;
+                $display("FAIL: longrun (mode 3) not built in this commit");
+            end
+            4: run_disabled;
+            5: run_adc_only;
+            6: run_dac_only;
             default: begin
                 errors = errors + 1;
                 $display("FAIL: mode %0d not implemented in this TB build", TB_MODE);

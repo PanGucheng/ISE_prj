@@ -430,6 +430,81 @@
       "timeoutSeconds": 1500,
       "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
       "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_dual_i2c",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "1"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_error_isolation",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "2"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_disabled",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "4"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_adc_only",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "5"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_dac_only",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "6"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
     }
   ],
   "verification": {
