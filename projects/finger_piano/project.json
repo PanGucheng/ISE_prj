@@ -63,6 +63,11 @@
       "library": "work"
     },
     {
+      "path": "src/audio/audio_gain_12bit.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/system/finger_piano_system.v",
       "language": "verilog",
       "library": "work"
@@ -539,6 +544,17 @@
       "timeoutSeconds": 1500,
       "passPattern": "TB_FINGER_PIANO_STAGE2_TOP: PASS",
       "failPattern": "TB_FINGER_PIANO_STAGE2_TOP: FAIL"
+    },
+    {
+      "name": "audio_gain_12bit",
+      "top": "tb_audio_gain_12bit",
+      "sources": [
+        "sim/tb_audio_gain_12bit.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_AUDIO_GAIN_12BIT: PASS",
+      "failPattern": "TB_AUDIO_GAIN_12BIT: FAIL"
     }
   ],
   "verification": {
