@@ -415,6 +415,21 @@
       "timeoutSeconds": 240,
       "passPattern": "TB_ADS1115_PRESSURE_PIPELINE: PASS",
       "failPattern": "TB_ADS1115_PRESSURE_PIPELINE: FAIL"
+    },
+    {
+      "name": "system_stage2_basic",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "0"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
     }
   ],
   "verification": {
