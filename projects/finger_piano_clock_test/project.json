@@ -16,6 +16,19 @@
   "constraintsReviewed": true,
   "optimization": "Speed",
   "optimizationLevel": 1,
+  "simulations": [
+    {
+      "name": "clock_test_top",
+      "top": "tb_clock_test_top",
+      "sources": [
+        "sim/tb_clock_test_top.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 300,
+      "passPattern": "TB_CLOCK_TEST_TOP: PASS",
+      "failPattern": "TB_CLOCK_TEST_TOP: FAIL"
+    }
+  ],
   "verification": {
     "expectImplementationBlocked": false,
     "failOnSynthesisWarnings": true,
