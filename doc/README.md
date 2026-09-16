@@ -32,6 +32,7 @@
 | P5 Pressure processor | RTL-INTEGRATED / SYSTEM-SIMULATED；当前无硬件消费方，Stage-2 综合中有意 trim；`NOT_CALIBRATED` | 逻辑是 / 综合 trim | NO |
 | P6 stage-2 系统集成 | **P6 COMPLETE**：STAGE2 TOP = IMPLEMENTED / SIMULATED / IMPLEMENTED（综合+实现+时序通过）；BOARD = NOT_TESTED | 是 | NO |
 | P7 启动/时钟板级验证 | **SOFTWARE PREPARATION = COMPLETE**（独立诊断工程 `finger_piano_clock_test`，verify/implement/bitstream 全过）；HARDWARE TEST = WAITING USER | 独立工程 | WAITING USER |
+| P8 数字音量 | SIMULATED / STANDALONE（DDS→gain→MCP4725 端到端通过；刻意不接 Stage-2 顶层；PRESSURE→VOLUME = NOT_IMPLEMENTED，FSR = NOT_CALIBRATED） | NO（刻意） | NO（BOARD AUDIO VOLUME = NOT_TESTED） |
 
 **P1~P6 已全部完成并交叉集成**：正式 Stage-2 顶层 `finger_piano_stage2_top`
 （12 个用户 I/O，引脚 2026-09-16 逐脚冻结）已通过全量 verify（Overall PASS，
@@ -174,6 +175,7 @@ tone_generator → audio_out
 | P5 | [ADS1115 压力数据处理与标定基础设施开发计划](./ADS1115压力数据处理与标定基础设施开发计划.md) | ADC raw → 干净的三路压力数据 | P1 | 否 |
 | P6 | [P6 最终顶层迁移与系统级数字集成计划](./P6最终顶层迁移与系统级数字集成计划.md) | stage-2 system core 纯数字集成 + 系统级仿真 + final top/UCF 迁移 | P1+P2+P3+P4+P5 | 是（P6A+P6B 全部完成） |
 | P7 | [P7 FPGA 启动与时钟分频板级验证计划](./P7FPGA启动与时钟分频板级验证.md) | 独立诊断工程的 FPGA 启动 / 12 MHz 时钟 / 分频 / ISF 冷启动板级验证 | P6 | 独立工程 `finger_piano_clock_test`（软件侧完成） |
+| P8 | [P8 DDS 数字音量控制基础设施开发计划](./P8_DDS数字音量控制基础设施开发计划.md) | DDS 样点围绕 2048 的 3-bit 数字增益（shift/add，无乘法器）与 DDS→gain→MCP4725 端到端链 | P1+P3+P4 | 否（刻意 STANDALONE） |
 
 这些计划的共同原则是：
 

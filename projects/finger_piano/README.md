@@ -509,6 +509,36 @@ NOT_TESTED;未执行任何 `program`**。物理上板(传感器、I²C 器件、
 
 ## 13. 验证记录
 
+### 第十五轮:P8 DDS 数字音量控制基础设施(audio_gain + gain pipeline,2026-09-17)
+
+**未改正式 Stage-2 top/UCF、未改 DDS/MCP4725/allowlist**;新增
+`src/audio/audio_gain_12bit.v`、`src/audio/dds_gain_mcp4725_pipeline.v`
+(刻意不实例化进任何顶层,保留 P4 baseline pipeline)、两个 TB 与计划文档。
+提交序列:`p8a`(4403047)→ `p8b`(8ac5846)→ `p8c`(20ffe16)→ `p8d`(2f0ff9b,
+位宽卫生 + 资源 + 全量回归)。
+
+- `audio_gain_12bit`:纯组合,`out = 2048 + floor(δ×level/8)`(δ =
+  in−2048 显式符号扩位),level 0..7 全 shift/add(P8 §6 表),无乘法器;
+  刻意不加饱和分支——12-bit 输入下结果数学上必然 ∈ [0,4095],不可达
+  饱和器只会产生 trim warning 漂移已冻结 allowlist;中间量位宽收窄到
+  12-bit signed(δ/2 ∈ ±1024、|δ−δ/8| ≤ 1792),0 冗余位。
+- 单元 TB:**4096×8 全组合穷举**(floor 参考模型与 RTL 算术右移同语义)
+  + 中心/静音/半波已知点/±1 LSB 对称/单调性 = 43126 checks 0 errors。
+- `dds_gain_mcp4725_pipeline`:DDS → gain → mcp4725_ctrl 纯结构化直连,
+  volume 是显式输入、**不**连压力(P8 §17)。TB 真实 12 MHz 走
+  mute(A)→C4×lvl1/4/7→A4×2/6→B4×7→mute(B) 共 3840 样点:scoreboard
+  按"推入时 DDS 码+当时音量"逐帧比对 0 mismatch;DDS 三区段独立锚定
+  横跨音量切换相位连续;cadence 恒 1500 拍;两种 mute 语义(note=0 与
+  volume=0 压平活动 G4)上总线同为 0x800;0 overrun / 0 error /
+  0 EEPROM / ready 全 1。3859 checks 0 errors。
+- 资源(临时独立工程 run `20260917-000243-066eda17`,0 errors /
+  **0 warnings**):**43 slices / 80 LUT4 / 0 FF / 0 multiplier**。
+- 全量回归 verify-20260917-000404-6eb8350a:Overall PASS,35/35 仿真,
+  0 errors / 166 warnings = 冻结 allowlist(unexpected = 0),417 FF /
+  12 IO 不变。P8 状态:**IMPLEMENTED / SIMULATED / STANDALONE**;
+  PRESSURE→VOLUME = **NOT_IMPLEMENTED**;FSR = NOT_CALIBRATED;
+  板上音量/LM386/扬声器 = NOT_TESTED。
+
 ### 第十四轮:P6B 最终顶层与 UCF 迁移(2026-09-16)
 
 **这是本工程第一次把真实 3-bit 传感器 + 双 I²C 架构作为正式 FPGA 顶层。**

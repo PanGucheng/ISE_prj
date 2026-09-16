@@ -1,6 +1,6 @@
 # finger_piano P8 DDS 数字音量控制基础设施开发计划
 
-> **Status**: PLANNED  
+> **Status**: IMPLEMENTED / SIMULATED / STANDALONE（audio gain 单元 + pipeline 仿真全过，未接 Stage-2 顶层；PRESSURE→VOLUME = NOT_IMPLEMENTED，FSR = NOT_CALIBRATED）  
 > **Scope**: DDS sample → digital gain → MCP4725 的纯数字音量控制基础设施  
 > **Depends on**: P1～P7 已完成的软件/数字基础设施；P6 正式 Stage-2 已冻结  
 > **Main Stage-2 top/UCF**: 本计划默认不修改  
