@@ -1,82 +1,95 @@
 #=============================================================================
-# finger_piano.ucf  --  XC3S50AN TQ144 最小系统板引脚约束
+# finger_piano.ucf  --  XC3S50AN TQ144 Stage-2 最终引脚约束
 #
-# 板卡信息（由用户在 2026-09-14 确认）：
-#   - 系统时钟：P57 接 12 MHz 有源晶振。实测该脚为全局时钟输入：
-#     ISE 自动插入 clk_BUFGP/IBUFG -> BUFGMUX，0 errors / 0 warnings。
-#   - 可用 I/O 范围：P1..P40。其中 P1=TMS、P2=TDI 必须留给 JTAG，不得占用；
-#     P9/P17/P26/P34=GND，P14/P23=VCCO_3，P40=VCCO_2，P22=VCCINT，
-#     P36=VCCAUX，P33/P35=IPAD113/114（仅输入）。
-#   - I/O 电压：3.3 V，因此 IOSTANDARD = LVCMOS33。
+# Stage-2 physical pin assignment frozen 2026-09-16.
+# VCCO = 3.3V confirmed by user.
+# Pin legality checked against XC3S50AN-TQG144 DS557 pinout.
 #
-# 时序：SYS_CLK_HZ = 12 000 000 -> PERIOD = 1000/12 = 83.33 ns。
+# 冻结分配(全部 LVCMOS33,全部为纯 I/O 或 GCLK,不含 JTAG/电源/GND/
+# input-only/配置复用 DUAL/RHCLK 管脚):
+#
+#   信号              LOC    Bank  XC3S50AN 管脚名      类型
+#   ----------------  -----  ----  ------------------  ------
+#   clk               P57     2    IO_L09P_2/GCLK0     GCLK
+#   rst_n             P3      3    IO_L02P_3           I/O
+#   sensor_async[0]   P28     3    IO_L11P_3           I/O
+#   sensor_async[1]   P29     3    IO_L10N_3           I/O
+#   sensor_async[2]   P30     3    IO_L11N_3           I/O
+#   adc_i2c_scl       P31     3    IO_L12P_3           I/O
+#   adc_i2c_sda       P32     3    IO_L12N_3           I/O
+#   dac_i2c_scl       P102    1    IO_L10P_1           I/O
+#   dac_i2c_sda       P103    1    IO_L11P_1           I/O
+#   note_debug[0]     P110    0    IO_L01P_0           I/O
+#   note_debug[1]     P111    0    IO_L01N_0           I/O
+#   note_debug[2]     P113    0    IO_L02N_0           I/O
+#
+#   总计 12 个用户 I/O(物理顶层 finger_piano_stage2_top)。
+#
+# 说明:
+#   - 全部相关 Bank 的 VCCO 均为 3.3 V(用户 2026-09-16 确认);
+#   - 两条 I2C 总线物理独立:ADS1115 走 P31/P32,MCP4725 走 P102/P103;
+#   - 不使用 P76/P77(IO_L01P_1/HDC 与 IO_L02N_1/LDC0,配置期 DUAL);
+#   - I2C 上拉在板级(4.7 kΩ 到 3.3 V),UCF 不写 PULLUP 代替外部上拉;
+#   - I2C SCL 是同步状态机产生的开漏 GPIO,不是 FPGA 时钟:
+#     **不写 TNM_NET,也不作为任何 always 的时钟沿**;
+#   - 全工程仍只有 clk(P57,12 MHz)一个时钟域。
+#
+# Legacy(7-key 方波电子琴)finger_piano_top 的旧引脚映射已从本活动 UCF
+# 删除(该 top 不再是工程顶层);历史映射保留在 projects/finger_piano/
+# README.md §7 与 Git history 中。
+#
+# 时序:SYS_CLK_HZ = 12 000 000 -> PERIOD = 1000/12 = 83.33 ns。
 #       修改 src/finger_piano_cfg.vh 的频率后必须同步修改下面的 TIMESPEC。
 #=============================================================================
 
 
 #-----------------------------------------------------------------------------
-# 系统时钟：P57（全局时钟输入，12 MHz 有源晶振）
+# SYSTEM CLOCK: P57(全局时钟输入,12 MHz 有源晶振,唯一时钟源)
 #-----------------------------------------------------------------------------
 NET "clk" LOC = P57 | IOSTANDARD = LVCMOS33;
-NET "clk" TNM_NET = "clk_group";
-TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%;
 
 
 #-----------------------------------------------------------------------------
-# 复位 rst_n（低有效，外部上拉/RC）
+# RESET: rst_n(低有效,外部上拉/RC)
 #-----------------------------------------------------------------------------
 NET "rst_n" LOC = P3 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# 7 路按键输入（压力传感器调理 + 电平判决后的 0/1 电平）
-#   key_in<0> = 唱名 1 (C4) ... key_in<6> = 唱名 7 (B4)
-#   极性由 src/finger_piano_cfg.vh 的 `KEY_ACTIVE_HIGH 配置，不在 UCF 里反相。
+# 3-BIT SENSOR INPUT: LM393 比较器编码
+#   sensor_async[0] = CH0,权重 1; [1] = CH1,权重 2; [2] = CH2,权重 4
+#   000 = 静音,001~111 = C4~B4(位序不得交换)
 #-----------------------------------------------------------------------------
-NET "key_in<0>" LOC = P4  | IOSTANDARD = LVCMOS33;
-NET "key_in<1>" LOC = P5  | IOSTANDARD = LVCMOS33;
-NET "key_in<2>" LOC = P6  | IOSTANDARD = LVCMOS33;
-NET "key_in<3>" LOC = P7  | IOSTANDARD = LVCMOS33;
-NET "key_in<4>" LOC = P8  | IOSTANDARD = LVCMOS33;
-NET "key_in<5>" LOC = P10 | IOSTANDARD = LVCMOS33;
-NET "key_in<6>" LOC = P11 | IOSTANDARD = LVCMOS33;
+NET "sensor_async<0>" LOC = P28 | IOSTANDARD = LVCMOS33;
+NET "sensor_async<1>" LOC = P29 | IOSTANDARD = LVCMOS33;
+NET "sensor_async<2>" LOC = P30 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# 音频输出：P12 -> LM386 输入
+# ADS1115 INDEPENDENT I2C BUS(开漏,外部 4.7 kΩ 上拉到 3.3 V)
 #-----------------------------------------------------------------------------
-NET "audio_out" LOC = P12 | IOSTANDARD = LVCMOS33;
+NET "adc_i2c_scl" LOC = P31 | IOSTANDARD = LVCMOS33;
+NET "adc_i2c_sda" LOC = P32 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# 调试输出：极性归一化 + 同步 + 滤波之后的按键状态（可接 LED/示波器）
+# MCP4725 INDEPENDENT I2C BUS(开漏,外部 4.7 kΩ 上拉到 3.3 V)
+#   与 ADS1115 总线完全独立:无共享 SDA/SCL,无 arbiter,无 bus mux
 #-----------------------------------------------------------------------------
-NET "key_debug<0>" LOC = P13 | IOSTANDARD = LVCMOS33;
-NET "key_debug<1>" LOC = P15 | IOSTANDARD = LVCMOS33;
-NET "key_debug<2>" LOC = P16 | IOSTANDARD = LVCMOS33;
-NET "key_debug<3>" LOC = P18 | IOSTANDARD = LVCMOS33;
-NET "key_debug<4>" LOC = P19 | IOSTANDARD = LVCMOS33;
-NET "key_debug<5>" LOC = P20 | IOSTANDARD = LVCMOS33;
-NET "key_debug<6>" LOC = P21 | IOSTANDARD = LVCMOS33;
+NET "dac_i2c_scl" LOC = P102 | IOSTANDARD = LVCMOS33;
+NET "dac_i2c_sda" LOC = P103 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# 调试输出：当前音符编码（0 = 无音符，1..7 = C4..B4）
+# NOTE DEBUG: 同步/滤波/解码之后的当前音符编码(0=无音符,1~7=C4~B4)
 #-----------------------------------------------------------------------------
-NET "note_debug<0>" LOC = P24 | IOSTANDARD = LVCMOS33;
-NET "note_debug<1>" LOC = P25 | IOSTANDARD = LVCMOS33;
-NET "note_debug<2>" LOC = P27 | IOSTANDARD = LVCMOS33;
+NET "note_debug<0>" LOC = P110 | IOSTANDARD = LVCMOS33;
+NET "note_debug<1>" LOC = P111 | IOSTANDARD = LVCMOS33;
+NET "note_debug<2>" LOC = P113 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# BOARD TODO（P1 可选外设，全部未确认、未启用——此处不得出现任何 LOC）
-#
-# P1 的 ads1115_ctrl / mcp4725_ctrl 已作为独立 RTL 存在（默认关闭，顶层未
-# 实例化），将来顶层集成前必须由用户逐脚确认以下 4 个 I²C 引脚后，
-# 才允许在这里写 NET ... LOC（候选分配见 doc/README.md「可用引脚池与
-# IO 重分配」，确认前禁止依赖 MAP 自动分配）：
-#   - ADC_SCL / ADC_SDA（ADS1115，独立总线 1）
-#   - DAC_SCL / DAC_SDA（MCP4725，独立总线 2）
-# 上拉电阻在板级（4.7 kΩ 到 3.3 V），不是 FPGA 内部资源。
+# TIMING: 12 MHz 单一系统时钟(83.33 ns)
 #-----------------------------------------------------------------------------
-
+NET "clk" TNM_NET = "clk_group";
+TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%;
