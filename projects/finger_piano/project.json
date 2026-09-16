@@ -68,6 +68,11 @@
       "library": "work"
     },
     {
+      "path": "src/audio/dds_gain_mcp4725_pipeline.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/system/finger_piano_system.v",
       "language": "verilog",
       "library": "work"
@@ -555,6 +560,18 @@
       "timeoutSeconds": 240,
       "passPattern": "TB_AUDIO_GAIN_12BIT: PASS",
       "failPattern": "TB_AUDIO_GAIN_12BIT: FAIL"
+    },
+    {
+      "name": "dds_gain_mcp4725_pipeline",
+      "top": "tb_dds_gain_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_gain_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 1200,
+      "passPattern": "TB_DDS_GAIN_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_GAIN_MCP4725_PIPELINE: FAIL"
     }
   ],
   "verification": {
