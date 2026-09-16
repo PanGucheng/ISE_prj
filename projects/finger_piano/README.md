@@ -437,7 +437,26 @@ top / UCF 迁移)被 7 个接口引脚的人工确认阻塞,Agent 不得自行�
   legacy/P1~P6A 回归零失败。
 
 状态:STAGE2 TOP = IMPLEMENTED;STAGE2 TOP SIM = PASS;UCF = CONFIRMED;
-BOARD = **NOT_TESTED**;未执行任何 `program`。实现/时序见下一节。
+BOARD = **NOT_TESTED**;未执行任何 `program`。
+
+**实现与引脚核对**(run `20260916-154225-79f5b654`,`build -Stage implement`):
+translate/map/par 退出码 0;**MAP 0 errors / 0 warnings**、**PAR 0 errors /
+0 warnings**、`All signals are completely routed`、`Timing Score: 0`;
+`routed_pad.txt` 中 12 个用户 I/O 全部 `LOCATED`,库与电平与冻结表一致
+(P57 clk/Bank2、P3 rst_n/Bank3、P28/P29/P30 sensor/Bank3、P31/P32
+adc_i2c/Bank3、P102/P103 dac_i2c/Bank1、P110/P111/P113 note_debug/Bank0,
+全部 `LVCMOS33`),`Number of bonded IOBs: 12`,**无自动分配 I/O**。
+
+**时序(本人阅读 `timing.twr`,非工具自动结论)**:`Timing constraint:
+TS_clk = PERIOD TIMEGRP "clk_group" 83.33 ns HIGH 50%` → 31512 paths /
+1814 endpoints / **0 failing,0 timing errors**(0 setup / 0 hold /
+0 component switching limit),`Minimum period is 12.362ns`,**最差 setup slack
+70.968ns**,component switching limit 最差 slack 80.126ns,报告结尾
+`All constraints were met.` / `Timing errors: 0  Score: 0`。UCF 未写
+`OFFSET IN/OUT`,`Unconstrained OFFSET IN BEFORE` / `OFFSET OUT AFTER` /
+`Unconstrained path analysis` 各段都是「无约束可查」且 0 errors,因此只能
+说明没有违反任何已写约束,不能解释为板级 I/O 时序已认证。工具 `summary.txt`
+照旧输出 `Timing: NEEDS_REVIEW`。
 
 ### 第十三轮:P6A stage-2 系统数字集成(system core + 系统级仿真,2026-09-16)
 
