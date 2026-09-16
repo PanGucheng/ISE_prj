@@ -31,6 +31,7 @@
 ## 仿真与验收
 
 - 修改 RTL 或 Testbench 后的主验收入口是 `pwsh -File .\ise.ps1 verify -Project <名称>`：依次执行配置检查、静态检查、synth 综合、project.json 中全部 enabled 仿真、implement 门禁判定，并写出 `artifacts/verify-<id>/verification.json` 与控制台报告；任一项 FAIL 时退出码非零。
+- `verification.failOnSynthesisWarnings=true` 时 XST warning 会判 FAIL。若某工程确实存在“有意被综合器裁掉、无硬件消费方”的仿真专用层级，只允许用 `verification.synthesisWarningAllowlist`（逐条 `id`+`pattern`+`expected` 计数、人工审阅）做窄口径例外：verify 逐条分类原始 `synthesis.srp`（报告不改写），任何未命中条目、新路径/类别、或计数漂移仍判 FAIL。**禁止**用 `XIL_XST_HIDEMESSAGES`、全局静音、`KEEP`/`DONT_TOUCH` 或假消费者去绕过；不得为通过检查把 `failOnSynthesisWarnings` 改成 `false`。工具内不写工程名特例。
 - 单个仿真用 `pwsh -File .\ise.ps1 sim -Project <名称> -Test <名称>`。用例定义在 project.json 的 `simulations` 段（`name/top/sources/generics/timeoutSeconds/passPattern/failPattern`，可加 `enabled`）；testbench 绝不加入综合 `sources`。
 - sim 的判据是日志出现 `passPattern`：退出码 0 不算通过，既无 PASS 也无 FAIL 视为 FAIL；generic 覆盖只在 fuse 阶段生效，每次参数组合重新 fuse；超时会终止本地 SSH 会话并判 FAIL。
 - `pwsh -File .\ise.ps1 report -Project <名称> (-RunId <id> | -Latest) [-Json]` 只读取已有 artifacts，不重新构建；`timing` 在有人实际阅读 timing.twr 之前只能是 `NOT_RUN`/`NEEDS_REVIEW`，不得据此声称时序通过。

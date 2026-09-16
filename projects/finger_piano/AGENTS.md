@@ -128,7 +128,7 @@ pwsh -File .\ise.ps1 sim -Project finger_piano -Test <name>
 - 单一 `clk` 时钟域，派生节拍用 **clock-enable**
 - **不得**把 `audio_out` / I2C SCL / `sample_tick` 当作时钟
 - 频率等时钟相关字面量只允许出现在 `src/finger_piano_cfg.vh`（TB 仿真参数除外）
-- XST **0 errors / 0 warnings**（`failOnSynthesisWarnings=true`）
+- XST **0 errors / 0 warnings**（`failOnSynthesisWarnings=true`）。**unexpected synthesis warnings 必须为 0**；本工程唯一的例外是 `project.json` 的 `verification.synthesisWarningAllowlist` 中逐条审阅过的 Stage-2 trim 告警（当前为 12 脚顶层没有硬件消费方的 ADS1115 压力链/DDS debug 出口，共 166 条，见 README §12.5/§13）。计数漂移、新路径/类别一律 FAIL；**不得**加 `KEEP`/`DONT_TOUCH`/假消费者，也不得关闭 `failOnSynthesisWarnings`。
 - 每个 testbench 必须打印明确的 `PASS` / `FAIL` pattern；**退出码 0 不算通过**
 
 ## 板级安全规则

@@ -30,7 +30,7 @@
 | P3 DDS | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P4 DDS → MCP4725 | SIMULATED（IMPLEMENTED / STANDALONE，端到端数字链通过，未接顶层） | NO | NO |
 | P5 Pressure processor | SIMULATED（IMPLEMENTED / STANDALONE，零点未实测 NOT_CALIBRATED，未接顶层） | NO | NO |
-| P6 stage-2 系统集成 | P6A 完成：SYSTEM DIGITAL CORE = SIMULATED / STANDALONE；FINAL TOP = NOT MIGRATED（P6B 待用户逐脚确认 7 个引脚） | P6A: NO / P6B: 待确认 | NO |
+| P6 stage-2 系统集成 | **P6 COMPLETE**：STAGE2 TOP = IMPLEMENTED / SIMULATED / IMPLEMENTED（综合+实现+时序通过）；BOARD = NOT_TESTED | 是 | NO |
 
 **P1~P5 五份计划已全部实现并通过全量仿真与综合**（最新全量:
 verify-20260916-031854-e3c00f1e Overall PASS,25 个仿真全部 PASS,综合
@@ -166,15 +166,21 @@ tone_generator → audio_out
 | P3 | [DDS 正弦音频发生器开发计划](./DDS正弦音频发生器开发计划.md) | 8 kS/s、24-bit DDS、12-bit 正弦样点 | P1 的统一配置 | 否 |
 | P4 | [DDS 到 MCP4725 数字音频链路集成计划](./DDS到MCP4725数字音频链路集成计划.md) | DDS 与 DAC controller 端到端吞吐 | P1 + P3 | 否 |
 | P5 | [ADS1115 压力数据处理与标定基础设施开发计划](./ADS1115压力数据处理与标定基础设施开发计划.md) | ADC raw → 干净的三路压力数据 | P1 | 否 |
-| P6 | [P6 最终顶层迁移与系统级数字集成计划](./P6最终顶层迁移与系统级数字集成计划.md) | stage-2 system core 纯数字集成 + 系统级仿真 + final top/UCF 迁移 | P1+P2+P3+P4+P5 | P6A 否；P6B 待用户逐脚确认 |
+| P6 | [P6 最终顶层迁移与系统级数字集成计划](./P6最终顶层迁移与系统级数字集成计划.md) | stage-2 system core 纯数字集成 + 系统级仿真 + final top/UCF 迁移 | P1+P2+P3+P4+P5 | 是（P6A+P6B 全部完成） |
 
 这些计划的共同原则是：
 
 先做独立 RTL 和可重复仿真，再做顶层和实物集成。
 
-P6（stage-2 系统集成）已按同一原则完成其 P6A 部分：`finger_piano_system`
-纯数字集成层 + 7 个系统级仿真全部通过；legacy 顶层/UCF 零改动，final top
-迁移（P6B）等待用户逐脚确认 7 个接口引脚后单独执行。
+P6 已全部完成。P6A 交付纯数字集成层 `finger_piano_system` 与 7 个系统级
+仿真；P6B 交付正式物理顶层 `finger_piano_stage2_top`（wrapper only）、冻结
+12 脚 UCF、stage2 top TB、全量 verify（Overall PASS，33 仿真）与实现/时序
+（MAP/PAR 0/0、`Timing Score: 0`、`TS_clk = 83.33 ns` 0 timing errors）。最终
+引脚由用户在 2026-09-16 逐脚确认（clk=P57、rst_n=P3、
+sensor_async[0..2]=P28/P29/P30、adc_i2c=P31/P32、dac_i2c=P102/P103、
+note_debug=P110/P111/P113，全部 LVCMOS33，VCCO=3.3 V）。**从未烧录，板卡
+功能 = NOT_TESTED**；当前 12 脚顶层没有压力数据消费方，P5 压力链被 XST
+有意 trim（已审阅告警白名单，见工程 README §12.5/§13）。
 
 ## 4. 推荐执行顺序
 
@@ -225,7 +231,7 @@ P6A stage-2 system core（纯数字集成,不动 legacy top/UCF）
  ↓
 完整 verify
  ↓
-P6B final top / UCF 迁移（**被阻塞:待用户逐脚确认 7 个接口引脚**）
+P6B final top / UCF 迁移（引脚已冻结;见工程 README §13 第十四轮）
 
 任何阶段出现回归失败：
 

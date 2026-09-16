@@ -1,45 +1,78 @@
 # 手指钢琴（Finger Piano）——Spartan-3AN XC3S50AN 课设工程
 
-7 路数字输入的单音电子琴：`key_in[6:0]` 分别对应唱名 1~7（第四八度 C4~B4），FPGA 输出 50% 占空比方波 `audio_out` 驱动 LM386 功放。无按键时输出恒 0。
+3-bit 传感器输入的单音电子琴（正式 Stage-2 顶层）：3 个 LM393 比较器输出形成 `sensor_async[2:0]` 编码（`000 = 静音，001~111 = C4~B4`），音符经 **DDS → MCP4725（独立 I²C）→ 重构滤波 → LM386** 输出；三路模拟压力另经 **ADS1115（另一条独立 I²C）** 采集。原来的 7-key 方波电子琴 `key_in[6:0] → tone_generator → audio_out` 作为 **legacy baseline** 保留（`finger_piano_top`，已不再是工程顶层）。
 
 > **架构状态说明（先读这一段）**
 >
-> 本 README 前部描述的是当前已经综合、仿真、实现和烧录验证过的 **7-key legacy baseline**，用于保留现有可工作的软件基线。
->
-> **最终真实硬件不是 7 个压力传感器。** 实际设计使用 **3 个 FSR + 3 个 LM393 数字输出形成 3-bit 编码**（`000 = 静音，001~111 = C4~B4`），三路模拟压力另经 **ADS1115** 采集；后续音频链路使用 **DDS → MCP4725 → 重构滤波 → LM386**。
->
-> - 项目宪法（目标、计划顺序、不得猜引脚等硬规则）：[`AGENTS.md`](./AGENTS.md)
-> - 架构地图、P1~P5 计划索引与当前实施状态：[`../../doc/README.md`](../../doc/README.md)
+> - **正式顶层 = `finger_piano_stage2_top`**（12 个用户 I/O；P6B 已完成 UCF 冻结 / 综合 / 仿真 / 实现 / 时序）。`finger_piano_top`（7-key 方波）保留为 legacy baseline。
+> - 真实硬件：**3 个 FSR + 3 个 LM393 → 3-bit 编码**；三路模拟压力经 ADS1115；音频链路 DDS → MCP4725 → 重构滤波 → LM386。
+> - **压力数据当前没有硬件消费方**，因此在 12 脚 Stage-2 综合中 ADS1115 压力链被 XST 合法 trim（详见 §12.5 与 §13 第十四轮）；这不是缺陷。
+> - 板卡功能、FSR 标定、MCP4725 模拟输出、LM386、扬声器**全部未上板验证**。
+> - 项目宪法：[`AGENTS.md`](./AGENTS.md)；架构地图与状态：[`../../doc/README.md`](../../doc/README.md)
 
 - 器件：`xc3s50an-4-tqg144`（**TODO：速度等级 `-4` 为暂定占位，必须以芯片丝印为准核对后修改 `project.json` 与本节**）
 - 工具：Xilinx ISE 14.7（远端 Win7 `fpga-vm`），Verilog-2001，XST 综合
-- 顶层：`finger_piano_top`
-- 时钟：外部有源晶振作为**唯一**系统时钟；全工程只有一个时钟域 `clk`，无门控时钟、无逻辑产生的第二时钟
+- 正式顶层：`finger_piano_stage2_top`（legacy baseline：`finger_piano_top`，保留）
+- 时钟：外部 12 MHz 有源晶振（P57）作为**唯一**系统时钟；全工程只有一个时钟域 `clk`，无门控时钟、无逻辑产生的第二时钟
 
 ## 0. 当前状态（Toolchain Freeze v1 口径）
 
-> 本节记录 **legacy stage-1 baseline**（7-key 方波电子琴）当时的验证事实；
-> P1~P5 扩展（3-bit 输入、ADS1115 / MCP4725、DDS、压力处理）与系统集成的
-> 当前状态见 §12 与 §13 最近几轮记录，引脚池更新见 [`../../doc/README.md`](../../doc/README.md) §12.1。
+> 正式顶层已迁移到 Stage-2；legacy 7-key baseline 的验证事实保留在 §12 与
+> §13 后续轮次。系统集成与引脚状态见 §12.5 / §12.6 与 §13 第十四轮。
 
-**已完成（均有真机或工具证据）**：RTL、综合（0 errors / 0 warnings）、6 个仿真用例、实现（MAP/PAR 0/0）、时序（`TS_clk = PERIOD 83.33 ns` 读 `timing.twr`：0 timing errors、最差 slack 70.697 ns）、bitstream（`design.bit` 54 738 字节）、**JTAG 易失配置**（`-Mode Jtag`）、**ISF erase/program/verify**（`-Mode Isf`，run `program-20260915-083244-bf54acda`）。
+**Stage-2 正式顶层（P6B，2026-09-16，均有无板上板工具证据）**：新顶层
+`finger_piano_stage2_top`（wrapper only）、冻结 12 脚 UCF、stage2 top TB。
+全量 `verify-20260916-153554-00e49086` **Overall PASS**（综合 0 errors /
+166 条已审阅 trim 告警 / 0 unexpected / 0 latches / 12 IOs；33 个仿真全
+PASS，含 legacy 与 P1~P6A 回归；implement 门禁 open）。实现
+`20260916-154225-79f5b654`：MAP/PAR **0 errors / 0 warnings**、全布线、
+`Timing Score: 0`。时序（本人读 `timing.twr`）：`TS_clk = PERIOD 83.33 ns`
+满足、**0 timing errors**、最差 setup slack **70.968 ns**、`All constraints
+were met.`。资源 12 IOs / 417 FF / 1101 LUT / 578 slices。**未烧录**。
 
-**尚未完成（外围硬件未搭建，未做测量）**：
+**legacy baseline（stage-1，历史，已不再是工程顶层）**：RTL、综合（0 errors
+/ 0 warnings）、6 个仿真用例、实现（MAP/PAR 0/0）、时序（`TS_clk = PERIOD
+83.33 ns`：0 timing errors、最差 slack 70.697 ns）、bitstream
+（`design.bit` 54 738 字节）、**JTAG 易失配置**（`-Mode Jtag`）、
+**ISF erase/program/verify**（`-Mode Isf`，run
+`program-20260915-083244-bf54acda`）。
+
+**尚未完成（整个工程，外围硬件未搭建，未做测量）**：
 
 ```
 power-cycle persistent boot   = NOT_TESTED   # 成功写入后尚未做断电启动验证
 board functional test         = NOT_TESTED
 sensor input test             = NOT_TESTED   # 压力传感器调理电路未搭建
-audio output measurement      = NOT_TESTED   # 未用示波器/频率计测 P12
+audio output measurement      = NOT_TESTED   # 未用示波器/频率计测
+MCP4725 analog output         = NOT_TESTED
 LM386 test                    = NOT_TESTED
 speaker test                  = NOT_TESTED
+FSR calibration               = NOT_CALIBRATED
 complete finger-piano acceptance = NOT_TESTED
-userDesignFunctional          = NOT_TESTED
+userDesignFunctional          = NOT_TESTED   # Stage-2 顶层从未烧录/上板
 ```
 
-**这些一律记为 `NOT_TESTED`，不得写成 FAIL。** 烧录结论（`programmingVerified = VERIFIED`）与板卡功能结论是两件事，不可互相推导。
+**这些一律记为 `NOT_TESTED` / `NOT_CALIBRATED`，不得写成 FAIL。** 烧录结论
+（`programmingVerified = VERIFIED`）与板卡功能结论是两件事，不可互相推导。
 
 ## 1. 顶层端口
+
+### 1.1 正式顶层 `finger_piano_stage2_top`（12 个用户 I/O）
+
+| 端口 | 方向 | 位宽 | 说明 |
+|---|---|---|---|
+| `clk` | in | 1 | 外部 12 MHz 有源晶振（P57），唯一系统时钟 |
+| `rst_n` | in | 1 | 低有效复位；顶层经 `reset_sync` 异步拉低、同步释放为 `rst_n_sync` |
+| `sensor_async[2:0]` | in | 3 | LM393 3-bit 编码，`[0]`/`[1]`/`[2]` 权重 1/2/4（不得交换） |
+| `adc_i2c_scl` / `adc_i2c_sda` | inout | 1+1 | ADS1115 独立 I²C（开漏 0/Z，外部 4.7 kΩ 上拉到 3.3 V） |
+| `dac_i2c_scl` / `dac_i2c_sda` | inout | 1+1 | MCP4725 独立 I²C（开漏 0/Z，外部 4.7 kΩ 上拉到 3.3 V） |
+| `note_debug[2:0]` | out | 3 | 同步+滤波+解码后的当前音符编码，0=无音符，1~7=C4~B4（= `note_code`） |
+
+结构：`rst_n → reset_sync → finger_piano_system`（内含 P1~P5 全部数字基础设施），
+`assign note_debug = note_code`；顶层不重实现任何子系统，不含 legacy
+`key_in`/`key_debug`/`audio_out`，两条 I²C 完全独立。
+
+### 1.2 legacy 顶层 `finger_piano_top`（7-key 方波 baseline，保留）
 
 | 端口 | 方向 | 位宽 | 说明 |
 |---|---|---|---|
@@ -127,44 +160,72 @@ projects/finger_piano/
 
 ## 7. UCF 引脚约束（`constraints/finger_piano.ucf`）
 
-**已按用户确认的板卡信息填写完毕**（2026-09-14）：系统时钟 P57（12 MHz 有源晶振）、可用 I/O 为 P1–P40、I/O 电压 3.3 V（LVCMOS33）。当前分配：
+**活动 UCF 现在是 Stage-2 正式顶层的冻结分配**（用户 2026-09-16 确认，
+VCCO 全部 3.3 V，IOSTANDARD 全部 LVCMOS33；已对 XC3S50AN-TQG144 DS557
+逐脚核对）：
 
-> ⚠️ **「可用 I/O 为 P1–P40」是 2026-09-14 的旧口径**，已被 2026-09-15 用户确认的
-> **38 脚引脚池**取代（池中不含 P8/P11/P16/P18/P24，见
-> [`../../doc/README.md`](../../doc/README.md) §12.1）。本表列出的 legacy LOC
-> 本身保持不变、UCF 本轮不动；stage2 迁移（P6B）将在用户逐脚确认 7 个新接口后
-> 按新引脚池重整 UCF，并同步修订本节与 UCF 头部注释。
+| Stage-2 信号 | LOC | Bank | 管脚名 | 说明 |
+|---|---|---|---|---|
+| `clk` | **P57** | 2 | `IO_L09P_2/GCLK0` | 12 MHz 有源晶振，唯一时钟；走 `IBUFG → BUFGMUX` |
+| `rst_n` | **P3** | 3 | `IO_L02P_3` | 低有效，外部上拉/RC |
+| `sensor_async[0]` | **P28** | 3 | `IO_L11P_3` | LM393 CH0，权重 1 |
+| `sensor_async[1]` | **P29** | 3 | `IO_L10N_3` | LM393 CH1，权重 2 |
+| `sensor_async[2]` | **P30** | 3 | `IO_L11N_3` | LM393 CH2，权重 4 |
+| `adc_i2c_scl` | **P31** | 3 | `IO_L12P_3` | ADS1115 SCL |
+| `adc_i2c_sda` | **P32** | 3 | `IO_L12N_3` | ADS1115 SDA |
+| `dac_i2c_scl` | **P102** | 1 | `IO_L10P_1` | MCP4725 SCL |
+| `dac_i2c_sda` | **P103** | 1 | `IO_L11P_1` | MCP4725 SDA |
+| `note_debug[0]` | **P110** | 0 | `IO_L01P_0` | 当前音符编码 |
+| `note_debug[1]` | **P111** | 0 | `IO_L01N_0` | 当前音符编码 |
+| `note_debug[2]` | **P113** | 0 | `IO_L02N_0` | 当前音符编码 |
+| 时钟周期 | `TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%` | — | — | 12 MHz；改频后必须同步修改 |
 
-| 信号 | 引脚 | 说明 |
-|---|---|---|
-| `clk` | **P57** | 全局时钟输入；实测 ISE 走 `IBUFG → BUFGMUX`，0 errors / 0 warnings |
-| `rst_n` | P3 | 低有效，外部上拉/RC |
-| `key_in<0>`…`key_in<6>` | P4、P5、P6、P7、P8、P10、P11 | 唱名 1…7；`key_in<0>` 最高优先级 |
-| `audio_out` | P12 | 接 LM386 输入 |
-| `key_debug<0>`…`key_debug<6>` | P13、P15、P16、P18、P19、P20、P21 | 滤波后的按键状态 |
-| `note_debug<0>`…`note_debug<2>` | P24、P25、P27 | 当前音符编码 |
-| 时钟周期 | `TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%` | 12 MHz；改频后必须同步修改 |
+共 **12 个用户 I/O**。实现报告 `routed_pad.txt` 实测 12 脚全部 `LOCATED`，
+无自动分配 I/O；`design.pcf` 只有这 12 个 LOC。**不使用 P76/P77**
+（`IO_L01P_1/HDC`、`IO_L02N_1/LDC0`，配置期 DUAL）；不给 I²C SCL
+建 `TNM_NET`/时钟域；不加 `PULLUP`（真实上拉在板级）。
 
-**刻意避开**的引脚：P1=TMS、P2=TDI（保留给 JTAG，占用会导致无法烧录）、P9/P17/P26/P34=GND、P14/P23=VCCO_3、P40=VCCO_2、P22=VCCINT、P36=VCCAUX、P33/P35=IPAD113/114（仅输入）。
+### 7.1 legacy 顶层 `finger_piano_top` 的历史引脚映射（已从活动 UCF 删除）
 
-命名规则：Verilog 向量端口在 UCF 中写成 `名字<下标>`，例如 `key_in<0>`。
+保留在 Git history 与本表中作为 legacy baseline 记录（该 top 已不是工程顶层）：
+
+| 信号 | 引脚 |
+|---|---|
+| `clk` | P57 |
+| `rst_n` | P3 |
+| `key_in<0>`…`key_in<6>` | P4、P5、P6、P7、P8、P10、P11 |
+| `audio_out` | P12 |
+| `key_debug<0>`…`key_debug<6>` | P13、P15、P16、P18、P19、P20、P21 |
+| `note_debug<0>`…`note_debug<2>` | P24、P25、P27 |
+
+**刻意避开**的引脚：P1=TMS、P2=TDI（保留给 JTAG，占用会导致无法烧录）、
+P9/P17/P26/P34=GND、P14/P23=VCCO_3、P40=VCCO_2、P22=VCCINT、P36=VCCAUX、
+P33/P35=IPAD113/114（仅输入）。
+
+命名规则：Verilog 向量端口在 UCF 中写成 `名字<下标>`，例如 `sensor_async<0>`。
 
 ## 8. `constraintsReviewed=true` 的前置条件（本工程已满足）
 
-`constraintsReviewed=true` 是人工确认，不是工具时序结论。以下 8 项已由用户在 2026-09-14 确认，因此 `project.json` 中该字段已置 `true`：
+`constraintsReviewed=true` 是人工确认，不是工具时序结论。Stage-2 冻结引脚
+的以下各项已由用户在 **2026-09-16** 确认，因此 `project.json` 中该字段保持
+`true`：
 
 ```
 [x] clk LOC 已核对（P57，接 12 MHz 有源晶振）
 [x] clk IOSTANDARD 已核对（LVCMOS33，3.3 V）
 [x] rst_n LOC 与电气条件（P3，低有效）已核对
-[x] key_in[0..6] LOC 全部核对（P4/P5/P6/P7/P8/P10/P11）
-[x] audio_out LOC 已核对（P12）
-[x] 所有保留的 debug 顶层端口 LOC 已核对（P13–P21、P24/P25/P27）
-[x] I/O Bank 电压与全部 IOSTANDARD 匹配（3.3 V）
+[x] sensor_async[0..2] LOC 全部核对（P28/P29/P30，位序 1/2/4）
+[x] adc_i2c_scl/sda LOC 已核对（P31/P32）
+[x] dac_i2c_scl/sda LOC 已核对（P102/P103）
+[x] note_debug[0..2] LOC 已核对（P110/P111/P113）
+[x] 所有相关 Bank VCCO 均为 3.3 V，全部 IOSTANDARD 匹配（LVCMOS33）
 [x] UCF 中 PERIOD 与实际有源晶振频率一致（83.33 ns ↔ 12 MHz）
+[x] 未使用 P76/P77（配置期 DUAL）或额外 GCLK/RHCLK 作普通功能 I/O
 ```
 
-若以后更换晶振或改板，必须重新执行本节核对并把 `constraintsReviewed` 置回 `false`。debug 端口共 10 根，绝不允许在最终 bitstream 中处于“未约束、由工具自动分配”的状态。
+若以后更换晶振或改板，必须重新执行本节核对并把 `constraintsReviewed` 置回
+`false`。12 个用户 I/O 绝不允许在最终 bitstream 中处于“未约束、由工具自动
+分配”的状态。
 
 ## 9. 仿真步骤
 
@@ -302,7 +363,7 @@ OS 轮询+超时)、`mcp4725_ctrl.v`(仅 Fast Write,pending+overrun 缓冲),
 232 FF / 20 I/O 与 legacy 基线一致,方波路径未受影响。**7 键 RTL 仍是
 legacy baseline**,真实硬件(3×LM393 → 3-bit 编码)迁移在上板前单独进行。
 
-### 12.2 3-bit 传感器输入基础设施(P2,IMPLEMENTED / STANDALONE)
+### 12.2 3-bit 传感器输入基础设施(P2,IMPLEMENTED / SIMULATED / INTEGRATED)
 
 P2 四个提交(p2a/p2b/p2c + 文档 p2e)已落地:`src/input/` 下的 `sensor_code_decoder.v`
 (编码表语义边界,000=静音,001~111=C4~B4)、`sensor_code_filter.v`
@@ -310,11 +371,10 @@ P2 四个提交(p2a/p2b/p2c + 文档 p2e)已落地:`src/input/` 下的 `sensor_c
 一次性更新,杜绝 001→011→111 逐 bit 滤波的短暂错音)、`sensor_code_frontend.v`
 (极性归一化 → 复用 `key_sync` WIDTH=3 两级同步 → 原子滤波 → 解码),
 配套三个 TB(8/29/6 checks)与 4 个仿真(含 ACTIVE_HIGH=0 低有效套件)。
-状态:**NOT_INTEGRATED**(顶层未实例化)、**BOARD PINS TODO**(3 个 LM393
-输入引脚待用户逐脚确认,见 doc/README.md §12.2);legacy 7-key 路径零改动,
-综合仍为 232 FF / 20 I/O。验收:verify-20260916-015815-edd2f5fa 全量 PASS。
+状态:**INTEGRATED**(经 `finger_piano_system` 进入 Stage-2 顶层,引脚
+P28/P29/P30 已冻结)。验收:verify-20260916-015815-edd2f5fa 全量 PASS。
 
-### 12.3 DDS 正弦音频发生器(P3,IMPLEMENTED / SIMULATED / NOT_INTEGRATED / NOT_BOARD_TESTED)
+### 12.3 DDS 正弦音频发生器(P3,IMPLEMENTED / SIMULATED / INTEGRATED / NOT_BOARD_TESTED)
 
 P3 六个提交(A~F)已落地:`src/audio/sine_lut_12bit.v`(quarter-wave
 65×11 bit 查表,256 相位合成,范围 256~3840,中心 2048)、
@@ -325,9 +385,9 @@ P3 六个提交(A~F)已落地:`src/audio/sine_lut_12bit.v`(quarter-wave
 与方波 frequency_table.md 分开维护)。验收:17 个仿真全 PASS——七音零交叉
 实测误差全部 ≤0.4%,phase increment 与独立 real 数学计算逐位一致,12 MHz
 下 50 个 valid 间隔全部精确 1500 拍,ENABLE=0 恒 0x800/valid=0。
-**尚未连接 MCP4725(P4),不得声称 DDS 硬件已验证。**
+**已进入 Stage-2 顶层(P4/P6B),但 DDS/模拟音频硬件从未上板验证。**
 
-### 12.4 DDS → MCP4725 数字音频链路(P4,IMPLEMENTED / SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED)
+### 12.4 DDS → MCP4725 数字音频链路(P4,IMPLEMENTED / SIMULATED / INTEGRATED / NOT_BOARD_TESTED)
 
 P4 四个提交(p4a/p4b/p4c+d/p4f)已落地:`src/audio/dds_mcp4725_pipeline.v`(纯结构化
 集成层:DDS 固定 8 kS/s 时间轴直连 mcp4725_ctrl,无第二采样计数器、无
@@ -338,12 +398,13 @@ FIFO、无 ready 反馈进入 DDS)+ `sim/tb_dds_mcp4725_pipeline.v`(scoreboard
 错误),ready 在每个 valid 时为 1,最大事务延迟 1014 clk < 1500 clk,
 捕获流频率抽检 C4 −0.02% / A4 +0.01% / B4 +0.04%,地址可参数化(0x61
 验证),NACK 丢弃样点不重传且可恢复,mid-transaction reset 干净恢复,
-EEPROM 写全程 0。状态:**端到端数字音频流 PASS**;模拟输出/重构滤波/
-LM386 未验证(§39/§40)。
+EEPROM 写全程 0。状态:**端到端数字音频流 PASS,已进入 Stage-2 顶层**
+(DAC I²C 引脚 P102/P103 已冻结);模拟输出/重构滤波/LM386 仍未验证
+(§39/§40)。
 
 
 
-### 12.5 压力数据处理(P5,IMPLEMENTED / SIMULATED / ZERO CALIBRATION NOT MEASURED / NOT_TOP_INTEGRATED)
+### 12.5 压力数据处理(P5,RTL-INTEGRATED / SYSTEM-SIMULATED / 当前 Stage-2 综合中 INTENTIONALLY SYNTHESIS-TRIMMED / ZERO CALIBRATION NOT MEASURED)
 
 P5 五个提交(p5a/p5b/p5c/p5d + p5f)已落地:`src/pressure/` 三模块 ——
 `pressure_frame_capture.v`(三通道轮询扫描帧原子锁存,frame_valid 单 clk)、
@@ -357,15 +418,31 @@ stale timeout。三个 `CFG_PRESSURE_CHx_ZERO` 默认 0(**UNMEASURED DEFAULT**),
 验收:25 个仿真全 PASS,含端到端用例(负码/1000/2500 + 零点 0/100/200 →
 0/900/2300 经真实 I2C driver)。
 
-### 12.6 stage-2 系统集成(P6A,SYSTEM DIGITAL CORE = SIMULATED / STANDALONE)
+**P6B 之后的实际归属**:P5 已由 `finger_piano_system` 实例化并进入正式
+Stage-2 顶层,系统级仿真(含真实 I²C driver)全部 PASS。但当前 12 脚 Stage-2
+顶层**没有压力数据的硬件消费方**(`pressure_ch0/1/2`/`pressure_valid` 不引出
+引脚,压力→音量/音高映射属于后续独立计划),因此 XST 在本设计中**合法地
+trim 掉 ADS1115 压力链与相关 debug 出口**,并产生 166 条已审阅的
+"unconnected/constant, will be trimmed" 告警(见 §13 第十四轮的白名单)。
+**这是有意为之、不是缺陷**:不得用 `KEEP`/`DONT_TOUCH` 或假消费者去对抗
+优化;等后续实现 pressure→audio 消费方后,该层级会自然保留在网表中。
 
-P6A 五个提交(p6a~p6e)已落地:`src/system/finger_piano_system.v`——
-P1~P5 模块的**纯结构化连接层**(sensor frontend → note_code → DDS/MCP4725
+### 12.6 stage-2 系统集成(P6A + P6B,STAGE2 TOP = INTEGRATED / IMPLEMENTED / NOT_BOARD_TESTED)
+
+P6A 五个提交(p6a~p6e)落地 `src/system/finger_piano_system.v`——P1~P5
+模块的**纯结构化连接层**(sensor frontend → note_code → DDS/MCP4725
 pipeline;ADS1115 controller → pressure_processor),ENABLE_ADC/ENABLE_DAC
 独立门控,无系统总控 FSM、无 reset_sync 重复实例化、压力链与音符链解耦、
-两条 I²C 物理总线保持独立。`project.json` 已加入 sources 与 7 个系统级仿真;
-**top 仍是 legacy `finger_piano_top`,legacy 网表 232 FF / 20 I/O 不变**
-(system 模块被编译后被 trim,未进入 legacy 数据路径)。
+两条 I²C 物理总线保持独立。
+
+P6B 落地正式物理顶层 `src/finger_piano_stage2_top.v`(wrapper only:
+`reset_sync` + `finger_piano_system` + `note_debug = note_code`)、
+`sim/tb_finger_piano_stage2_top.v`(29 checks)与冻结 12 脚 UCF;
+`project.json` 的 `top` 已切为 `finger_piano_stage2_top`。综合
+12 IOs / 417 FF / 1101 LUT,实现 MAP/PAR 0/0、`Timing Score: 0`,
+`TS_clk = PERIOD 83.33 ns` 0 timing errors、最差 slack 70.968 ns;
+全量 verify Overall PASS(33 仿真)。legacy `finger_piano_top` 与其
+6 个仿真用例继续保留作回归参考。
 
 系统级 TB(`sim/tb_finger_piano_system.v`,真实 12 MHz 节拍 + 真实 10 ms
 滤波门限)验证(P6 计划 §17~§28):
@@ -379,8 +456,9 @@ pipeline;ADS1115 controller → pressure_processor),ENABLE_ADC/ENABLE_DAC
 - ENABLE 四种组合(11/00/10/01),关闭侧总线静默监视;
 - longrun:真实 860 SPS 下 C4 连续 8224 样点逐点匹配,8319 DAC 帧 +
   223 ADC 帧零错误。
-状态:**SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED**。P6B(final
-top / UCF 迁移)被 7 个接口引脚的人工确认阻塞,Agent 不得自行推进。
+状态:**STAGE2 TOP SIM = PASS / INTEGRATED / IMPLEMENTED;BOARD =
+NOT_TESTED;未执行任何 `program`**。物理上板(传感器、I²C 器件、模拟音频)
+从未验证。
 
 ## 13. 验证记录
 
