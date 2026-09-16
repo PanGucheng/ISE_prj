@@ -509,6 +509,32 @@ NOT_TESTED;未执行任何 `program`**。物理上板(传感器、I²C 器件、
 
 ## 13. 验证记录
 
+### 第十六轮:P9 ADS1115/MCP4725 板级诊断工程(periph_test,2026-09-17)
+
+正式工程**零修改**(仅文档)。新增独立工程
+`projects/finger_piano_periph_test/`(详见其 README):诊断顶层
+`periph_test_top.v`(ADS1115 controller + MCP4725 诊断源/controller +
+dbg_alive/dbg_adc/dbg_error 三个状态脚,P57/P3/P31/P32/P102/P103/
+P110/P111/P113 九脚冻结)、`dac_diag_source.v`(DC 0x400/0x800/0xC00 与
+1 kHz/8 kS/s 八点波形,常量经 round(1792·sin) 离线复核)、7 个仿真与
+UCF。**严禁在本工程副本内单独修改复用 RTL**;改动先入正式工程再同步。
+
+- 仿真 7/7 PASS:normal/adc_nack/dac_nack/dac_400/dac_c00/dac_1khz/
+  heartbeat_real——复位态、heartbeat 周期、ADS 帧 toggle、DC 码精确
+  捕获、1 kHz 循环序列 + 8 kS/s cadence、双向 NACK 隔离 + sticky
+  (仅 reset 清)、0 error/overrun/EEPROM。
+- verify-20260917-004113-3c4a791f Overall PASS(综合 0 errors;144 条
+  trim 为结构性良性——ADC 转换值 P9 §12 明确不消费、TEST_MODE 编译期
+  常量 DC 使 DAC 载荷恒定,已逐条审核进本工程独立 allowlist,任何新
+  warning/漂移仍 FAIL;正式工程的 166 条 allowlist 未动)。
+- implement `20260917-004237-e5b4c5b2`:MAP/PAR 0/0,317 FF,
+  9 bonded IOB 全部 LOCATED;timing.twr 人工阅读:0 timing errors,
+  `All constraints were met.`。
+- bitstream `20260917-004330-18966658`:54 738 字节,SHA256
+  `9654a942…f764ae09a`,DRC 0/0。**软件阶段到此停止,BOARD TEST =
+  WAITING USER**;烧录必须由用户明确要求并带 `-ConfirmHardwareWrite`,
+  板测后是否恢复 Stage-2 ISF 由用户决定(P9 §37)。
+
 ### 第十五轮:P8 DDS 数字音量控制基础设施(audio_gain + gain pipeline,2026-09-17)
 
 **未改正式 Stage-2 top/UCF、未改 DDS/MCP4725/allowlist**;新增

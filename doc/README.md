@@ -33,6 +33,7 @@
 | P6 stage-2 系统集成 | **P6 COMPLETE**：STAGE2 TOP = IMPLEMENTED / SIMULATED / IMPLEMENTED（综合+实现+时序通过）；BOARD = NOT_TESTED | 是 | NO |
 | P7 启动/时钟板级验证 | **SOFTWARE PREPARATION = COMPLETE**（独立诊断工程 `finger_piano_clock_test`，verify/implement/bitstream 全过）；HARDWARE TEST = WAITING USER | 独立工程 | WAITING USER |
 | P8 数字音量 | SIMULATED / STANDALONE（DDS→gain→MCP4725 端到端通过；刻意不接 Stage-2 顶层；PRESSURE→VOLUME = NOT_IMPLEMENTED，FSR = NOT_CALIBRATED） | NO（刻意） | NO（BOARD AUDIO VOLUME = NOT_TESTED） |
+| P9 ADC/DAC 板级诊断 | **READY_FOR_BOARD_TEST**（独立诊断工程 `finger_piano_periph_test`：7 仿真 + verify/implement/bitstream 全过、SHA256 已记录）；BOARD TEST = WAITING USER | 独立工程 | WAITING USER（烧录须用户明确授权） |
 
 **P1~P6 已全部完成并交叉集成**：正式 Stage-2 顶层 `finger_piano_stage2_top`
 （12 个用户 I/O，引脚 2026-09-16 逐脚冻结）已通过全量 verify（Overall PASS，
@@ -45,6 +46,19 @@ P7 已新建独立诊断工程 `projects/finger_piano_clock_test`（P110=2 MHz�
 P111=100 kHz、P113=1 kHz，clk=P57、rst_n=P3），软件侧（仿真 / 综合 /
 实现 / bitstream）全部通过，停在 `READY_FOR_BOARD_TEST`，等待用户明确授权后
 再做 JTAG / ISF 写入与实测。
+
+P8 建成 `DDS → audio_gain_12bit → MCP4725` 纯数字音量基础设施
+（3-bit level、围绕 2048 缩放、shift/add 零乘法器，单元 43126 checks +
+端到端 3859 checks 全过），刻意保持 STANDALONE；压力→音量映射与真实
+音量标定等待 FSR 实物数据（NOT_CALIBRATED）。
+
+P9 已新建独立诊断工程 `projects/finger_piano_periph_test`
+（clk=P57、rst_n=P3、ADS=P31/P32、DAC=P102/P103、dbg_alive/adc/error=
+P110/P111/P113），软件侧全部通过、bitstream SHA256 已记录，停在
+`READY_FOR_BOARD_TEST`：板测时先看 P110 是否翻（FPGA/时钟/复位），
+再看 P113（sticky I2C 错误）与 P111（ADS 帧活动），最后用万用表/
+示波器测 DAC 0x400/0x800/0xC00 单调性与 1 kHz 波形；实测表在工程
+README。板测完成后是否恢复 Stage-2 ISF 由用户决定。
 
 ### 0.2 事实来源优先级（冲突时以此为准）
 
@@ -176,6 +190,7 @@ tone_generator → audio_out
 | P6 | [P6 最终顶层迁移与系统级数字集成计划](./P6最终顶层迁移与系统级数字集成计划.md) | stage-2 system core 纯数字集成 + 系统级仿真 + final top/UCF 迁移 | P1+P2+P3+P4+P5 | 是（P6A+P6B 全部完成） |
 | P7 | [P7 FPGA 启动与时钟分频板级验证计划](./P7FPGA启动与时钟分频板级验证.md) | 独立诊断工程的 FPGA 启动 / 12 MHz 时钟 / 分频 / ISF 冷启动板级验证 | P6 | 独立工程 `finger_piano_clock_test`（软件侧完成） |
 | P8 | [P8 DDS 数字音量控制基础设施开发计划](./P8_DDS数字音量控制基础设施开发计划.md) | DDS 样点围绕 2048 的 3-bit 数字增益（shift/add，无乘法器）与 DDS→gain→MCP4725 端到端链 | P1+P3+P4 | 否（刻意 STANDALONE） |
+| P9 | [P9 ADS1115 与 MCP4725 板级诊断工程计划](./P9_ADS1115与MCP4725板级诊断工程计划.md) | ADC/DAC 板级排故诊断 bitstream（heartbeat / ADS 帧 toggle / sticky error / DAC DC+1kHz 模式） | P1~P7；建议 P8 后 | 独立工程 `finger_piano_periph_test`（软件侧完成） |
 
 这些计划的共同原则是：
 

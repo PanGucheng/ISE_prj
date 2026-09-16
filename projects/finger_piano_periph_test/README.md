@@ -56,11 +56,19 @@ BOARD TEST                    = WAITING USER
 | 项 | 值 |
 |---|---|
 | DAC_TEST_MODE | 0(0x800 DC;其余模式在仿真侧验证,烧录前按需重构建) |
-| run id | TODO(E 阶段填写) |
-| SHA256 | TODO |
-| size | TODO |
+| run id | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) |
+| SHA256 | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` |
+| size | 54 738 字节(DRC 0 errors / 0 warnings) |
 | device | xc3s50an-4-tqg144 |
-| commit | TODO |
+| commit | `261eea5`(p9a-d)+ 本文档提交 |
+
+implement 记录(人工阅读 `map.log` / `routed.pad` / `timing.twr`):
+MAP/PAR **0 errors / 0 warnings**,317 FF / 455 slices,**9 个 bonded IOB
+全部 `LOCATED`** 且与 §3 冻结表逐脚一致(P57/P3/P31/P32/P102/P103/
+P110/P111/P113,全部 LVCMOS33),无自动分配 I/O;`TS_clk = 83.33 ns` →
+**0 timing errors**(setup/hold/switching 全 0),`All constraints were met.`。
+结论边界(P9 §51/§35):这是 DIGITAL IMPLEMENTATION PASS,不构成
+I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
 
 ## 板测记录表(P9 §34,实测值必须由用户填写)
 
