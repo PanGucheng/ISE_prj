@@ -73,18 +73,55 @@ pwsh -File .\ise.ps1 build -Project finger_piano_clock_test -Stage bitstream
 `0 errors / 0 warnings / 0 latches`。实现后人工阅读 `timing.twr`，确认
 `TS_clk = PERIOD 83.33 ns` 满足。
 
-## 6. 状态
+## 6. 软件准备结果（2026-09-16）
 
 ```text
-P7 SOFTWARE PREPARATION   = COMPLETE (待本轮运行结果)
-HARDWARE TEST             = WAITING USER
-BOARD MEASUREMENT         = TODO (由用户实测填写,Agent 不得编造)
+verify      verify-20260916-161314-e4afa190   Overall PASS
+            synthesis 0 errors / 0 warnings / 0 latches（未使用任何 allowlist）
+            simulation clock_test_top  PASS
+            implement gate open
+
+implement   20260916-161330-82a13ebe
+            MAP 0 errors / 0 warnings；PAR 0 errors / 0 warnings；
+            All signals are completely routed；Timing Score: 0
+            routed_pad: P57 clk / P3 rst_n / P110 ref_2mhz /
+            P111 ref_100khz / P113 ref_1khz 全部 LOCATED，5 bonded IOBs，
+            无自动分配 I/O
+            timing.twr（人工阅读）: TS_clk = PERIOD clk_group 83.33 ns，
+            0 timing errors，Minimum period 7.670 ns，最差 slack 75.660 ns，
+            All constraints were met.
+
+bitstream   20260916-161405-0050b850
+            path   : results/design.bit
+            size   : 54738 bytes
+            target : xc3s50an tqg144（bitgen DRC 0 errors / 0 warnings）
+            SHA256 : 9E1DBC034C1B05CD2BF1ED623FCB826783FD6081CF166DEACA8C78DB47DC40D4
+```
+
+### 6.1 Stage-2 恢复 bitstream（recovery artifact）
+
+```text
+finger_piano  20260916-161434-96853257
+              size   : 54738 bytes
+              SHA256 : 65A18EE6F191CC72DF9B9793B2308423AF530F3E8CCC37DFF55A8B07BD3518BA
+              source : finger_piano_stage2_top @ commit bd85e3a（或之后仅文档提交）
+```
+
+DO NOT PROGRAM（除非用户明确授权）。这只是把正式 Stage-2 镜像也构建好，
+方便诊断 ISF 测试后恢复。
+
+## 7. 状态
+
+```text
+P7 SOFTWARE PREPARATION   = COMPLETE
+HARDWARE TEST             = WAITING USER（READY_FOR_BOARD_TEST）
+BOARD MEASUREMENT         = TODO（由用户实测填写，Agent 不得编造）
 ```
 
 生成 bitstream 后本工程停在 `READY_FOR_BOARD_TEST`。**不执行任何 JTAG /
 ISF `program`**，除非用户明确授权并带 `-ConfirmHardwareWrite`。
 
-## 7. 板测记录（用户实测后填写）
+## 8. 板测记录（用户实测后填写）
 
 | 项目 | 理论 | 实测 | 误差 |
 |---|---|---|---|

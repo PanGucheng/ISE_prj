@@ -25,19 +25,25 @@
 
 | Plan | 状态 | 顶层接入 | 板测 |
 |---|---|---|---|
-| P1 ADC/DAC drivers | SIMULATED（IMPLEMENTED / STANDALONE，默认关闭） | NO | NO |
-| P2 3-bit input | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
-| P3 DDS | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
-| P4 DDS → MCP4725 | SIMULATED（IMPLEMENTED / STANDALONE，端到端数字链通过，未接顶层） | NO | NO |
-| P5 Pressure processor | SIMULATED（IMPLEMENTED / STANDALONE，零点未实测 NOT_CALIBRATED，未接顶层） | NO | NO |
+| P1 ADC/DAC drivers | SIMULATED / INTEGRATED（经 `finger_piano_system` 接入 stage-2；ADS1115 压力链当前被综合 trim） | 是 | NO |
+| P2 3-bit input | SIMULATED / INTEGRATED（`sensor_async` P28/P29/P30） | 是 | NO |
+| P3 DDS | SIMULATED / INTEGRATED（经 P4 进入 stage-2 顶层） | 是 | NO |
+| P4 DDS → MCP4725 | SIMULATED / INTEGRATED（`dac_i2c` P102/P103） | 是 | NO |
+| P5 Pressure processor | RTL-INTEGRATED / SYSTEM-SIMULATED；当前无硬件消费方，Stage-2 综合中有意 trim；`NOT_CALIBRATED` | 逻辑是 / 综合 trim | NO |
 | P6 stage-2 系统集成 | **P6 COMPLETE**：STAGE2 TOP = IMPLEMENTED / SIMULATED / IMPLEMENTED（综合+实现+时序通过）；BOARD = NOT_TESTED | 是 | NO |
+| P7 启动/时钟板级验证 | **SOFTWARE PREPARATION = COMPLETE**（独立诊断工程 `finger_piano_clock_test`，verify/implement/bitstream 全过）；HARDWARE TEST = WAITING USER | 独立工程 | WAITING USER |
 
-**P1~P5 五份计划已全部实现并通过全量仿真与综合**（最新全量:
-verify-20260916-031854-e3c00f1e Overall PASS,25 个仿真全部 PASS,综合
-0 errors / 0 warnings / 0 latches,232 FF / 20 IOs 与 legacy 基线一致）。
-五个扩展阶段全部是 standalone 基础设施:默认关闭、未接顶层、未上板;
-真正接入 `finger_piano_top` 的顶层迁移(含 3 个 LM393 输入与两套 I²C 共
-7 个新引脚的逐脚确认)必须在用户确认管脚后按 §31 的迁移计划单独执行。
+**P1~P6 已全部完成并交叉集成**：正式 Stage-2 顶层 `finger_piano_stage2_top`
+（12 个用户 I/O，引脚 2026-09-16 逐脚冻结）已通过全量 verify（Overall PASS，
+33 仿真）、实现（MAP/PAR 0/0）与人工时序复核（`TS_clk = PERIOD 83.33 ns`，
+0 timing errors）。当前 12 脚顶层没有压力数据消费方，ADS1115 压力链被 XST
+合法 trim（已审阅告警白名单，见工程 README §12.5/§13）。**从未烧录，板卡
+功能 = NOT_TESTED；FSR = NOT_CALIBRATED。**
+
+P7 已新建独立诊断工程 `projects/finger_piano_clock_test`（P110=2 MHz、
+P111=100 kHz、P113=1 kHz，clk=P57、rst_n=P3），软件侧（仿真 / 综合 /
+实现 / bitstream）全部通过，停在 `READY_FOR_BOARD_TEST`，等待用户明确授权后
+再做 JTAG / ISF 写入与实测。
 
 ### 0.2 事实来源优先级（冲突时以此为准）
 
@@ -167,6 +173,7 @@ tone_generator → audio_out
 | P4 | [DDS 到 MCP4725 数字音频链路集成计划](./DDS到MCP4725数字音频链路集成计划.md) | DDS 与 DAC controller 端到端吞吐 | P1 + P3 | 否 |
 | P5 | [ADS1115 压力数据处理与标定基础设施开发计划](./ADS1115压力数据处理与标定基础设施开发计划.md) | ADC raw → 干净的三路压力数据 | P1 | 否 |
 | P6 | [P6 最终顶层迁移与系统级数字集成计划](./P6最终顶层迁移与系统级数字集成计划.md) | stage-2 system core 纯数字集成 + 系统级仿真 + final top/UCF 迁移 | P1+P2+P3+P4+P5 | 是（P6A+P6B 全部完成） |
+| P7 | [P7 FPGA 启动与时钟分频板级验证计划](./P7FPGA启动与时钟分频板级验证.md) | 独立诊断工程的 FPGA 启动 / 12 MHz 时钟 / 分频 / ISF 冷启动板级验证 | P6 | 独立工程 `finger_piano_clock_test`（软件侧完成） |
 
 这些计划的共同原则是：
 
