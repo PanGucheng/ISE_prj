@@ -384,6 +384,61 @@ top / UCF 迁移)被 7 个接口引脚的人工确认阻塞,Agent 不得自行�
 
 ## 13. 验证记录
 
+### 第十四轮:P6B 最终顶层与 UCF 迁移(2026-09-16)
+
+**这是本工程第一次把真实 3-bit 传感器 + 双 I²C 架构作为正式 FPGA 顶层。**
+未改任何 P1~P6A 已验证 RTL(仅新增顶层与 TB)。提交序列:`p6b`(计划文档
+392336e)→ `p6ba`(98e8960,stage2 top 源文件)→ `p6bb`(9c2c507,stage2 top TB
+与仿真入口)→ `p6bc`(43bd961,UCF 迁移)→ verify 白名单工具提交(f9693bd)→
+`p6bd`(754c07c,top 切换)→ 全量 verify(本轮)。
+
+- **新顶层** `src/finger_piano_stage2_top.v`:`wrapper only`——外部 `rst_n`
+  → 现有 `reset_sync` → `rst_n_sync` → `finger_piano_system`;
+  `assign note_debug = note_code`。不重实现任何子系统,不含 legacy
+  `key_in[6:0]`/`audio_out`,两条 I²C 仍完全独立,全工程仍单 `clk` 域。
+- **引脚冻结(用户 2026-09-16 确认,全部 LVCMOS33,VCCO=3.3 V)**:
+  `clk`=P57、`rst_n`=P3、`sensor_async[0..2]`=P28/P29/P30、
+  `adc_i2c_scl/sda`=P31/P32、`dac_i2c_scl/sda`=P102/P103、
+  `note_debug[0..2]`=P110/P111/P113。共 **12 个用户 I/O**,XST 实测
+  `Number of IOs: 12`。不使用 P76/P77 等配置期 DUAL 脚。
+- **新 UCF**(`constraints/finger_piano.ucf`)按功能重整:
+  SYSTEM CLOCK / RESET / 3-BIT SENSOR INPUT / ADS1115 I2C / MCP4725 I2C /
+  NOTE DEBUG / TIMING;删除 legacy 无效 NET(`key_in*`/`key_debug*`/
+  `audio_out`/旧 `note_debug`);不写 PULLUP,不给 I²C SCL 建时钟域(唯一
+  `TNM_NET`/`TIMESPEC` 仍只在 `clk`,`TS_clk = PERIOD 83.33 ns`)。
+- **stage2 top TB**(`sim/tb_finger_piano_stage2_top.v`,29 checks 全过):
+  复位态 `note_debug=000` 且双总线释放;真实 10 ms 门限下
+  `sensor 000/001/011/111/000 → note_debug 0/1/3/7/0`;note 1/7/mute 都产生
+  MCP4725 Fast Write(mute 段逐样点 0x800);ADS 模型 1000/2000/3000 →
+  系统内部 pressure frame;双总线事务 > 0 且 `adc_error`/`dac_error`/
+  `dac_overrun` 全 0;无 EEPROM 命令;再次复位干净。运行:
+  `sim-20260916-154045-3f5a4e43`(单测另见 `sim-20260916-152125-85857e36`)。
+- **综合裁掉的是没有硬件消费方的层级(有意,非缺陷)**:12 脚顶层没有
+  消费 `pressure_ch0/1/2`/`pressure_valid`/`sensor_code_stable`/
+  `adc_error`/`dac_error`/`dac_overrun` 以及 DDS/MCP debug 口的引脚,因此
+  XST 合法地把 ADS1115 压力链与 debug 出口整段 trim,并报 166 条
+  "unconnected/constant, will be trimmed" 告警(`Xst:2677`×155、
+  `Xst:646`×2、`Xst:1710`×4、`Xst:1895`×5)。这类告警**不是**功能/时序
+  问题,但会触发 `failOnSynthesisWarnings`。经用户批准,工具新增
+  `verification.synthesisWarningAllowlist`(窄口径、逐条 id+正则+期望计数),
+  **保持 `failOnSynthesisWarnings=true`**:只有这 166 条已审阅条目算
+  allowed,任何其他 warning、新路径或计数漂移仍判 FAIL(原始 `.srp` 不改写,
+  不使用 `XIL_XST_HIDEMESSAGES`,也不加 KEEP/DONT_TOUCH/假消费者)。
+  P5 压力处理因此是 **RTL-INTEGRATED / SYSTEM-SIMULATED,但在当前 12 脚
+  Stage-2 综合中被有意 trim**(无硬件消费方),待后续实现 pressure→audio
+  消费方后自然保留在网表中。
+- **综合基线**(run `20260916-153555-b4d6b31b`):0 errors / 0 latches,
+  warnings 166(166 allowed / 0 unexpected),**12 IOs**、417 FF、1101 LUT、
+  578 slices、1 GCLK。与 legacy 232 FF / 20 IOs 不同属正常(P6B §31)。
+- **全量 verify**(`verify-20260916-153554-00e49086`)Overall **PASS**,
+  Stage `IMPLEMENT_ALLOWED`:配置/静态检查 PASS,综合 0 errors / 166 allowed /
+  0 unexpected / 0 latches,implement 门禁 PASS;**33 个仿真全部 PASS**
+  (legacy 6 + P1 3 + P2 4 + P3 4 + P4 4 + P5 4 + 系统 7 + stage2_top 1),
+  legacy/P1~P6A 回归零失败。
+
+状态:STAGE2 TOP = IMPLEMENTED;STAGE2 TOP SIM = PASS;UCF = CONFIRMED;
+BOARD = **NOT_TESTED**;未执行任何 `program`。实现/时序见下一节。
+
 ### 第十三轮:P6A stage-2 系统数字集成(system core + 系统级仿真,2026-09-16)
 
 **未改任何 legacy RTL、顶层端口与 UCF**;新增 `src/system/finger_piano_system.v`
