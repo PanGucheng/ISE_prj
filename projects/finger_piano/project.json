@@ -63,6 +63,11 @@
       "library": "work"
     },
     {
+      "path": "src/system/finger_piano_system.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/reset_sync.v",
       "language": "verilog",
       "library": "work"
