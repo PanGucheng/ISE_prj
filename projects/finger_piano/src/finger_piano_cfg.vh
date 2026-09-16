@@ -79,9 +79,11 @@
 // MCP4725 controller(P4 计划),本阶段全部不做,保持 0。
 `define CFG_ENABLE_DDS        0
 
-// DDS 相位累加器位宽(P3 冻结 24 bit);DDS 频率表只适用于 8 kS/s +
-// 24 bit,改采样率/位宽必须重新生成 phase increment 表。
-`define CFG_DDS_PHASE_BITS    24
+// DDS 相位累加器位宽:P3 冻结为 24 bit 的**固定实现**(dds_sine_generator.v
+// 内 `reg [23:0] phase_acc`);DDS 频率表只适用于 8 kS/s + 24 bit,改采样率/
+// 位宽必须重新生成 phase increment 表。
+// P6 收尾:原 `CFG_DDS_PHASE_BITS` 宏已删除——它没有任何 RTL 消费,属于
+// "看起来可改、实际不影响 RTL"的伪参数;位宽真值就是 RTL 本身。
 
 // ADS1115 采样参数(doc/ads1115.pdf 8.1.3 Config 寄存器):
 //   PGA[2:0] = 001 -> FSR = +-4.096 V

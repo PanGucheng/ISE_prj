@@ -30,6 +30,7 @@
 | P3 DDS | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P4 DDS → MCP4725 | SIMULATED（IMPLEMENTED / STANDALONE，端到端数字链通过，未接顶层） | NO | NO |
 | P5 Pressure processor | SIMULATED（IMPLEMENTED / STANDALONE，零点未实测 NOT_CALIBRATED，未接顶层） | NO | NO |
+| P6 stage-2 系统集成 | P6A 进行中（system core 纯数字集成，final top 迁移待用户确认引脚） | P6A: NO / P6B: 待确认 | NO |
 
 **P1~P5 五份计划已全部实现并通过全量仿真与综合**（最新全量:
 verify-20260916-031854-e3c00f1e Overall PASS,25 个仿真全部 PASS,综合
@@ -165,6 +166,7 @@ tone_generator → audio_out
 | P3 | [DDS 正弦音频发生器开发计划](./DDS正弦音频发生器开发计划.md) | 8 kS/s、24-bit DDS、12-bit 正弦样点 | P1 的统一配置 | 否 |
 | P4 | [DDS 到 MCP4725 数字音频链路集成计划](./DDS到MCP4725数字音频链路集成计划.md) | DDS 与 DAC controller 端到端吞吐 | P1 + P3 | 否 |
 | P5 | [ADS1115 压力数据处理与标定基础设施开发计划](./ADS1115压力数据处理与标定基础设施开发计划.md) | ADC raw → 干净的三路压力数据 | P1 | 否 |
+| P6 | [P6 最终顶层迁移与系统级数字集成计划](./P6最终顶层迁移与系统级数字集成计划.md) | stage-2 system core 纯数字集成 + 系统级仿真 + final top/UCF 迁移 | P1+P2+P3+P4+P5 | P6A 否；P6B 待用户逐脚确认 |
 
 这些计划的共同原则是：
 
@@ -214,6 +216,12 @@ P4  DDS → MCP4725 pipeline
 P5  ADS1115 pressure processing
  ↓
 完整 verify
+ ↓
+P6A stage-2 system core（纯数字集成,不动 legacy top/UCF）
+ ↓
+完整 verify
+ ↓
+P6B final top / UCF 迁移（**被阻塞:待用户逐脚确认 7 个接口引脚**）
 
 任何阶段出现回归失败：
 
@@ -615,7 +623,7 @@ note_debug<0..2> P24 P25 P27
 
 - 池中**不含** `P8`、`P11`、`P16`、`P18`、`P24`。这 5 根当前在用，但**没有被确认可用于改接**；迁移时不得把它们当作可用资源。
 - `P1`/`P2`（TMS/TDI）**永远保留给 JTAG**；`P9/P17/P26/P34`=GND、`P14/P23`=VCCO_3、`P40`=VCCO_2、`P22`=VCCINT、`P36`=VCCAUX、`P33/P35`=IPAD（仅输入），均不得作普通 I/O。
-- ⚠️ 现有 `constraints/finger_piano.ucf` 头部注释与 `projects/finger_piano/README.md` §7 仍写「可用 I/O 范围：P1..P40」（2026-09-14 的信息），已被本次 38 脚池取代；**这两处尚未同步**，待用户确认后再改（本轮不动 UCF）。
+- ⚠️ 现有 `constraints/finger_piano.ucf` 头部注释仍写「可用 I/O 范围：P1..P40」（2026-09-14 的信息），已被本次 38 脚池取代；`projects/finger_piano/README.md` §7 已于 2026-09-16 加注指向本节，**UCF 头部注释本身待 P6B 重整 UCF 时一并修订**（本轮不动 UCF）。
 
 迁移后需要新增的引脚：
 

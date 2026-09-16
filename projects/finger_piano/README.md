@@ -18,6 +18,10 @@
 
 ## 0. 当前状态（Toolchain Freeze v1 口径）
 
+> 本节记录 **legacy stage-1 baseline**（7-key 方波电子琴）当时的验证事实；
+> P1~P5 扩展（3-bit 输入、ADS1115 / MCP4725、DDS、压力处理）与系统集成的
+> 当前状态见 §12 与 §13 最近几轮记录，引脚池更新见 [`../../doc/README.md`](../../doc/README.md) §12.1。
+
 **已完成（均有真机或工具证据）**：RTL、综合（0 errors / 0 warnings）、6 个仿真用例、实现（MAP/PAR 0/0）、时序（`TS_clk = PERIOD 83.33 ns` 读 `timing.twr`：0 timing errors、最差 slack 70.697 ns）、bitstream（`design.bit` 54 738 字节）、**JTAG 易失配置**（`-Mode Jtag`）、**ISF erase/program/verify**（`-Mode Isf`，run `program-20260915-083244-bf54acda`）。
 
 **尚未完成（外围硬件未搭建，未做测量）**：
@@ -124,6 +128,12 @@ projects/finger_piano/
 ## 7. UCF 引脚约束（`constraints/finger_piano.ucf`）
 
 **已按用户确认的板卡信息填写完毕**（2026-09-14）：系统时钟 P57（12 MHz 有源晶振）、可用 I/O 为 P1–P40、I/O 电压 3.3 V（LVCMOS33）。当前分配：
+
+> ⚠️ **「可用 I/O 为 P1–P40」是 2026-09-14 的旧口径**，已被 2026-09-15 用户确认的
+> **38 脚引脚池**取代（池中不含 P8/P11/P16/P18/P24，见
+> [`../../doc/README.md`](../../doc/README.md) §12.1）。本表列出的 legacy LOC
+> 本身保持不变、UCF 本轮不动；stage2 迁移（P6B）将在用户逐脚确认 7 个新接口后
+> 按新引脚池重整 UCF，并同步修订本节与 UCF 头部注释。
 
 | 信号 | 引脚 | 说明 |
 |---|---|---|
@@ -294,7 +304,7 @@ legacy baseline**,真实硬件(3×LM393 → 3-bit 编码)迁移在上板前单�
 
 ### 12.2 3-bit 传感器输入基础设施(P2,IMPLEMENTED / STANDALONE)
 
-P2 五个提交(A~E)已落地:`src/input/` 下的 `sensor_code_decoder.v`
+P2 四个提交(p2a/p2b/p2c + 文档 p2e)已落地:`src/input/` 下的 `sensor_code_decoder.v`
 (编码表语义边界,000=静音,001~111=C4~B4)、`sensor_code_filter.v`
 (**整体码字原子滤波**:单一 candidate + 单一计数器,N-1 拍不更新、第 N 拍
 一次性更新,杜绝 001→011→111 逐 bit 滤波的短暂错音)、`sensor_code_frontend.v`
@@ -319,7 +329,7 @@ P3 六个提交(A~F)已落地:`src/audio/sine_lut_12bit.v`(quarter-wave
 
 ### 12.4 DDS → MCP4725 数字音频链路(P4,IMPLEMENTED / SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED)
 
-P4 六个提交(A~F)已落地:`src/audio/dds_mcp4725_pipeline.v`(纯结构化
+P4 四个提交(p4a/p4b/p4c+d/p4f)已落地:`src/audio/dds_mcp4725_pipeline.v`(纯结构化
 集成层:DDS 固定 8 kS/s 时间轴直连 mcp4725_ctrl,无第二采样计数器、无
 FIFO、无 ready 反馈进入 DDS)+ `sim/tb_dds_mcp4725_pipeline.v`(scoreboard
 逐样点比对 + 全局 ready/延迟/范围/EEPROM 监视,4 个仿真入口)。验收
@@ -335,7 +345,7 @@ LM386 未验证(§39/§40)。
 
 ### 12.5 压力数据处理(P5,IMPLEMENTED / SIMULATED / ZERO CALIBRATION NOT MEASURED / NOT_TOP_INTEGRATED)
 
-P5 六个提交(A~F)已落地:`src/pressure/` 三模块 ——
+P5 五个提交(p5a/p5b/p5c/p5d + p5f)已落地:`src/pressure/` 三模块 ——
 `pressure_frame_capture.v`(三通道轮询扫描帧原子锁存,frame_valid 单 clk)、
 `pressure_channel_corrector.v`(负码钳 0、不取绝对值、零点减法、下溢饱和,
 输出 15 bit unsigned)、`pressure_processor.v`(三通道包装,valid 与数据
