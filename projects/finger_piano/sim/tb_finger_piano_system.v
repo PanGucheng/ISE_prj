@@ -811,6 +811,43 @@ module tb_finger_piano_system;
     endtask
 
     //-------------------------------------------------------------------------
+    // MODE 3 — longrun(P6 §26):真实 12 MHz / 8 kS/s / ~333 kHz / 860 SPS,
+    // 固定 C4 连续播放 >8192 样点(约 1.03 s 音频时间),逐样点波形比对,
+    // 同时 ADC 持续扫描且零错误。
+    //-------------------------------------------------------------------------
+    task run_longrun;
+        integer target;
+        begin
+            @(posedge clk);
+            rst_n = 1'b1;
+
+            drive_sensor(3'd1);
+            wait_stable(3'd1);
+            skip_frames(16);
+            target = cap_total + 8224;
+            g = 0;
+            // 上限 2 s 仿真时间:10 ms 滤波等待(1.2e6 拍)+ 8224 x 1500 拍
+            // (1.23e7)还有充分余量
+            while ((cap_total < target) && (g < 20000000)) begin
+                @(posedge clk);
+                g = g + 1;
+            end
+            check_true(cap_total >= target, "longrun: samples collected in time");
+
+            check_note_wave(1, 8224);
+
+            check_true(pvalid_cnt > 0, "longrun: ADC frames > 0");
+            $display("  info: longrun stats: dac_frames=%0d adc_frames=%0d",
+                     u_dac_model.frame_cnt, pvalid_cnt);
+            check_eq32(adc_err_cnt,  0, "longrun: adc_error == 0");
+            check_eq32(dac_err_cnt,  0, "longrun: dac_error == 0");
+            check_eq32(dac_over_cnt, 0, "longrun: overrun == 0");
+            check_eq32(range_bad,    0, "longrun: no out-of-range samples");
+            check_eq32(note_code, 3'd1, "longrun: note still C4");
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
     // MODE 4/5/6 — ENABLE 组合(P6 §28)
     //-------------------------------------------------------------------------
     task run_disabled;
@@ -903,10 +940,7 @@ module tb_finger_piano_system;
             0: run_basic;
             1: run_dual;
             2: run_err_iso;
-            3: begin
-                errors = errors + 1;
-                $display("FAIL: longrun (mode 3) not built in this commit");
-            end
+            3: run_longrun;
             4: run_disabled;
             5: run_adc_only;
             6: run_dac_only;

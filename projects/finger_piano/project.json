@@ -462,6 +462,22 @@
       "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
     },
     {
+      "name": "system_stage2_longrun",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "3",
+        "TB_CONV_CYCLES": "13956"
+      },
+      "timeoutSeconds": 2400,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
       "name": "system_stage2_disabled",
       "top": "tb_finger_piano_system",
       "sources": [

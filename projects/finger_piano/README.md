@@ -357,7 +357,69 @@ stale timeout。三个 `CFG_PRESSURE_CHx_ZERO` 默认 0(**UNMEASURED DEFAULT**),
 验收:25 个仿真全 PASS,含端到端用例(负码/1000/2500 + 零点 0/100/200 →
 0/900/2300 经真实 I2C driver)。
 
+### 12.6 stage-2 系统集成(P6A,SYSTEM DIGITAL CORE = SIMULATED / STANDALONE)
+
+P6A 五个提交(p6a~p6e)已落地:`src/system/finger_piano_system.v`——
+P1~P5 模块的**纯结构化连接层**(sensor frontend → note_code → DDS/MCP4725
+pipeline;ADS1115 controller → pressure_processor),ENABLE_ADC/ENABLE_DAC
+独立门控,无系统总控 FSM、无 reset_sync 重复实例化、压力链与音符链解耦、
+两条 I²C 物理总线保持独立。`project.json` 已加入 sources 与 7 个系统级仿真;
+**top 仍是 legacy `finger_piano_top`,legacy 网表 232 FF / 20 I/O 不变**
+(system 模块被编译后被 trim,未进入 legacy 数据路径)。
+
+系统级 TB(`sim/tb_finger_piano_system.v`,真实 12 MHz 节拍 + 真实 10 ms
+滤波门限)验证(P6 计划 §17~§28):
+- 复位态输出确定、双总线释放;ADC 自动扫描 → pressure 1000/2000/3000;
+- 000~111 全码遍历:stable 门限门控切换,MCP 捕获音频与独立泰勒级数
+  LUT 模型(同 8-bit 相位量化)**逐样点匹配(±1 LSB)**;
+- CH0 源注入 500→5000→20000:压力跟随、note 与 DAC 流纹丝不动;音符
+  快速切换不打断 ADC 帧;
+- ADC NACK / DAC NACK 互相隔离;双总线事务中复位:总线释放、状态清零、
+  双链完整重启;
+- ENABLE 四种组合(11/00/10/01),关闭侧总线静默监视;
+- longrun:真实 860 SPS 下 C4 连续 8224 样点逐点匹配,8319 DAC 帧 +
+  223 ADC 帧零错误。
+状态:**SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED**。P6B(final
+top / UCF 迁移)被 7 个接口引脚的人工确认阻塞,Agent 不得自行推进。
+
 ## 13. 验证记录
+
+### 第十三轮:P6A stage-2 系统数字集成(system core + 系统级仿真,2026-09-16)
+
+**未改任何 legacy RTL、顶层端口与 UCF**;新增 `src/system/finger_piano_system.v`
+(纯连接层)、`sim/tb_finger_piano_system.v`(7 个 TB_MODE)、P1/P5 计划文档
+状态收尾与 cfg 宏清理(`CFG_DDS_PHASE_BITS` 伪参数删除)。提交序列:
+`p6a`(81e4008,文档)→ `p6b`(e7199cd,system core)→ `p6c`(c55e12d,
+基础系统 TB)→ `p6d`(3e40acf,双总线/隔离/ENABLE 组合)→ `p6e`(本文档)。
+
+- **system core(P6 §5~§14)**:sensor frontend → note_code →
+  dds_mcp4725_pipeline;ads1115_ctrl → pressure_processor 直连;
+  ENABLE_ADC/ENABLE_DAC 独立 generate 门控;无总控 FSM、无第二复位、
+  无压力→音符耦合、双 I²C 保持独立。加入 sources 但 top 不变,
+  综合 0 errors / 0 warnings,**232 FF / 20 I/O 与 legacy 基线一致**
+  (P6 §33 反向检查:模块被编译后 trim)。
+- **系统级 TB**:真实 12 MHz 节拍 + 宏 10 ms 滤波门限;MCP 捕获流与
+  **独立 real 泰勒级数 LUT 模型逐样点比对(±1 LSB,同 8-bit 相位量化
+  语义)**。本轮踩过并修掉:TB 时钟先用 100 MHz 导致全拍数常数失真;
+  system core 未透传 STABLE_MS 而 TB 按 1 ms 等待(stable 永远落后一档);
+  过零测频公式量纲/半周期因子错误且计数系统性缺漏(改为逐点波形匹配);
+  wave 期望误用 24-bit 精确相位(8-bit 量化差最高数百 LSB);MODE 1
+  窗口起点 k0 超出搜索上限;MODE 2 错误计数基线跨复位失效。
+- **7 个系统仿真全 PASS**:basic(58 checks:复位态、压力 1000/2000/3000、
+  全码遍历 768 样点/音逐点匹配、mute 恒 0x800)、dual_i2c(CH0 注入
+  500→5000→20000 压力跟随而 note/DAC 不变、切音符不断扫)、
+  error_isolation(ADC NACK ↔ DAC 隔离、双事务中复位干净重启)、
+  longrun(真实 860 SPS:C4 连续 8224 样点逐点匹配、8319 DAC 帧 +
+  223 ADC 帧、0 错误)、disabled/adc_only/dac_only(ENABLE 四组合 +
+  关闭侧总线静默监视)。
+
+**验收**:全量 verify Overall PASS(综合 0 errors / 0 warnings /
+0 latches,232 FF / 20 IOs 不变;32 个仿真全部 PASS:legacy 6 + P1 3 +
+P2 4 + P3 4 + P4 4 + P5 4 + 系统 7)。P6A 状态:**SYSTEM DIGITAL CORE =
+SIMULATED / NOT_TOP_INTEGRATED / NOT_BOARD_TESTED**;**FINAL TOP = NOT
+MIGRATED**——P6B(新增 stage2 top、UCF 重整、top 切换)必须等待用户对
+7 个接口引脚逐脚确认后才能开始。
+
 
 ### 第十二轮:P5 压力数据处理基础设施(frame capture / corrector / processor,2026-09-16)
 

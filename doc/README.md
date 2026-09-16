@@ -30,7 +30,7 @@
 | P3 DDS | SIMULATED（IMPLEMENTED / STANDALONE，未接顶层） | NO | NO |
 | P4 DDS → MCP4725 | SIMULATED（IMPLEMENTED / STANDALONE，端到端数字链通过，未接顶层） | NO | NO |
 | P5 Pressure processor | SIMULATED（IMPLEMENTED / STANDALONE，零点未实测 NOT_CALIBRATED，未接顶层） | NO | NO |
-| P6 stage-2 系统集成 | P6A 进行中（system core 纯数字集成，final top 迁移待用户确认引脚） | P6A: NO / P6B: 待确认 | NO |
+| P6 stage-2 系统集成 | P6A 完成：SYSTEM DIGITAL CORE = SIMULATED / STANDALONE；FINAL TOP = NOT MIGRATED（P6B 待用户逐脚确认 7 个引脚） | P6A: NO / P6B: 待确认 | NO |
 
 **P1~P5 五份计划已全部实现并通过全量仿真与综合**（最新全量:
 verify-20260916-031854-e3c00f1e Overall PASS,25 个仿真全部 PASS,综合
@@ -171,6 +171,10 @@ tone_generator → audio_out
 这些计划的共同原则是：
 
 先做独立 RTL 和可重复仿真，再做顶层和实物集成。
+
+P6（stage-2 系统集成）已按同一原则完成其 P6A 部分：`finger_piano_system`
+纯数字集成层 + 7 个系统级仿真全部通过；legacy 顶层/UCF 零改动，final top
+迁移（P6B）等待用户逐脚确认 7 个接口引脚后单独执行。
 
 ## 4. 推荐执行顺序
 
