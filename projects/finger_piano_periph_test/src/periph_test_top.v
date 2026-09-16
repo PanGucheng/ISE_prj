@@ -41,8 +41,8 @@ module periph_test_top #(
     inout  wire       dac_i2c_sda,
 
     output reg        dbg_alive,     // P110 heartbeat
-    output reg        dbg_adc,       // P111 ADC frame toggle
-    output reg        dbg_error      // P113 sticky error
+    output wire       dbg_adc,       // P111 ADC frame toggle
+    output wire       dbg_error      // P113 sticky error
 );
 
     //-------------------------------------------------------------------------

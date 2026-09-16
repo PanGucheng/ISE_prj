@@ -1,0 +1,183 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "periph_test_top",
+  "sources": [
+    {
+      "path": "src/periph/i2c_master.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/ads1115_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/mcp4725_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/reset_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/dac_diag_source.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph_test_top.v",
+      "language": "verilog",
+      "library": "work"
+    }
+  ],
+  "includeDirs": [
+    "src"
+  ],
+  "includeFiles": [
+    "src/finger_piano_cfg.vh"
+  ],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/periph_test.ucf",
+  "constraintsReviewed": true,
+  "optimization": "Speed",
+  "optimizationLevel": 1,
+  "simulations": [
+    {
+      "name": "periph_test_normal",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "0",
+        "TB_DAC_TEST_MODE": "0"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    },
+    {
+      "name": "periph_test_adc_nack",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "1"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    },
+    {
+      "name": "periph_test_dac_nack",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "2"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    },
+    {
+      "name": "periph_test_dac_400",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "0",
+        "TB_DAC_TEST_MODE": "1"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    },
+    {
+      "name": "periph_test_dac_c00",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "0",
+        "TB_DAC_TEST_MODE": "2"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    },
+    {
+      "name": "periph_test_dac_1khz",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "3",
+        "TB_DAC_TEST_MODE": "3"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    },
+    {
+      "name": "periph_test_heartbeat_real",
+      "top": "tb_periph_test_top",
+      "sources": [
+        "sim/tb_periph_test_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "0",
+        "TB_HEARTBEAT_HALF_CYC": "6000000"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
+      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
+    }
+  ],
+  "verification": {
+    "expectImplementationBlocked": false,
+    "failOnSynthesisWarnings": true,
+    "clockName": "clk",
+    "resetNames": [
+      "rst_n",
+      "rst_n_sync"
+    ],
+    "forbiddenEdgeSignals": [
+      "clk_8k"
+    ]
+  },
+  "programming": {
+    "cableType": "digilent",
+    "cableSerial": "210241672559",
+    "cableFrequencyHz": 10000000,
+    "position": 1,
+    "probeTimeoutSeconds": 120,
+    "jtagTimeoutSeconds": 300,
+    "isfTimeoutSeconds": 600,
+    "verifyTimeoutSeconds": 300,
+    "cableRetryAttempts": 3
+  }
+}
