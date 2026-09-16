@@ -533,8 +533,17 @@ SystemVerilog-only constructs
 
 项目启用了 synthesis warning 阻断策略，因此最终必须：
 
-XST errors   = 0
-XST warnings = 0
+XST errors             = 0
+unexpected XST warnings = 0
+latches                = 0
+
+唯一例外是 `project.json` 的 `verification.synthesisWarningAllowlist`：逐条
+审阅过的 trim warning（id + 正则 + 期望计数）算 allowed。任何未命中条目、
+新路径/类别、或计数漂移仍判 FAIL；不得用 `XIL_XST_HIDEMESSAGES`、全局静音、
+`KEEP`/`DONT_TOUCH` 或假消费者绕过，也不得关闭 `failOnSynthesisWarnings`。
+`finger_piano` 当前有一份 12 脚 Stage-2 专用的白名单（166 条，见工程 README
+§12.5/§13）；诊断/新工程一律要求原始 0 warnings，不得复用该白名单。
+
 ### 10.6 仿真 PASS 不能只看退出码
 
 每个 testbench 必须产生明确：
@@ -602,90 +611,59 @@ programmingVerified = VERIFIED
 解释成：
 
 user design functional = PASS
-## 12. 今后真正顶层集成前的硬件阻塞项
+## 12. 板级验证阻塞项（顶层集成已完成）
 
-当前基础设施计划完成后，仍有若干必须由实物信息解除的 blocker。
+P6B 已于 2026-09-16 完成正式 Stage-2 顶层迁移：引脚由用户逐脚冻结，
+`projects/finger_piano/constraints/finger_piano.ucf` 就是最终活动约束。
+本节只保留**仍需实物信息解除**的板级 blocker（12.4/12.5）；旧的
+「引脚池 / 候选分配」提案已被最终冻结表取代，不再作为依据。
 
-### 12.1 可用引脚池与 IO 重分配（用户 2026-09-15 确认）
+### 12.1 Stage-2 最终引脚冻结（用户 2026-09-16 确认，已完成）
 
-**用户确认下列 38 个引脚可用**（照录，未做推断）：
+| 信号 | LOC | Bank | VCCO | IOSTANDARD | 外部 |
+|---|---|---|---|---|---|
+| `clk` | P57 | 2 | 3.3 V | LVCMOS33 | 12 MHz 有源晶振 |
+| `rst_n` | P3 | 3 | 3.3 V | LVCMOS33 | 低有效，外部上拉/RC |
+| `sensor_async[0]` | P28 | 3 | 3.3 V | LVCMOS33 | LM393 CH0（权重 1） |
+| `sensor_async[1]` | P29 | 3 | 3.3 V | LVCMOS33 | LM393 CH1（权重 2） |
+| `sensor_async[2]` | P30 | 3 | 3.3 V | LVCMOS33 | LM393 CH2（权重 4） |
+| `adc_i2c_scl` | P31 | 3 | 3.3 V | LVCMOS33 | ADS1115 SCL |
+| `adc_i2c_sda` | P32 | 3 | 3.3 V | LVCMOS33 | ADS1115 SDA |
+| `dac_i2c_scl` | P102 | 1 | 3.3 V | LVCMOS33 | MCP4725 SCL |
+| `dac_i2c_sda` | P103 | 1 | 3.3 V | LVCMOS33 | MCP4725 SDA |
+| `note_debug[0]` | P110 | 0 | 3.3 V | LVCMOS33 | 当前音符编码 |
+| `note_debug[1]` | P111 | 0 | 3.3 V | LVCMOS33 | 当前音符编码 |
+| `note_debug[2]` | P113 | 0 | 3.3 V | LVCMOS33 | 当前音符编码 |
 
-```
-P3   P4   P5   P6   P7   P10  P12  P13  P15  P19
-P20  P21  P25  P27  P28  P29  P30  P31  P32
-P76  P77  P78  P79  P90  P91  P92  P93
-P102 P103 P104 P105 P110 P111 P113 P114
-P124 P125 P126
-```
+共 12 个用户 I/O，全部 LVCMOS33、VCCO=3.3 V。实现报告 `routed_pad.txt`
+实测 12 脚全部 `LOCATED`、无自动分配 I/O。**不使用 P76/P77**（配置期 DUAL），
+也不使用额外 GCLK/RHCLK 作普通功能 I/O。旧提案（DAC 用 P76/P77、note_debug
+用 P78/P79/P90）作废，不再作为候选。
 
-当前 UCF 已占用（legacy baseline，**迁移阶段之前一律不动**）：
+（历史：2026-09-15 用户曾确认一份 38 脚可用池，仅表示这些脚"可以用"，且
+不含 P8/P11/P16/P18/P24。该池与差集信息保留在 Git history；最终功能分配以
+上表为准。）
 
-```
-clk              P57
-rst_n            P3
-key_in<0..6>     P4 P5 P6 P7 P8 P10 P11
-audio_out        P12
-key_debug<0..6>  P13 P15 P16 P18 P19 P20 P21
-note_debug<0..2> P24 P25 P27
-```
+### 12.2 三个 LM393 GPIO（已冻结）
 
-**池与现状的差集（事实，不是推断）**：
-
-- 池中**不含** `P8`、`P11`、`P16`、`P18`、`P24`。这 5 根当前在用，但**没有被确认可用于改接**；迁移时不得把它们当作可用资源。
-- `P1`/`P2`（TMS/TDI）**永远保留给 JTAG**；`P9/P17/P26/P34`=GND、`P14/P23`=VCCO_3、`P40`=VCCO_2、`P22`=VCCINT、`P36`=VCCAUX、`P33/P35`=IPAD（仅输入），均不得作普通 I/O。
-- ⚠️ 现有 `constraints/finger_piano.ucf` 头部注释仍写「可用 I/O 范围：P1..P40」（2026-09-14 的信息），已被本次 38 脚池取代；`projects/finger_piano/README.md` §7 已于 2026-09-16 加注指向本节，**UCF 头部注释本身待 P6B 重整 UCF 时一并修订**（本轮不动 UCF）。
-
-迁移后需要新增的引脚：
-
-| 用途 | 数量 | 来源计划 |
+| 信号 | LOC | 说明 |
 |---|---|---|
-| `sensor_async[2:0]`（3 个 LM393 数字输出） | 3 | P2 |
-| `ADC_SCL` / `ADC_SDA`（ADS1115，总线 1） | 2 | P1 / P5 |
-| `DAC_SCL` / `DAC_SDA`（MCP4725，总线 2） | 2 | P1 / P4 |
-| `note_debug` 等观测脚（可选） | 0~3 | 迁移阶段决定 |
+| `sensor_async[0]` | P28 | LM393 CH0，权重 1 |
+| `sensor_async[1]` | P29 | LM393 CH1，权重 2 |
+| `sensor_async[2]` | P30 | LM393 CH2，权重 4 |
 
-迁移后释放的 legacy 引脚：`key_in[6:0]` 7 根（其中 3 根可改作 `sensor_async[2:0]`）、`key_debug[6:0]` 7 根；`clk` / `rst_n` / `audio_out` 默认保持现脚不变。
+输入经 `sensor_code_frontend`（极性归一化 → 2FF 同步 → 原子码字滤波 → 解码）
+得到 `sensor_code_stable[2:0]` 与 `note_code[2:0]`；**位序不得交换**。
 
-#### 候选分配（**候选，未经用户逐脚确认前不得写入 UCF**）
+### 12.3 两套 I²C GPIO（已冻结）
 
-| 信号 | 候选引脚 | 理由 |
+| 信号 | LOC | 总线 |
 |---|---|---|
-| `sensor_async[0..2]` | P28 / P29 / P30 | 落在当前未占用的池内引脚，避开 onboard 键位与调试脚 |
-| `ADC_SCL` / `ADC_SDA` | P31 / P32 | 总线 1，独立于 DDS 音频链 |
-| `DAC_SCL` / `DAC_SDA` | P76 / P77 | 总线 2 |
-| `note_debug[2:0]`（可选） | P78 / P79 / P90 | 保留少量可观测脚 |
+| `adc_i2c_scl` / `adc_i2c_sda` | P31 / P32 | ADS1115 独立总线 1 |
+| `dac_i2c_scl` / `dac_i2c_sda` | P102 / P103 | MCP4725 独立总线 2 |
 
-选脚原则：① 一律 `LVCMOS33`（与现有 UCF 一致；若某个 bank 的 VCCO 不是 3.3 V，必须先确认）；② 新外设优先落在当前未占用的池内引脚，迁移前不与 legacy 抢脚；③ 迁移释放出来的 `P4~P11` 仍在池内，可作备选；④ 实际接线若把 LM393 接在 onboard 键位上，改候选表并重新确认即可。
-
-**硬规则**：候选表只是给用户逐脚确认的提案。确认之前**不得**在 UCF 增加任何新增外设 LOC，不得依赖 MAP 自动分配，也不得自动把 `constraintsReviewed` 置 true。
-
-### 12.2 三个 LM393 GPIO
-
-需要确认：
-
-sensor bit0 → FPGA ?
-sensor bit1 → FPGA ?
-sensor bit2 → FPGA ?
-
-确认后才能把 legacy：
-
-key_in[6:0]
-
-正式迁移到：
-
-sensor_async[2:0]（3-bit 计划中 `sensor_code_frontend` 的顶层输入名；其输出为 `sensor_code_stable[2:0]` 与 `note_code[2:0]`）
-
-### 12.3 两套 I²C GPIO
-
-由于 ADC 和 DAC 使用独立总线，需要确认四个真实 FPGA GPIO：
-
-ADC_SCL
-ADC_SDA
-
-DAC_SCL
-DAC_SDA
-
-在确认之前不得写 UCF LOC。
+两条总线物理独立，禁止共享 SDA/SCL、arbiter、bus mux；开漏 0/Z，
+外部 4.7 kΩ 上拉到 3.3 V；UCF 不加 `PULLUP`。
 
 ### 12.4 FSR 实物标定
 

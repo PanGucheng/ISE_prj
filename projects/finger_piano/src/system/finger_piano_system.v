@@ -27,9 +27,11 @@
 // 任意组合合法。默认 1/1 = 集成启用语义(区别于 P1 cfg 宏的全关默认)。
 // sensor 前端不受这两个参数影响。
 //
-// 综合归属(P6 §31/§33):本阶段只加入 project.json 的 sources 与仿真,
-// project top 仍是 legacy finger_piano_top;legacy 网表(232 FF / 20 I/O)
-// 不应因本模块而变化。final top 迁移(P6B)待用户逐脚确认 7 个接口引脚。
+// 综合归属(P6 收尾):P6B(2026-09-16)已完成 final top 迁移——正式顶层是
+// finger_piano_stage2_top,本模块经其被实例化并参与综合;12 脚冻结分配见
+// constraints/finger_piano.ucf。当前顶层没有压力数据的硬件消费方,因此
+// ADS1115 压力链及相关 debug 出口会被 XST 合法 trim(已审阅白名单,
+// 见 project.json 的 verification.synthesisWarningAllowlist 与工程 README)。
 //=============================================================================
 
 `include "finger_piano_cfg.vh"

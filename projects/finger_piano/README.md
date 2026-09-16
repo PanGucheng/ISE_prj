@@ -85,39 +85,85 @@ userDesignFunctional          = NOT_TESTED   # Stage-2 顶层从未烧录/上板
 
 按键极性由 `` `KEY_ACTIVE_HIGH `` 选择（默认 1=按下为高），归一化只在顶层做一次（`key_normalized`），后续链路统一使用归一化后的信号。
 
-## 2. 目录结构
+## 2. 目录结构（Stage-2 当前结构）
 
 ```
 projects/finger_piano/
-  project.json                     ISE 工具链配置（sources / includeDirs / includeFiles / ucf）
+  project.json                     ISE 工具链配置（top=finger_piano_stage2_top；sources/simulations/verification）
   src/
-    finger_piano_cfg.vh            ★ 配置真值源：SYS_CLK_HZ 等 6 个宏，全工程唯一
+    finger_piano_cfg.vh            ★ 配置真值源：SYS_CLK_HZ 等宏，全工程唯一
     reset_sync.v                   异步拉低、同步释放的复位同步器
-    key_sync.v                     7 路输入两级触发器同步
-    key_filter.v                   参数化数字稳定滤波（默认 10 ms，可关闭）
-    note_encoder.v                 7 路→note_code[2:0]，固定优先级 1>2>…>7
-    tone_generator.v               同步计数器 + terminal count 生成方波
-    finger_piano_top.v             顶层：极性归一化与模块互联
+    finger_piano_stage2_top.v      ★ 正式顶层（wrapper：reset_sync + finger_piano_system + note_debug）
+    system/finger_piano_system.v   P1~P5 纯结构化集成层（stage-2 逻辑系统边界）
+    input/                         P2：sensor_code_decoder / sensor_code_filter / sensor_code_frontend
+    audio/                         P3/P4：sine_lut_12bit / dds_sine_generator / dds_mcp4725_pipeline
+    periph/                        P1：i2c_master / ads1115_ctrl / mcp4725_ctrl
+    pressure/                      P5：pressure_frame_capture / pressure_channel_corrector / pressure_processor
+    key_sync.v                     （复用）两级同步器
+    finger_piano_top.v             legacy 7-key 顶层（保留，**已不是**工程 top）
+    key_filter.v / note_encoder.v / tone_generator.v   legacy baseline 模块（保留）
   constraints/
-    finger_piano.ucf               模板（只有注释与 TODO，无任何 LOC/IOSTANDARD/TIMESPEC）
+    finger_piano.ucf               ★ 12 脚冻结分配 + TS_clk（活动约束）
   sim/
-    tb_note_encoder.v              编码器优先级测试
-    tb_tone_generator.v            七音频率/静音/相位重启测试
-    tb_finger_piano_top.v          顶层：同步+滤波窗口判据、小星星序列、极性
+    tb_finger_piano_stage2_top.v   ★ 正式顶层 TB
+    tb_finger_piano_system.v       系统级 TB（7 个 TB_MODE）
+    models/                        ads1115_model.v / mcp4725_model.v
+    tb_*.v                         P1~P5 各模块 TB + legacy TB（保留作回归）
   README.md
-  frequency_table.md               半周期计数值与理论频率误差
+  frequency_table.md               方波半周期表（legacy）
+  dds_frequency_table.md           DDS 七音 phase increment 表（P3，冻结）
+  pressure_calibration.md          FSR 标定表（STATUS = NOT_CALIBRATED）
 ```
 
 `sim/` 下的 testbench **不在** `project.json` 的 `sources` 里，因此永远不会进入 XST 综合；`src/finger_piano_cfg.vh` 通过 `includeFiles` 同步、通过 `includeDirs: ["src"]`（XST `-vlgincdir`）被 `` `include `` 找到。
 
+### 2.1 legacy baseline 结构（历史，保留）
+
+```
+src/finger_piano_top.v                                legacy 7-key 顶层
+src/key_filter.v / note_encoder.v / tone_generator.v  legacy 数据路径
+sim/tb_note_encoder.v / tb_tone_generator.v / tb_finger_piano_top.v
+frequency_table.md
+```
+
 ## 3. 模块关系
+
+### 3.1 Stage-2 正式数据流（当前）
+
+```
+                    clk (P57, 12 MHz) + rst_n (P3)
+                              │
+                     finger_piano_stage2_top
+                              │
+                    reset_sync → rst_n_sync
+                              │
+                    finger_piano_system
+        ┌─────────────────────┼──────────────────────────┐
+        │                     │                          │
+ sensor_async[2:0]      adc_i2c_scl/sda            dac_i2c_scl/sda
+   (P28/P29/P30)          (P31/P32)                (P102/P103)
+        │                     │                          │
+ sensor_code_frontend   ads1115_ctrl            dds_mcp4725_pipeline
+        │                     │                  (DDS → mcp4725_ctrl)
+   note_code[2:0]        pressure_processor              │
+        │  │                  │                          │
+        │  └──> note_debug[2:0] (P110/P111/P113)          │
+        └────> DDS → MCP4725 ────────────────────────────┘
+```
+
+- `note_debug = note_code`（直通，便于上板核对 LM393→同步/滤波/解码）。
+- 压力链与音符链**解耦**；当前顶层无压力数据消费方，因此 ADS1115 压力链被
+  综合器 trim（§12.5）。
+- 两条 I²C 总线完全独立；全工程单 `clk` 域，`note_debug`/I²C SCL 都不是时钟。
+
+### 3.2 legacy baseline 数据流（历史，保留在 `finger_piano_top`）
 
 ```
                  +-------------+
    rst_n ------> | reset_sync  | --> rst_n_sync ------+---------------------+
                  +-------------+                      |                     |
                                                       v                     v
- key_in[6:0] --> [极性归一化] --> key_sync --> key_filter --> note_encoder --> tone_generator --> audio_out
+key_in[6:0] --> [极性归一化] --> key_sync --> key_filter --> note_encoder --> tone_generator --> audio_out
                  key_normalized   (2 级 FF)   (10ms 稳定)    (优先级编码)     (同步计数/TC)
                                         |                        |
                                         +--> key_debug[6:0]      +--> note_debug[2:0]
@@ -349,19 +395,20 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\ise.ps1 build  -Project finger_p
 - **PWM 音量**：在 `tone_generator` 输出之后插入 `pwm_volume`（同 `clk` 域），用高速计数器调制占空比；`audio_out` 语义不变。
 - **DDS 正弦波**：把 `tone_generator` 的“半周期翻转”替换为相位累加器 + 正弦查找表（可用 `ip/` 下的分布式 ROM 或 Block RAM）；`SYS_CLK_HZ` 与相位增量仍由同一参数推导。
 
-### 12.1 可选外设(P1:ADS1115 / MCP4725 驱动基础设施,默认关闭)
+### 12.1 可选外设(P1:ADS1115 / MCP4725 驱动基础设施,IMPLEMENTED / SIMULATED / INTEGRATED)
 
-P1 五个提交(A~E)已落地,**IMPLEMENTED / STANDALONE**:`src/periph/` 下的
+P1 五个提交(A~E)已落地:`src/periph/` 下的
 `i2c_master.v`(命令级开漏主机)、`ads1115_ctrl.v`(三通道轮询采集,
 OS 轮询+超时)、`mcp4725_ctrl.v`(仅 Fast Write,pending+overrun 缓冲),
 配套协议模型与三个 TB(58/40/73 checks)。协议依据为仓库内
 `doc/ads1115.pdf` 与 `doc/MCP4725.pdf`。设计细节、I²C 拍数公式、ENABLE 宏
-语义与接线规划见 [doc/ADC_DAC扩展设计.md](../../doc/ADC_DAC扩展设计.md)。
+语义与接线规划见 [doc/ADC_DAC扩展设计.md](../../doc/ADC_DAC扩展设计.md)
+(该文档描述 P1 阶段,引脚以最终冻结表为准)。
 
-**默认全关**:ENABLE 宏为 0、顶层无端口、无实例化、UCF 无 I²C LOC
-(引脚待用户逐脚确认,见 doc/README.md §12.3 候选分配);综合网表
-232 FF / 20 I/O 与 legacy 基线一致,方波路径未受影响。**7 键 RTL 仍是
-legacy baseline**,真实硬件(3×LM393 → 3-bit 编码)迁移在上板前单独进行。
+**P6B 之后的实际归属**:`ads1115_ctrl` 与 `dds_mcp4725_pipeline`(内含
+`mcp4725_ctrl`)已由 `finger_piano_system` 实例化并进入正式 Stage-2 顶层;
+两条独立 I²C 总线引脚已冻结(`adc_i2c` P31/P32、`dac_i2c` P102/P103)。
+当前顶层无压力数据消费方,ADS1115 压力链被综合器 trim(见 §12.5)。
 
 ### 12.2 3-bit 传感器输入基础设施(P2,IMPLEMENTED / SIMULATED / INTEGRATED)
 

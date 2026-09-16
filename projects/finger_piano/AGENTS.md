@@ -134,7 +134,7 @@ pwsh -File .\ise.ps1 sim -Project finger_piano -Test <name>
 ## 板级安全规则
 
 - **不得猜 FPGA LOC**，不得写未确认的 IOSTANDARD / 引脚 / 时钟。
-- 用户 2026-09-15 确认的**可用引脚池（38 脚）只表示这些脚可以用，不代表已经分配到具体功能**；候选分配（`sensor_async[2:0]`、两套 I²C）仍待用户逐脚确认。池、池与现状的差集、候选分配见 `doc/README.md` §12.1。
+- **P6 COMPLETE（2026-09-16）**：正式顶层已是 `finger_piano_stage2_top`，最终 12 脚已由用户逐脚冻结并写入活动 UCF：`clk`=P57、`rst_n`=P3、`sensor_async[0..2]`=P28/P29/P30、`adc_i2c_scl/sda`=P31/P32、`dac_i2c_scl/sda`=P102/P103、`note_debug[0..2]`=P110/P111/P113（全部 LVCMOS33，VCCO 全 3.3 V）。最终表与证据见 `doc/README.md` §12.1 与 `projects/finger_piano/README.md` §13 第十四轮。旧 38 脚池与 P76/P77 等候选方案已作废。
 - 新增外设 GPIO 未经用户确认前：不进入顶层、不写 UCF LOC、不允许「MAP 自动分配了就当作完成」。
 - `constraintsReviewed` 只代表人工确认过约束，**不得为了让工具产出 bitstream 而自动置 true**。
 - 无人值守开发阶段**不得执行**：

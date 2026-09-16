@@ -3,7 +3,7 @@
 
 # finger_piano P6B 最终顶层与 UCF 迁移实施计划
 
-> **Status**: READY TO IMPLEMENT
+> **Status**: P6B COMPLETE（2026-09-16；STAGE2 TOP = IMPLEMENTED / SIMULATED / IMPLEMENTED，verification + implementation + timing 全部通过，BOARD = NOT_TESTED）
 > **Scope**: Stage-2 physical top + UCF cutover + implementation verification
 > **Depends on**: P6A COMPLETE
 > **Pin assignment**: USER CONFIRMED / FROZEN
