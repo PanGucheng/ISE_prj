@@ -526,6 +526,19 @@
       "timeoutSeconds": 900,
       "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
       "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "stage2_top",
+      "top": "tb_finger_piano_stage2_top",
+      "sources": [
+        "sim/tb_finger_piano_stage2_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_STAGE2_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_STAGE2_TOP: FAIL"
     }
   ],
   "verification": {
