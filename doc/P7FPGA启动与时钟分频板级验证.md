@@ -1,6 +1,6 @@
 # finger_piano P7 FPGA 启动与时钟分频板级验证计划
 
-> **Status**: SOFTWARE PREPARATION COMPLETE / HARDWARE TEST WAITING USER（工程已建、verify/implement/bitstream 全部通过，停在 `READY_FOR_BOARD_TEST`；未执行任何 program）
+> **Status**: SOFTWARE PREPARATION COMPLETE；HARDWARE（用户 2026-09-16 授权「测试与 ISF」）已执行 probe PASS + JTAG 易失配置 PASS + ISF program/verify VERIFIED；**POWER-CYCLE PERSISTENT BOOT = NOT_TESTED**、板测频率/reset 待用户实测，`userDesignFunctional = NOT_TESTED`
 > **Scope**: FPGA basic bring-up / clock characterization / divider measurement / persistent boot
 > **Depends on**: P6 COMPLETE
 > **Main finger_piano RTL**: FROZEN

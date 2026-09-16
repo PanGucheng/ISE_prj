@@ -114,14 +114,49 @@ DO NOT PROGRAM（除非用户明确授权）。这只是把正式 Stage-2 镜像
 
 ```text
 P7 SOFTWARE PREPARATION   = COMPLETE
-HARDWARE TEST             = WAITING USER（READY_FOR_BOARD_TEST）
-BOARD MEASUREMENT         = TODO（由用户实测填写，Agent 不得编造）
+FPGA JTAG configuration   = PASS        （易失测试,program-20260916-161933-4e479624）
+FPGA ISF program/verify   = VERIFIED    （program-20260916-161953-65d8c7ac）
+HARDWARE TEST             = 已按用户授权执行 probe + Jtag + Isf
+POWER-CYCLE PERSISTENT BOOT = NOT_TESTED（需用户断电重启 5 次）
+BOARD MEASUREMENT         = TODO        （P110/P111/P113、reset 由用户实测,Agent 不得编造）
+userDesignFunctional      = NOT_TESTED
 ```
 
-生成 bitstream 后本工程停在 `READY_FOR_BOARD_TEST`。**不执行任何 JTAG /
-ISF `program`**，除非用户明确授权并带 `-ConfirmHardwareWrite`。
+**注意（P7 §32）**：ISF 现在装的是本诊断工程；板卡下次上电启动的是
+`clock_test_top`，**不是** `finger_piano_stage2_top`。这是预期行为。正式
+Stage-2 恢复镜像见 §6.1；是否写回 ISF 由用户再次明确决定，**Agent 不自动恢复**。
 
-## 8. 板测记录（用户实测后填写）
+## 8. 硬件执行记录（2026-09-16，用户授权「测试与 ISF」）
+
+| 步骤 | run | 结果 |
+|---|---|---|
+| 只读 probe | `probe-20260916-161920-d2cb6b83` | PASS：cableDetected / jtagChainDetected / deviceMatched 全 PASS，`xc3s50an` IDCODE `0x02610093` |
+| JTAG 易失配置 | `program-20260916-161933-4e479624` | `programmingCompleted = PASS`、`programmingVerified = CONFIG_STATUS_OK`（`DONEIN=1`、`CRC error=0`、`M[2:0]=011`）；`program -onlyFpga`，**未写 ISF** |
+| ISF 持久写入 | `program-20260916-161953-65d8c7ac` | `Erase → Program → Verify` 全部成功，`programmingVerified = VERIFIED`；见下 |
+
+ISF 转录关键行（原始 `program.log` 未改写）：
+
+```text
+'1': Erasing device...            done.
+'1': Erasure completed successfully.
+'1': Programming Flash...done.
+'1': Programming completed successfully.
+'1': Verifying device...done.
+'1': Verification completed successfully.
+'1': Programmed successfully.
+INFO:iMPACT - '1': Checking done pin....done.
+```
+
+没有 `Verify failed`、没有 `DONE did not go high`。写入前两次独立 pin 之前的
+`probe` 曾出现 `DIGILENT_ENUM_FAILED` / `DIGILENT_OPEN_FAILED`（`erc = 3072`
+冷启动），均被**事务内只读 preflight retry** 吸收；正式 probe/program 使用
+固定下载线 `SN=210241672559 / 10000000 Hz / position 1`。
+
+**这些只证明工具侧写入与校验成功，绝不等于板卡功能 PASS**（`userDesignFunctional`
+固定 `NOT_TESTED`）。P110/P111/P113 的实际频率、reset 行为、以及 5 次断电冷启动
+必须由用户实测后填入 §9；Agent 不得代填。
+
+## 9. 板测记录（用户实测后填写）
 
 | 项目 | 理论 | 实测 | 误差 |
 |---|---|---|---|
