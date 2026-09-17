@@ -15,6 +15,11 @@
   `0`=0x800 DC、`1`=0x400 DC、`2`=0xC00 DC、`3`=1 kHz / 8 kS/s 八点波形
   (2048, 3316, 3840, 3316, 2048, 780, 256, 780,由
   round(1792·sin(2πk/8)) 离线复核)
+  **默认 `DAC_TEST_MODE=0`**(对应已审阅的 mode-0 synthesis warning allowlist)。
+  板测需要 1 kHz 波形时,在 `project.json` 的 `defines` 里临时加 `"P9_DAC_MODE3"`
+  重新构建(`periph_test_top.v` 用 `` `ifdef P9_DAC_MODE3 `` 选 3);该变体的
+  trim 计数与 mode 0 不同,**不参与 verify 门禁**,构建后必须把 defines 还原
+  为 `[]`。mode 3 实测 121 warnings(mode 0 基线 144)。
 
 ## 与正式工程的关系
 
@@ -48,23 +53,24 @@ FAIL);正式 `finger_piano` 的 166-warning allowlist **未修改**,两者
 ```
 P9 SOFTWARE PREPARATION       = COMPLETE
 PERIPH DIAGNOSTIC BITSTREAM   = READY(见下节记录)
-BOARD TEST                    = WAITING USER
+BOARD TEST                    = IN PROGRESS(授权写入已完成,板上测量仍 TODO)
 ```
 
-软件阶段到此停止。**烧录必须由用户明确要求并带 `-ConfirmHardwareWrite`**
-(本工程任何阶段都不会自动 program);板测完成后是否恢复 Stage-2 ISF
-由用户决定(P9 §37)。
+**烧录必须由用户明确要求并带 `-ConfirmHardwareWrite`**(本工程任何阶段都不会
+自动 program)。2026-09-17 经用户逐次明确授权完成了本节的 ISF 与 volatile
+写入(见「授权烧录记录」);板上电压/波形测量仍全部 TODO,板测完成后是否恢复
+Stage-2 ISF 由用户决定(P9 §37)。
 
 ## Bitstream 记录
 
-| 项 | 值 |
-|---|---|
-| DAC_TEST_MODE | 0(0x800 DC;其余模式在仿真侧验证,烧录前按需重构建) |
-| run id | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) |
-| SHA256 | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` |
-| size | 54 738 字节(DRC 0 errors / 0 warnings) |
-| device | xc3s50an-4-tqg144 |
-| commit | `261eea5`(p9a-d)+ 本文档提交 |
+| 镜像 | DAC_TEST_MODE | run id | SHA256 | size |
+|---|---|---|---|---|
+| mode 0(默认,当前 ISF 内容) | 0(0x800 DC) | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` | 54 738 B |
+| mode 3(`P9_DAC_MODE3` defines,当前 volatile fabric) | 3(1 kHz / 8 kS/s) | bitstream `20260917-152127-13a3ee2f`(`-define P9_DAC_MODE3`,121 warnings) | `1b84780a31570c799d89ad1e954d050e19e04362f37daf56fbef5c595901633e` | 54 738 B |
+
+两个镜像均为 xc3s50an-4-tqg144、DRC 0/0;基线(mode 0、无 defines)回归
+`verify-20260917-152255-62bd2ff6` Overall **PASS**(144 allowed / 0 unexpected、
+0 latches、7/7 仿真 PASS、implement 门禁 open)。
 
 implement 记录(人工阅读 `map.log` / `routed.pad` / `timing.twr`):
 MAP/PAR **0 errors / 0 warnings**,317 FF / 455 slices,**9 个 bonded IOB
@@ -73,6 +79,21 @@ P110/P111/P113,全部 LVCMOS33),无自动分配 I/O;`TS_clk = 83.33 ns` →
 **0 timing errors**(setup/hold/switching 全 0),`All constraints were met.`。
 结论边界(P9 §51/§35):这是 DIGITAL IMPLEMENTATION PASS,不构成
 I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
+
+## 授权烧录记录(2026-09-17,均由用户明确要求 + `-ConfirmHardwareWrite`)
+
+| # | 模式 | run id | 结果 | 关键证据 |
+|---|---|---|---|---|
+| 1 | Isf(非易失,mode 0) | `program-20260917-150508-cb48ed1d` | `programmingCompleted=PASS` / `programmingVerified=VERIFIED` | `Erasing device...` → `Erasure completed successfully.` → `Programming Flash...done.` → `Programming completed successfully.` → `Verification completed successfully.`;cable SN 210241672559 / 10 MHz |
+| 2 | Jtag(易失,mode 3) | `program-20260917-152236-2c99ad5e` | `PASS` / `CONFIG_STATUS_OK` | `Programming device` → `Completed downloading bit file to device` → `Programmed successfully`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1` |
+
+- 若干次尝试(`program-20260917-145845-239e3f35` 等)在 preflight 阶段因下载线
+  `DIGILENT_OPEN_FAILED`(`failed to open device (DmgrOpenEx, erc = 3072)`)失败,
+  **未写入任何内容**(`run.status=PREFLIGHT_FAILED`);重试后成功。属 fpga-vm
+  USB 透传层问题,与工具/板卡无关。
+- **当前硬件状态**:内部 ISF = mode 0 诊断镜像(上电启动 mode 0);FPGA fabric =
+  mode 3 易失镜像(掉电丢失)。
+- `userDesignFunctional` 依旧 **NOT_TESTED**:烧录成功 ≠ 设计在板上可用。
 
 ## 板测记录表(P9 §34,实测值必须由用户填写)
 

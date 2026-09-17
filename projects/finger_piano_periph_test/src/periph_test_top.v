@@ -23,13 +23,20 @@
 //
 // DAC_TEST_MODE(P9 §13):0=0x800 / 1=0x400 / 2=0xC00 / 3=1 kHz 波形,
 // compile-time 参数,不加 mode pin;正式 finger_piano 工程零影响。
+// 默认 0x800 DC(与已审阅的 mode-0 synthesis warning allowlist 对应);
+// 板测需要 1 kHz 波形时在 project.json 的 defines 里临时加 "P9_DAC_MODE3"
+// 重新构建(该变体的 trim 计数不同,不参与 verify 门禁)。
 //=============================================================================
 
 `include "finger_piano_cfg.vh"
 
 module periph_test_top #(
     parameter integer HEARTBEAT_HALF_CYC = 6000000,   // 1 Hz 方波 @ 12 MHz
-    parameter integer DAC_TEST_MODE      = 0
+`ifdef P9_DAC_MODE3
+    parameter integer DAC_TEST_MODE      = 3          // 1 kHz / 8 kS/s 板测镜像
+`else
+    parameter integer DAC_TEST_MODE      = 0          // 0x800 DC(默认,与 allowlist 对应)
+`endif
 ) (
     input  wire       clk,           // P57,12 MHz,唯一时钟
     input  wire       rst_n,         // P3,外部异步低有效复位

@@ -33,7 +33,7 @@
 | P6 stage-2 系统集成 | **P6 COMPLETE**：STAGE2 TOP = IMPLEMENTED / SIMULATED / IMPLEMENTED（综合+实现+时序通过）；BOARD = NOT_TESTED | 是 | NO |
 | P7 启动/时钟板级验证 | **SOFTWARE PREPARATION = COMPLETE**（独立诊断工程 `finger_piano_clock_test`，verify/implement/bitstream 全过）；HARDWARE TEST = WAITING USER | 独立工程 | WAITING USER |
 | P8 数字音量 | SIMULATED / STANDALONE（DDS→gain→MCP4725 端到端通过；刻意不接 Stage-2 顶层；PRESSURE→VOLUME = NOT_IMPLEMENTED，FSR = NOT_CALIBRATED） | NO（刻意） | NO（BOARD AUDIO VOLUME = NOT_TESTED） |
-| P9 ADC/DAC 板级诊断 | **READY_FOR_BOARD_TEST**（独立诊断工程 `finger_piano_periph_test`：7 仿真 + verify/implement/bitstream 全过、SHA256 已记录）；BOARD TEST = WAITING USER | 独立工程 | WAITING USER（烧录须用户明确授权） |
+| P9 ADC/DAC 板级诊断 | **BOARD TEST = IN PROGRESS**（`finger_piano_periph_test`：7 仿真 + verify/implement/bitstream 全过；2026-09-17 经用户授权完成 ISF(mode 0) 与 volatile Jtag(mode 3) 写入；板上测量仍 TODO） | 独立工程 | IN PROGRESS |
 
 **P1~P6 已全部完成并交叉集成**：正式 Stage-2 顶层 `finger_piano_stage2_top`
 （12 个用户 I/O，引脚 2026-09-16 逐脚冻结）已通过全量 verify（Overall PASS，
@@ -58,7 +58,9 @@ P110/P111/P113），软件侧全部通过、bitstream SHA256 已记录，停在
 `READY_FOR_BOARD_TEST`：板测时先看 P110 是否翻（FPGA/时钟/复位），
 再看 P113（sticky I2C 错误）与 P111（ADS 帧活动），最后用万用表/
 示波器测 DAC 0x400/0x800/0xC00 单调性与 1 kHz 波形；实测表在工程
-README。板测完成后是否恢复 Stage-2 ISF 由用户决定。
+README。板测完成后是否恢复 Stage-2 ISF 由用户决定。2026-09-17 经用户逐次明确
+授权，已对本工程完成 ISF(mode 0，`Erase → Program → Verify` 全成功) 与
+volatile Jtag(mode 3，1 kHz) 写入；板上电压/波形测量仍全部 TODO。
 
 ### 0.2 事实来源优先级（冲突时以此为准）
 
