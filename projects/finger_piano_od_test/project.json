@@ -1,0 +1,56 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "od_test_top",
+  "sources": [
+    {
+      "path": "src/od_test_top.v",
+      "language": "verilog",
+      "library": "work"
+    }
+  ],
+  "includeDirs": [
+    "src"
+  ],
+  "includeFiles": [
+    "src/od_test_cfg.vh"
+  ],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/od_test.ucf",
+  "constraintsReviewed": true,
+  "optimization": "Speed",
+  "optimizationLevel": 1,
+  "simulations": [
+    {
+      "name": "od_test_top",
+      "top": "tb_od_test_top",
+      "sources": [
+        "sim/tb_od_test_top.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 300,
+      "passPattern": "TB_OD_TEST_TOP: PASS",
+      "failPattern": "TB_OD_TEST_TOP: FAIL"
+    }
+  ],
+  "verification": {
+    "expectImplementationBlocked": false,
+    "failOnSynthesisWarnings": true,
+    "clockName": "clk",
+    "forbiddenEdgeSignals": [
+      "p31_test",
+      "p32_test"
+    ]
+  },
+  "programming": {
+    "cableType": "digilent",
+    "cableSerial": "210241672559",
+    "cableFrequencyHz": 10000000,
+    "position": 1,
+    "probeTimeoutSeconds": 120,
+    "jtagTimeoutSeconds": 300,
+    "isfTimeoutSeconds": 600,
+    "verifyTimeoutSeconds": 300,
+    "cableRetryAttempts": 3
+  }
+}
