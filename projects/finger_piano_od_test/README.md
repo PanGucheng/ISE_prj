@@ -101,13 +101,28 @@ projects/finger_piano_od_test/artifacts/20260917-160223-4ac8eeec/results/design.
 
 ```text
 OD DIAGNOSTIC BITSTREAM = READY
-BOARD TEST              = READY_FOR_BOARD_TEST(等待用户授权烧录)
-PROGRAM                 = NOT RUN(本工程从未执行 JTAG/ISF 写入)
+BOARD TEST              = READY_FOR_BOARD_TEST(等待用户实测 P31/P32)
+PROGRAM                 = DONE(2026-09-17 volatile Jtag,经用户明确授权)
 userDesignFunctional    = NOT_TESTED
 ```
 
-**从未执行 `program`。** 烧录必须由用户明确要求并带 `-ConfirmHardwareWrite`;
-即使烧录成功也只是配置证据,**不构成板级功能 PASS**。
+**从未执行 ISF 写入。** 2026-09-17 经用户明确要求 + `-ConfirmHardwareWrite`
+执行了一次 **volatile Jtag** 配置(见下);烧录成功只是配置证据,
+**不构成板级功能 PASS**。
+
+## 授权烧录记录(2026-09-17)
+
+| 模式 | run id | 结果 | 关键证据 |
+|---|---|---|---|
+| Jtag(易失) | `program-20260917-160448-8a55fdf0` | `PASS` / `CONFIG_STATUS_OK` | preflight PASS(cable SN 210241672559 / 10 MHz);`Programming device` → `Completed downloading bit file to device` → `Programmed successfully`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1` |
+
+- 前一次尝试(`program-20260917-160428-4827500f`)因下载线
+  `DIGILENT_OPEN_FAILED`(`failed to open device (DmgrOpenEx, erc = 3072)`)在
+  preflight 阶段失败,**未写入任何内容**(`PREFLIGHT_FAILED`);重试后成功。
+  属 fpga-vm USB 透传层问题,与工具/板卡无关。
+- 当前硬件状态:**FPGA fabric = od_test(易失,掉电丢失)**;内部 ISF 仍是
+  P9 诊断 mode 0 镜像(上电启动 P9 诊断,不是本工程)。
+- `userDesignFunctional` 依旧 **NOT_TESTED**:需要在板级实测 P31/P32 波形。
 
 ## 板测步骤(建议)
 
