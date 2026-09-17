@@ -65,8 +65,16 @@ module periph_test_top #(
 
     //-------------------------------------------------------------------------
     // ADS1115 三通道轮询(P9 §11:0x48 / PGA +-4.096 V / 860 SPS /
-    // single-shot / OS polling,与正式工程同一 driver,行为零修改)
+    // single-shot / OS polling,与正式工程同一 driver,driver 本身零修改)
+    //
+    // P9 专用速率覆盖:仅本诊断工程把 ADS1115 总线目标改为 100 kHz
+    //   (override ads1115_ctrl 的 I2C_HZ 参数,不修改复用 driver,也不改
+    //    finger_piano_cfg.vh 的 CFG_ADC_I2C_SPEED=333333)。
+    //   12 MHz 下 100 kHz -> SCL_LOW=16 / SCL_HIGH=104 拍(周期 120 拍);
+    //   MCP4725 总线保持 CFG_DAC_I2C_SPEED=333333 不变。
     //-------------------------------------------------------------------------
+    localparam integer P9_ADC_I2C_HZ = 100000;   // P9 诊断:ADS1115 总线 100 kHz
+
     wire [15:0] adc_ch0_raw;
     wire [15:0] adc_ch1_raw;
     wire [15:0] adc_ch2_raw;
@@ -76,7 +84,8 @@ module periph_test_top #(
     wire [2:0]  adc_error_code;
 
     ads1115_ctrl #(
-        .ENABLE (1)
+        .ENABLE (1),
+        .I2C_HZ (P9_ADC_I2C_HZ)
     ) u_ads1115 (
         .clk              (clk),
         .rst_n_sync       (rst_n_sync),

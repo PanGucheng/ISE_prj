@@ -5,9 +5,11 @@
 (P9 计划 §0)。
 
 - 器件:`xc3s50an-4-tqg144`;时钟 P57(12 MHz,唯一时钟域);复位 P3
-- ADS1115:0x48 / PGA ±4.096 V / 860 SPS / single-shot / CH0-CH1-CH2 轮询
-  (与正式工程同一 driver,行为零修改)
-- MCP4725:0x60 / Fast Write only / 不写 EEPROM;诊断源 8 kS/s
+- ADS1115:0x48 / PGA ±4.096 V / 860 SPS / single-shot / CH0-CH1-CH2 轮询,
+  **ADS1115 总线目标 100 kHz**(P9 专用覆盖,见下);
+  与正式工程同一 driver(复用副本零修改)
+- MCP4725:0x60 / Fast Write only / 不写 EEPROM;诊断源 8 kS/s;**MCP4725 总线
+  保持 333333 Hz 不变**
 - 状态脚:**P110 `dbg_alive`**(~1 Hz heartbeat,只证明 FPGA 活着)、
   **P111 `dbg_adc`**(每完成一个三通道帧翻转一次)、**P113 `dbg_error`**
   (sticky,任一 ADC/DAC 错误或 overrun 置位,仅 reset 清除)
@@ -29,6 +31,14 @@
 `src/finger_piano_cfg.vh` 与 `sim/models/*.v` 均复制自
 `projects/finger_piano/` 同名文件——**不构成第二套实现**,禁止在本工程内
 单独修改这些文件;如需变更,先改正式工程再同步副本。
+
+**P9 专用 I²C 速率覆盖(2026-09-17)**:ADS1115 总线的目标速率只在
+`periph_test_top.v` 里通过实例参数覆盖(`ads1115_ctrl #(.I2C_HZ (P9_ADC_I2C_HZ))`,
+`P9_ADC_I2C_HZ = 100000`),**不修改**复用 driver,也**不改**
+`finger_piano_cfg.vh` 的 `CFG_ADC_I2C_SPEED`/`CFG_DAC_I2C_SPEED`。
+12 MHz 下 100 kHz → `SCL_LOW=16` / `SCL_HIGH=104` 拍(周期 120 拍 = 10 µs,
+`tLOW=1.333 µs ≥ 1300 ns`、`tHIGH=8.667 µs ≥ 600 ns`);**MCP4725 总线仍为
+333333 Hz**。正式 Stage-2 配置完全未动。
 
 ## 仿真
 
@@ -65,18 +75,21 @@ Stage-2 ISF 由用户决定(P9 §37)。
 
 | 镜像 | DAC_TEST_MODE | run id | SHA256 | size |
 |---|---|---|---|---|
-| mode 0(默认,当前 ISF 与 volatile fabric 内容) | 0(0x800 DC) | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` | 54 738 B |
-| mode 3(可复现变体,不参与 verify 门禁) | 3(1 kHz / 8 kS/s) | bitstream `20260917-152127-13a3ee2f`(`-define P9_DAC_MODE3`,121 warnings) | `1b84780a31570c799d89ad1e954d050e19e04362f37daf56fbef5c595901633e` | 54 738 B |
+| mode 0 + **ADS 100 kHz**(当前 HEAD 默认,可复现) | 0(0x800 DC) | bitstream `20260917-170512-33e884e2`(verify `verify-20260917-170347-72d5aef5`) | `40949c9d4286ceceaf5ba11458f0d659d97878b465c1460b3b6b94c46b0df603` | 54 738 B |
+| mode 0 + ADS 333333 Hz(历史,当前 ISF 内容) | 0(0x800 DC) | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` | 54 738 B |
+| mode 3 + ADS 333333 Hz(可复现变体,不参与 verify 门禁) | 3(1 kHz / 8 kS/s) | bitstream `20260917-152127-13a3ee2f`(`-define P9_DAC_MODE3`,121 warnings) | `1b84780a31570c799d89ad1e954d050e19e04362f37daf56fbef5c595901633e` | 54 738 B |
 
-两个镜像均为 xc3s50an-4-tqg144、DRC 0/0;基线(mode 0、无 defines)回归
-`verify-20260917-152255-62bd2ff6` Overall **PASS**(144 allowed / 0 unexpected、
-0 latches、7/7 仿真 PASS、implement 门禁 open)。
+三个镜像均为 xc3s50an-4-tqg144、DRC 0/0;当前 HEAD(mode 0 / ADS 100 kHz、
+无 defines)回归 `verify-20260917-170347-72d5aef5` Overall **PASS**
+(144 allowed / 0 unexpected、0 latches、7/7 仿真 PASS、implement 门禁 open)。
 
-implement 记录(人工阅读 `map.log` / `routed.pad` / `timing.twr`):
-MAP/PAR **0 errors / 0 warnings**,317 FF / 455 slices,**9 个 bonded IOB
+implement 记录(人工阅读 `map.log` / `routed.pad` / `timing.twr`;ADS 100 kHz 版
+run `20260917-170512-33e884e2`):
+MAP/PAR **0 errors / 0 warnings**,317 FF / 449 slices,**9 个 bonded IOB
 全部 `LOCATED`** 且与 §3 冻结表逐脚一致(P57/P3/P31/P32/P102/P103/
 P110/P111/P113,全部 LVCMOS33),无自动分配 I/O;`TS_clk = 83.33 ns` →
-**0 timing errors**(setup/hold/switching 全 0),`All constraints were met.`。
+**0 timing errors**(setup/hold/switching 全 0)、最小周期 9.220 ns、
+`All constraints were met.`。
 结论边界(P9 §51/§35):这是 DIGITAL IMPLEMENTATION PASS,不构成
 I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
 
@@ -94,8 +107,10 @@ I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
   **未写入任何内容**(`run.status=PREFLIGHT_FAILED`);重试后成功。属 fpga-vm
   USB 透传层问题,与工具/板卡无关。
 - **当前硬件状态**:内部 ISF = mode 0 诊断镜像(2026-09-17 重新擦除写入,run
-  `program-20260917-163937-54107e0d`);FPGA fabric 为后续 `finger_piano_od_test`
-  的授权 volatile 写入所覆盖,掉电重启会回到本 ISF 的 mode 0。
+  `program-20260917-163937-54107e0d`,其 ADS 总线为 **333333 Hz** 旧镜像);
+  FPGA fabric 为后续 `finger_piano_od_test` 的授权 volatile 写入所覆盖,掉电
+  重启会回到本 ISF 的 mode 0。当前 HEAD 的 mode 0 镜像是 **ADS 100 kHz** 版
+  (`20260917-170512-33e884e2`),尚未写入 ISF。
 - `userDesignFunctional` 依旧 **NOT_TESTED**:烧录成功 ≠ 设计在板上可用。
 
 ## 板测记录表(P9 §34,实测值必须由用户填写)
@@ -105,7 +120,7 @@ I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
 | P110 heartbeat | ~1 Hz 固定慢速翻转 | TODO | TODO |
 | P111 ADC toggle | 持续活动 | TODO | TODO |
 | P113 error | 正常时 0 | TODO | TODO |
-| ADC SCL | ~333 kHz | TODO | TODO |
+| ADC SCL | **~100 kHz**(P9 覆盖;16+104=120 拍 @12 MHz) | TODO | TODO |
 | DAC SCL | ~333 kHz | TODO | TODO |
 | DAC 0x400 VOUT | 低于 0x800 | TODO | TODO |
 | DAC 0x800 VOUT | ~VDD/2(3.3 V 时约 1.65 V,仅理论参考) | TODO | TODO |
