@@ -151,6 +151,12 @@ delta = sample_in - 2048
 sample_out = 2048 + delta × volume_level / 8
 ```
 
+> **P8-E 修正注记**：上式是**理想增益**。shift/add 实现（§6 逐项移位
+> 表）因每一项各自向 -inf 截断，结果是该理想值的**量化近似**，相对
+> `floor(delta*level/8)` 的误差 **≤ ±1 LSB**；单元 TB 已对全部
+> 4096×8 组合用理想参考锁定该界。文档与 RTL 注释中的公式均按此口径
+> 理解，不重写实现。
+
 禁止直接：
 
 ```text
@@ -289,6 +295,11 @@ TB 中用独立整数参考模型计算：
 delta = sample - 2048
 expected = 2048 + trunc(delta * level / 8)
 ```
+
+> **P8-E 修正注记**：TB 实际保留**两套**独立整数参考——(a) 与 RTL
+> 逐位一致的 shift/add 同语义参考（算术右移，向 -inf）；(b) 理想参考
+> `floor(delta*level/8)`（严格向 -inf），要求全部组合下
+> |RTL − ideal| ≤ 1 LSB。两套都不使用 real 四舍五入。
 
 必须与 RTL 的负数截断规则一致。禁止用 real 四舍五入制造与 RTL 不同的参考答案。
 

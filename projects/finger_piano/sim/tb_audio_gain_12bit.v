@@ -1,16 +1,20 @@
 //=============================================================================
-// tb_audio_gain_12bit.v — audio_gain_12bit 单元验收(P8 计划 Commit B,§9/§10)
+// tb_audio_gain_12bit.v — audio_gain_12bit 单元验收(P8 计划 Commit B,§9/§10;
+// P8-E 修正:增加理想增益参考检查)
 //
 // 覆盖:
 //   1. **全组合穷举**:sample_in 0..4095 × volume_level 0..7 全部 32768
-//      组合,与独立整数参考模型逐位比对(§10:参考 = 2048 +
-//      floor 移位语义的 shift/add,与 RTL 的算术右移完全一致;禁止用
-//      real 四舍五入制造另一套答案)。穷举同时证明端点 0/4095 无 wrap、
-//      level 0 恒 2048、2048 恒 2048(§7/§8/§26)。
+//      组合,与两套独立整数参考逐位比对:
+//        a) shift/add 同语义参考(与 RTL 的算术右移 floor 规则完全一致,
+//           逐位相等);
+//        b) **理想增益参考** floor(delta*level/8)(严格向 -inf,P8-E 新增):
+//           RTL 是该理想值的 shift/add 量化近似,要求全部组合下
+//           |RTL - ideal| <= 1 LSB。
+//      穷举同时证明端点 0/4095 无 wrap、level 0 恒 2048、2048 恒 2048
+//      (§7/§8/§26)。
 //   2. 正/负半波已知点抽查表:2560/3072/3840 与 256/1024/1536 全 level
 //      逐点打印(§9)。
-//   3. 对称性:|g(+d) + g(-d)| <= 1(floor 截断允许的 ±1 LSB 对称误差,
-//      §9)。
+//   3. 对称性:|g(+d) + g(-d)| <= 1(量化近似允许的 ±1 LSB 对称误差,§9)。
 //   4. 单调性:固定 |delta| 时,增益绝对值随 level 单调不减。
 //
 // 诊断文本全 ASCII。判定行:TB_AUDIO_GAIN_12BIT: PASS / FAIL
@@ -43,7 +47,8 @@ module tb_audio_gain_12bit;
     );
 
     //-------------------------------------------------------------------------
-    // 独立参考模型(P8 §10):floor 语义的 shift/add,与 RTL >>> 一致
+    // 独立参考模型一(P8 §10):shift/add 同语义参考,floor 移位与 RTL
+    // 的算术右移完全一致——预期与 RTL **逐位相等**。
     //-------------------------------------------------------------------------
     function integer fshift;    // floor(d / 2^n)
         input integer d;
@@ -77,9 +82,27 @@ module tb_audio_gain_12bit;
         end
     endfunction
 
+    //-------------------------------------------------------------------------
+    // 独立参考模型二(P8-E 新增):**理想增益** floor(delta*level/8),
+    // 严格向 -inf 取整。RTL 的 shift/add 是该理想值的量化近似(逐项
+    // 移位截断),本检查锁定全部组合下 |RTL - ideal| <= 1 LSB。
+    //-------------------------------------------------------------------------
+    function integer ideal_scaled;
+        input integer delta;
+        input integer lvl;
+        integer p;
+        begin
+            p = delta * lvl;
+            if (p >= 0) ideal_scaled = p / 8;
+            else        ideal_scaled = -(((-p) + 7) / 8);
+        end
+    endfunction
+
     task apply_check;
         input integer in_code;
         input integer in_lvl;
+        integer ideal_code;
+        integer diff;
         begin
             sample_in    = in_code[11:0];
             volume_level = in_lvl[2:0];
@@ -89,8 +112,18 @@ module tb_audio_gain_12bit;
             got      = sample_out;
             if (got !== exp_code) begin
                 errors = errors + 1;
-                $display("FAIL: in=%0d lvl=%0d: got %0d expected %0d",
+                $display("FAIL: shiftadd ref: in=%0d lvl=%0d: got %0d expected %0d",
                          in_code, in_lvl, got, exp_code);
+            end
+            // 理想增益参考:|RTL - ideal| <= 1 LSB(P8-E)
+            checks = checks + 1;
+            ideal_code = 2048 + ideal_scaled(in_code - 2048, in_lvl);
+            diff = got - ideal_code;
+            if (diff < 0) diff = -diff;
+            if (diff > 1) begin
+                errors = errors + 1;
+                $display("FAIL: ideal ref: in=%0d lvl=%0d: got %0d ideal %0d (diff %0d > 1)",
+                         in_code, in_lvl, got, ideal_code, diff);
             end
         end
     endtask
@@ -111,7 +144,7 @@ module tb_audio_gain_12bit;
                 apply_check(s, lvl);
             end
         end
-        $display("  ok: exhaustive 4096x8 sweep done (%0d checks)", checks);
+        $display("  ok: exhaustive 4096x8 sweep done (%0d checks: shift-add bitwise + ideal <=1 LSB)", checks);
 
         //---------------------------------------------------------------------
         // 2. 关键语义点(§8/§9)
