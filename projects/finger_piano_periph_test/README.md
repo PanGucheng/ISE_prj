@@ -65,8 +65,8 @@ Stage-2 ISF 由用户决定(P9 §37)。
 
 | 镜像 | DAC_TEST_MODE | run id | SHA256 | size |
 |---|---|---|---|---|
-| mode 0(默认,当前 ISF 内容) | 0(0x800 DC) | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` | 54 738 B |
-| mode 3(`P9_DAC_MODE3` defines,当前 volatile fabric) | 3(1 kHz / 8 kS/s) | bitstream `20260917-152127-13a3ee2f`(`-define P9_DAC_MODE3`,121 warnings) | `1b84780a31570c799d89ad1e954d050e19e04362f37daf56fbef5c595901633e` | 54 738 B |
+| mode 0(默认,当前 ISF 与 volatile fabric 内容) | 0(0x800 DC) | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` | 54 738 B |
+| mode 3(可复现变体,不参与 verify 门禁) | 3(1 kHz / 8 kS/s) | bitstream `20260917-152127-13a3ee2f`(`-define P9_DAC_MODE3`,121 warnings) | `1b84780a31570c799d89ad1e954d050e19e04362f37daf56fbef5c595901633e` | 54 738 B |
 
 两个镜像均为 xc3s50an-4-tqg144、DRC 0/0;基线(mode 0、无 defines)回归
 `verify-20260917-152255-62bd2ff6` Overall **PASS**(144 allowed / 0 unexpected、
@@ -86,13 +86,14 @@ I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
 |---|---|---|---|---|
 | 1 | Isf(非易失,mode 0) | `program-20260917-150508-cb48ed1d` | `programmingCompleted=PASS` / `programmingVerified=VERIFIED` | `Erasing device...` → `Erasure completed successfully.` → `Programming Flash...done.` → `Programming completed successfully.` → `Verification completed successfully.`;cable SN 210241672559 / 10 MHz |
 | 2 | Jtag(易失,mode 3) | `program-20260917-152236-2c99ad5e` | `PASS` / `CONFIG_STATUS_OK` | `Programming device` → `Completed downloading bit file to device` → `Programmed successfully`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1` |
+| 3 | Jtag(易失,由 mode 3 切回 mode 0) | `program-20260917-153713-a2dbc37a` | `PASS` / `CONFIG_STATUS_OK` | 同上 fabric 配置证据;当前 volatile fabric = mode 0 |
 
 - 若干次尝试(`program-20260917-145845-239e3f35` 等)在 preflight 阶段因下载线
   `DIGILENT_OPEN_FAILED`(`failed to open device (DmgrOpenEx, erc = 3072)`)失败,
   **未写入任何内容**(`run.status=PREFLIGHT_FAILED`);重试后成功。属 fpga-vm
   USB 透传层问题,与工具/板卡无关。
-- **当前硬件状态**:内部 ISF = mode 0 诊断镜像(上电启动 mode 0);FPGA fabric =
-  mode 3 易失镜像(掉电丢失)。
+- **当前硬件状态**:内部 ISF = mode 0 诊断镜像;FPGA fabric = mode 0(2026-09-17
+  由 mode 3 切回,易失镜像,掉电丢失)。
 - `userDesignFunctional` 依旧 **NOT_TESTED**:烧录成功 ≠ 设计在板上可用。
 
 ## 板测记录表(P9 §34,实测值必须由用户填写)
