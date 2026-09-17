@@ -1,17 +1,17 @@
 #=============================================================================
-# od_test.ucf -- finger_piano_od_test (P31/P32 open-drain IO 板级诊断工程)
+# od_test.ucf -- finger_piano_od_test (P31/P32/P110 推挽方波板级诊断工程)
 #
-# 只约束 4 个已确认引脚(全部 LVCMOS33,VCCO 全 3.3 V):
-#   clk      P57  12 MHz 有源晶振(唯一系统时钟)
-#   rst_n    P3   低有效外部复位
-#   p31_test P31  开漏:0 / Z(板级外部 4.7 kΩ 上拉到 3.3 V)
-#   p32_test P32  开漏:0 / Z(板级外部 4.7 kΩ 上拉到 3.3 V)
+# 只约束 5 个已确认引脚(全部 LVCMOS33,VCCO 全 3.3 V):
+#   clk       P57  12 MHz 有源晶振(唯一系统时钟)
+#   rst_n     P3   低有效外部复位
+#   p31_test  P31  推挽 1 kHz 方波
+#   p32_test  P32  推挽 1 kHz 方波(与 P31 同相)
+#   p110_test P110 推挽 1 kHz 方波(与 P31 同相)
 #
 # 说明:
-#   - P31/P32 是 Bank 3 的普通 I/O,VCCO=3.3 V,LVCMOS33 与外部 3.3 V 匹配;
-#   - **不写 PULLUP / PULLDOWN**:高电平完全由板级外部 4.7 kΩ 电阻提供;
-#     两个脚都是被使用的 IOB,因此 bitgen 的 UnusedPin 设置对它们不生效;
-#   - 两路输出是普通 GPIO,绝不建时钟域、绝不写进任何 always 的时钟沿;
+#   - 五个脚都是普通 I/O,VCCO=3.3 V,LVCMOS33;
+#   - **不写 PULLUP / PULLDOWN**:三个输出是推挽驱动,不需要外部/内部上拉;
+#   - 输出是普通 GPIO,绝不建时钟域、绝不写进任何 always 的时钟沿;
 #   - UCF 不写 OFFSET(没有板级 I/O 时序数据,不得假装已认证);
 #   - 不得依赖 MAP 自动分配任何引脚。
 #
@@ -27,10 +27,11 @@ NET "rst_n" LOC = P3  | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------
-# OPEN-DRAIN DIAGNOSTIC OUTPUTS (0 / Z only;外部 3.3 V 上拉;无 PULLUP/PULLDOWN)
+# PUSH-PULL 1 kHz DIAGNOSTIC OUTPUTS(同相位)
 #-----------------------------------------------------------------------------
-NET "p31_test" LOC = P31 | IOSTANDARD = LVCMOS33;
-NET "p32_test" LOC = P32 | IOSTANDARD = LVCMOS33;
+NET "p31_test"  LOC = P31  | IOSTANDARD = LVCMOS33;
+NET "p32_test"  LOC = P32  | IOSTANDARD = LVCMOS33;
+NET "p110_test" LOC = P110 | IOSTANDARD = LVCMOS33;
 
 
 #-----------------------------------------------------------------------------

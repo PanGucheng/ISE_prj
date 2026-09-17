@@ -1,70 +1,62 @@
 //=============================================================================
 // od_test_top.v
-// finger_piano_od_test -- P31/P32 开漏(open-drain)IO 板级诊断顶层。
+// finger_piano_od_test -- P31/P32/P110 推挽方波板级诊断顶层。
 //
-// 目的:在 ADS1115 完全断开、P31/P32 各自用 4.7 kΩ 上拉到 3.3 V 的条件下,
-// 用一个**运行时变化**的慢速相位让两路开漏输出互补,每个状态保持 1 秒:
+// 目的:用一个 12 MHz 系统时钟产生**同相位、同频率**的 1 kHz、50% 占空比
+// **推挽**方波,同时从 P31、P32、P110 三个脚输出,便于:
+//   - 用示波器/频率计同时核对三个脚的输出频率与相位;
+//   - 确认三个脚都能正常推挽驱动高/低(高电平由 FPGA 自己驱动)。
 //
-//       phase = 0 : P31 = Z   , P32 = LOW   (0 s ~ 1 s)
-//       phase = 1 : P31 = LOW , P32 = Z     (1 s ~ 2 s)
-//
-// 这样单个 bitstream 内两条线都能被分别观察:
-//       Z   + 外部 4.7 kΩ 上拉 -> 板上约 3.3 V(FPGA 不驱动)
-//       LOW                     -> 板上约 0 V(FPGA 拉低)
-// 并且两个三态缓冲都是真实运行时信号驱动的,综合器**不能**把任何一路
-// 当作常量 Z 优化掉(不是永久常量实现)。
+//   Fout = SYS_CLK_HZ / (2 * HALF),12 MHz / 1 kHz -> HALF = 6000 clk。
 //
 // 结构约束:
 //   - 全工程只有 clk(P57,12 MHz)一个时钟域,只有 posedge clk;
 //   - 异步低有效复位 rst_n(P3),全工程唯一复位;
-//   - 相位由 clock-enable 语义的计数器产生,不使用任何分频时钟;
-//   - 输出严格 0 / Z(顶层 inout):
-//         assign p31_test = p31_drive_low ? 1'b0 : 1'bz;
-//         assign p32_test = p32_drive_low ? 1'b0 : 1'bz;
-//     绝不推挽驱动 1;高电平完全来自板级外部上拉;
+//   - 分频用 clock-enable 语义的计数器,不使用任何派生时钟;
+//   - 三个输出都是普通推挽输出(0/1),不建时钟域、不写进任何时钟沿;
 //   - UCF 不写 PULLUP/PULLDOWN,不使用 KEEP/DONT_TOUCH。
 //=============================================================================
 
 `include "od_test_cfg.vh"
 
 module od_test_top #(
-    parameter integer SYS_CLK_HZ     = `OD_SYS_CLK_HZ,
-    parameter integer PHASE_HALF_CYC = `OD_PHASE_HALF_CYC   // 每多少个 clk 互换相位
+    parameter integer SYS_CLK_HZ = `OD_SYS_CLK_HZ,
+    parameter integer TONE_HZ    = `OD_TONE_HZ       // 目标方波频率
 ) (
     input  wire clk,        // P57, 12 MHz 有源晶振(唯一系统时钟)
     input  wire rst_n,      // P3, 低有效外部复位
 
-    inout  wire p31_test,   // P31, 开漏:0 / Z
-    inout  wire p32_test    // P32, 开漏:0 / Z
+    output wire p31_test,   // P31, 推挽 1 kHz 方波
+    output wire p32_test,   // P32, 推挽 1 kHz 方波(与 P31 同相)
+    output wire p110_test   // P110, 推挽 1 kHz 方波(与 P31 同相)
 );
 
     //-------------------------------------------------------------------------
-    // 慢速相位:每 PHASE_HALF_CYC 个 clk 互换一次
-    //   12 MHz 下 PHASE_HALF_CYC = 12,000,000 -> 每个状态 1 秒,周期 2 秒
-    //   计数器位宽 24 bit 足够容纳 12,000,000(< 2^24)。
+    // 半周期拍数:每 HALF 个 clk 翻转一次,输出 50% 占空比
+    //   12 MHz / 1 kHz -> HALF = 6000(13 bit 计数器足够,6000 < 8192)
     //-------------------------------------------------------------------------
-    reg [23:0] phase_cnt = 24'd0;
-    reg        phase     = 1'b0;
+    localparam integer HALF = SYS_CLK_HZ / (2 * TONE_HZ);
+
+    reg [12:0] cnt  = 13'd0;
+    reg        wave = 1'b0;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            phase_cnt <= 24'd0;
-            phase     <= 1'b0;
-        end else if (phase_cnt == (PHASE_HALF_CYC - 1)) begin
-            phase_cnt <= 24'd0;
-            phase     <= ~phase;
+            cnt  <= 13'd0;
+            wave <= 1'b0;
+        end else if (cnt == (HALF - 1)) begin
+            cnt  <= 13'd0;
+            wave <= ~wave;
         end else begin
-            phase_cnt <= phase_cnt + 24'd1;
+            cnt <= cnt + 13'd1;
         end
     end
 
     //-------------------------------------------------------------------------
-    // 互补开漏驱动:phase=0 -> P31 Z / P32 LOW;phase=1 -> P31 LOW / P32 Z
+    // 三个脚同相位、同波形(推挽 0/1)
     //-------------------------------------------------------------------------
-    wire p31_drive_low = phase;
-    wire p32_drive_low = ~phase;
-
-    assign p31_test = p31_drive_low ? 1'b0 : 1'bz;
-    assign p32_test = p32_drive_low ? 1'b0 : 1'bz;
+    assign p31_test  = wave;
+    assign p32_test  = wave;
+    assign p110_test = wave;
 
 endmodule

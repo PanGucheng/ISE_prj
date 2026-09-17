@@ -28,22 +28,22 @@
         "sim/tb_od_test_top.v"
       ],
       "generics": {
-        "TB_PHASE_HALF_CYC": "200"
+        "TB_TONE_HZ": "12000"
       },
       "timeoutSeconds": 120,
       "passPattern": "TB_OD_TEST_TOP: PASS",
       "failPattern": "TB_OD_TEST_TOP: FAIL"
     },
     {
-      "name": "od_test_real_1s",
+      "name": "od_test_tone_1k",
       "top": "tb_od_test_top",
       "sources": [
         "sim/tb_od_test_top.v"
       ],
       "generics": {
-        "TB_PHASE_HALF_CYC": "12000000"
+        "TB_TONE_HZ": "1000"
       },
-      "timeoutSeconds": 1800,
+      "timeoutSeconds": 300,
       "passPattern": "TB_OD_TEST_TOP: PASS",
       "failPattern": "TB_OD_TEST_TOP: FAIL"
     }
@@ -57,7 +57,8 @@
     ],
     "forbiddenEdgeSignals": [
       "p31_test",
-      "p32_test"
+      "p32_test",
+      "p110_test"
     ]
   },
   "programming": {
