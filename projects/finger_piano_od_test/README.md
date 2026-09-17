@@ -103,13 +103,23 @@ projects/finger_piano_od_test/artifacts/20260917-163556-c0d5de09/results/design.
 ```text
 OD DIAGNOSTIC BITSTREAM = READY(推挽 1 kHz,P31/P32/P110)
 BOARD TEST              = READY_FOR_BOARD_TEST(等待用户实测)
-PROGRAM                 = NOT RUN(本版尚未烧录)
+PROGRAM                 = DONE(2026-09-17 volatile Jtag,经用户明确授权)
 userDesignFunctional    = NOT_TESTED
 ```
 
-**本版未执行 `program`。** 板上的 fabric 目前仍是上一版 1 秒互补 open-drain
-设计(`program-20260917-162532-7fe23477`),要观察本版推挽 1 kHz 需要重新授权烧录。
-即使烧录成功也只是配置证据,**不构成板级功能 PASS**。
+**本版未执行 ISF 写入。** 2026-09-17 经用户明确要求 + `-ConfirmHardwareWrite`
+执行了一次 **volatile Jtag** 配置(见下);烧录成功只是配置证据,
+**不构成板级功能 PASS**。
+
+## 授权烧录记录(2026-09-17)
+
+| 模式 | run id | 镜像 | 结果 | 关键证据 |
+|---|---|---|---|---|
+| Jtag(易失) | `program-20260917-163655-ed791d87` | `20260917-163556-c0d5de09`(SHA256 `c7f5684d…17f647ea`) | `PASS` / `CONFIG_STATUS_OK` | preflight PASS(cable SN 210241672559 / 10 MHz);`Programming device` → `Completed downloading bit file to device` → `Programmed successfully`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1` |
+
+- 当前硬件状态:**FPGA fabric = 本工程推挽 1 kHz 设计(易失,掉电丢失)**;
+  内部 ISF 仍是 P9 诊断 mode 0 镜像(上电启动 P9 诊断,不是本工程)。
+- `userDesignFunctional` 依旧 **NOT_TESTED**:需要按「板测步骤」实测 P31/P32/P110。
 
 ## 板测步骤(建议)
 
