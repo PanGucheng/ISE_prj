@@ -2,79 +2,69 @@
 // od_test_top.v
 // finger_piano_od_test -- P31/P32 开漏(open-drain)IO 板级诊断顶层。
 //
-// 目的:在 ADS1115 完全断开、P31/P32 由外部电阻上拉到 3.3 V 的条件下,
-// 用示波器/频率计直接观察两条开漏线的拉低/释放行为:
-//   P31 = 约 1 kHz 方波(每 6000 个 clk 翻转一次拉低状态)
-//   P32 = 约 2 kHz 方波(每 3000 个 clk 翻转一次拉低状态)
+// 目的:在 ADS1115 完全断开、P31/P32 各自用 4.7 kΩ 上拉到 3.3 V 的条件下,
+// 用一个**运行时变化**的慢速相位让两路开漏输出互补,每个状态保持 1 秒:
+//
+//       phase = 0 : P31 = Z   , P32 = LOW   (0 s ~ 1 s)
+//       phase = 1 : P31 = LOW , P32 = Z     (1 s ~ 2 s)
+//
+// 这样单个 bitstream 内两条线都能被分别观察:
+//       Z   + 外部 4.7 kΩ 上拉 -> 板上约 3.3 V(FPGA 不驱动)
+//       LOW                     -> 板上约 0 V(FPGA 拉低)
+// 并且两个三态缓冲都是真实运行时信号驱动的,综合器**不能**把任何一路
+// 当作常量 Z 优化掉(不是永久常量实现)。
 //
 // 结构约束:
-//   - 全工程只有 clk(P57,12 MHz)一个时钟域;
-//   - 不使用分频器输出当时钟,只用 posedge clk + counter(clock-enable 语义);
-//   - 输出严格 0 / Z:
+//   - 全工程只有 clk(P57,12 MHz)一个时钟域,只有 posedge clk;
+//   - 异步低有效复位 rst_n(P3),全工程唯一复位;
+//   - 相位由 clock-enable 语义的计数器产生,不使用任何分频时钟;
+//   - 输出严格 0 / Z(顶层 inout):
 //         assign p31_test = p31_drive_low ? 1'b0 : 1'bz;
 //         assign p32_test = p32_drive_low ? 1'b0 : 1'bz;
-//     即只在拉低时驱动 0,释放时为高阻,绝不推挽驱动 1;高电平完全来自
-//     板级外部上拉电阻(不是 FPGA 内部 PULLUP,也不写 UCF PULLUP);
-//   - 无外部复位引脚(UCF 只允许 P57/P31/P32),计数器用上电初值,
-//     配置完成后(GSR)两路输出先处于释放态,再开始分频。
-//
-// Fout = SYS_CLK_HZ / (2 * HALF),HALF 为"每 HALF 个 clk 翻转一次";
-// 频率参数全部来自 od_test_cfg.vh(本工程唯一配置真值源)。
+//     绝不推挽驱动 1;高电平完全来自板级外部上拉;
+//   - UCF 不写 PULLUP/PULLDOWN,不使用 KEEP/DONT_TOUCH。
 //=============================================================================
 
 `include "od_test_cfg.vh"
 
 module od_test_top #(
-    parameter integer SYS_CLK_HZ = `OD_SYS_CLK_HZ,
-    parameter integer P31_HZ     = `OD_P31_HZ,
-    parameter integer P32_HZ     = `OD_P32_HZ
+    parameter integer SYS_CLK_HZ     = `OD_SYS_CLK_HZ,
+    parameter integer PHASE_HALF_CYC = `OD_PHASE_HALF_CYC   // 每多少个 clk 互换相位
 ) (
     input  wire clk,        // P57, 12 MHz 有源晶振(唯一系统时钟)
+    input  wire rst_n,      // P3, 低有效外部复位
 
-    output wire p31_test,   // P31, 开漏:0 / Z(约 1 kHz)
-    output wire p32_test    // P32, 开漏:0 / Z(约 2 kHz)
+    inout  wire p31_test,   // P31, 开漏:0 / Z
+    inout  wire p32_test    // P32, 开漏:0 / Z
 );
 
     //-------------------------------------------------------------------------
-    // 半周期拍数:每 HALF 个 clk 翻转一次"拉低"状态
+    // 慢速相位:每 PHASE_HALF_CYC 个 clk 互换一次
+    //   12 MHz 下 PHASE_HALF_CYC = 12,000,000 -> 每个状态 1 秒,周期 2 秒
+    //   计数器位宽 24 bit 足够容纳 12,000,000(< 2^24)。
     //-------------------------------------------------------------------------
-    localparam integer P31_HALF = SYS_CLK_HZ / (2 * P31_HZ);
-    localparam integer P32_HALF = SYS_CLK_HZ / (2 * P32_HZ);
+    reg [23:0] phase_cnt = 24'd0;
+    reg        phase     = 1'b0;
 
-    //-------------------------------------------------------------------------
-    // P31:上电初值 = 释放(Z),counter 从 0 开始
-    //-------------------------------------------------------------------------
-    reg [15:0] cnt31 = 16'd0;
-    reg        low31 = 1'b0;
-
-    always @(posedge clk) begin
-        if (cnt31 == (P31_HALF - 1)) begin
-            cnt31 <= 16'd0;
-            low31 <= ~low31;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            phase_cnt <= 24'd0;
+            phase     <= 1'b0;
+        end else if (phase_cnt == (PHASE_HALF_CYC - 1)) begin
+            phase_cnt <= 24'd0;
+            phase     <= ~phase;
         end else begin
-            cnt31 <= cnt31 + 16'd1;
+            phase_cnt <= phase_cnt + 24'd1;
         end
     end
 
     //-------------------------------------------------------------------------
-    // P32:上电初值 = 释放(Z),counter 从 0 开始
+    // 互补开漏驱动:phase=0 -> P31 Z / P32 LOW;phase=1 -> P31 LOW / P32 Z
     //-------------------------------------------------------------------------
-    reg [15:0] cnt32 = 16'd0;
-    reg        low32 = 1'b0;
+    wire p31_drive_low = phase;
+    wire p32_drive_low = ~phase;
 
-    always @(posedge clk) begin
-        if (cnt32 == (P32_HALF - 1)) begin
-            cnt32 <= 16'd0;
-            low32 <= ~low32;
-        end else begin
-            cnt32 <= cnt32 + 16'd1;
-        end
-    end
-
-    //-------------------------------------------------------------------------
-    // 开漏输出:只拉低,释放为高阻;绝不输出 1
-    //-------------------------------------------------------------------------
-    assign p31_test = low31 ? 1'b0 : 1'bz;
-    assign p32_test = low32 ? 1'b0 : 1'bz;
+    assign p31_test = p31_drive_low ? 1'b0 : 1'bz;
+    assign p32_test = p32_drive_low ? 1'b0 : 1'bz;
 
 endmodule

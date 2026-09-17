@@ -22,13 +22,28 @@
   "optimizationLevel": 1,
   "simulations": [
     {
-      "name": "od_test_top",
+      "name": "od_test_fast",
       "top": "tb_od_test_top",
       "sources": [
         "sim/tb_od_test_top.v"
       ],
-      "generics": {},
-      "timeoutSeconds": 300,
+      "generics": {
+        "TB_PHASE_HALF_CYC": "200"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_OD_TEST_TOP: PASS",
+      "failPattern": "TB_OD_TEST_TOP: FAIL"
+    },
+    {
+      "name": "od_test_real_1s",
+      "top": "tb_od_test_top",
+      "sources": [
+        "sim/tb_od_test_top.v"
+      ],
+      "generics": {
+        "TB_PHASE_HALF_CYC": "12000000"
+      },
+      "timeoutSeconds": 1800,
       "passPattern": "TB_OD_TEST_TOP: PASS",
       "failPattern": "TB_OD_TEST_TOP: FAIL"
     }
@@ -37,6 +52,9 @@
     "expectImplementationBlocked": false,
     "failOnSynthesisWarnings": true,
     "clockName": "clk",
+    "resetNames": [
+      "rst_n"
+    ],
     "forbiddenEdgeSignals": [
       "p31_test",
       "p32_test"
