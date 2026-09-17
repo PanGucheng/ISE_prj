@@ -87,13 +87,15 @@ I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
 | 1 | Isf(非易失,mode 0) | `program-20260917-150508-cb48ed1d` | `programmingCompleted=PASS` / `programmingVerified=VERIFIED` | `Erasing device...` → `Erasure completed successfully.` → `Programming Flash...done.` → `Programming completed successfully.` → `Verification completed successfully.`;cable SN 210241672559 / 10 MHz |
 | 2 | Jtag(易失,mode 3) | `program-20260917-152236-2c99ad5e` | `PASS` / `CONFIG_STATUS_OK` | `Programming device` → `Completed downloading bit file to device` → `Programmed successfully`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1` |
 | 3 | Jtag(易失,由 mode 3 切回 mode 0) | `program-20260917-153713-a2dbc37a` | `PASS` / `CONFIG_STATUS_OK` | 同上 fabric 配置证据;当前 volatile fabric = mode 0 |
+| 4 | Isf(非易失,重写 mode 0 镜像) | `program-20260917-163937-54107e0d` | `programmingCompleted=PASS` / `programmingVerified=VERIFIED` | `Erasing device...` → `Erasure completed successfully.` → `Programming Flash...done.` → `Programming completed successfully.` → `Verification completed successfully.`;内容与 row 1 相同(SHA256 `9654a942…764ae09a`)
 
 - 若干次尝试(`program-20260917-145845-239e3f35` 等)在 preflight 阶段因下载线
   `DIGILENT_OPEN_FAILED`(`failed to open device (DmgrOpenEx, erc = 3072)`)失败,
   **未写入任何内容**(`run.status=PREFLIGHT_FAILED`);重试后成功。属 fpga-vm
   USB 透传层问题,与工具/板卡无关。
-- **当前硬件状态**:内部 ISF = mode 0 诊断镜像;FPGA fabric = mode 0(2026-09-17
-  由 mode 3 切回,易失镜像,掉电丢失)。
+- **当前硬件状态**:内部 ISF = mode 0 诊断镜像(2026-09-17 重新擦除写入,run
+  `program-20260917-163937-54107e0d`);FPGA fabric 为后续 `finger_piano_od_test`
+  的授权 volatile 写入所覆盖,掉电重启会回到本 ISF 的 mode 0。
 - `userDesignFunctional` 依旧 **NOT_TESTED**:烧录成功 ≠ 设计在板上可用。
 
 ## 板测记录表(P9 §34,实测值必须由用户填写)
