@@ -55,7 +55,9 @@
 ## 5. 软件与仿真记录
 
 - **Stage A (Scaffold)**: `ise.ps1 check -Project tone_dac_demo -Stage synth` PASS
-- **Stage B (Input + Square)**: TODO
+- **Stage B (Input + Square)**: PASS
+  - `sensor_code_frontend`: run `sim-20260921-135942-db901a7e` (PASS)
+  - `tone_generator_12m`: run `sim-20260921-135955-eb4c4a75` (PASS)
 - **Stage C (DDS + MCP4725)**: TODO
 - **Stage D (Top Integration)**: TODO
 - **Stage E (Full Verify)**: TODO
