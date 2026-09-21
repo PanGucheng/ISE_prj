@@ -58,7 +58,8 @@
 - **Stage B (Input + Square)**: PASS
   - `sensor_code_frontend`: run `sim-20260921-135942-db901a7e` (PASS)
   - `tone_generator_12m`: run `sim-20260921-135955-eb4c4a75` (PASS)
-- **Stage C (DDS + MCP4725)**: TODO
+- **Stage C (DDS + MCP4725)**: PASS
+  - `dds_mcp4725_pipeline`: run `sim-20260921-140027-8600e28a` (PASS)
 - **Stage D (Top Integration)**: TODO
 - **Stage E (Full Verify)**: TODO
 - **Stage F (Bitstream)**: TODO
