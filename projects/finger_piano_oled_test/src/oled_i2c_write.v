@@ -27,7 +27,6 @@ module oled_i2c_write #(
     input  wire       stop_req,        // 发送 STOP
 
     // 状态与响应
-    output reg        busy,            // 1: 正在执行总线事务
     output reg        byte_done,       // 单周期脉冲：当前字节/START/STOP 完成
     output reg        ack_error,       // 采样到的 ACK 状态（1: NACK 异常，0: ACK 正常）
 
@@ -44,7 +43,6 @@ module oled_i2c_write #(
     localparam integer CYCLES_PER_PHASE = CYCLES_PER_BIT / 4;
 
     reg [7:0] clk_cnt;
-    reg [1:0] phase;
 
     // 内部驱动控制（1 = 拉低为0，0 = 释放为Z）
     reg scl_drive_low;
@@ -76,10 +74,8 @@ module oled_i2c_write #(
         if (!rst_n_sync) begin
             state         <= ST_IDLE;
             clk_cnt       <= 8'd0;
-            phase         <= 2'd0;
             scl_drive_low <= 1'b0;
             sda_drive_low <= 1'b0;
-            busy          <= 1'b0;
             byte_done     <= 1'b0;
             ack_error     <= 1'b0;
             shift_reg     <= 8'd0;
@@ -89,23 +85,17 @@ module oled_i2c_write #(
 
             case (state)
                 ST_IDLE: begin
-                    clk_cnt       <= 8'd0;
-                    phase         <= 2'd0;
+                    clk_cnt <= 8'd0;
                     if (start_req) begin
-                        busy          <= 1'b1;
-                        shift_reg     <= I2C_ADDR_WRITE; // START 自动带入写地址 0x78
-                        bit_cnt       <= 3'd7;
-                        state         <= ST_START_PRE;
+                        shift_reg <= I2C_ADDR_WRITE; // START 自动带入写地址 0x78
+                        bit_cnt   <= 3'd7;
+                        state     <= ST_START_PRE;
                     end else if (write_byte_req) begin
-                        busy          <= 1'b1;
-                        shift_reg     <= byte_in;
-                        bit_cnt       <= 3'd7;
-                        state         <= ST_BIT_LOW;
+                        shift_reg <= byte_in;
+                        bit_cnt   <= 3'd7;
+                        state     <= ST_BIT_LOW;
                     end else if (stop_req) begin
-                        busy          <= 1'b1;
-                        state         <= ST_STOP_PRE;
-                    end else begin
-                        busy <= 1'b0;
+                        state <= ST_STOP_PRE;
                     end
                 end
 

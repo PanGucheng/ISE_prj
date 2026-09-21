@@ -8,6 +8,16 @@
       "library": "work"
     },
     {
+      "path": "src/oled_bitmap_rom.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_title_rom.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/oled_i2c_write.v",
       "language": "verilog",
       "library": "work"
@@ -56,8 +66,14 @@
       "rst_n_sync"
     ],
     "forbiddenEdgeSignals": [],
-    "synthesisWarningAllowlistNote": "Audited for Stage OLED-1 test.",
-    "synthesisWarningAllowlist": []
+    "synthesisWarningAllowlistNote": "Audited 1 warning for oled_bitmap_rom read-only Block RAM table (Signal <mem> is used but never assigned. Tied to default value).",
+    "synthesisWarningAllowlist": [
+      {
+        "id": "Xst:1781",
+        "pattern": "Signal <mem> is used but never assigned\\. Tied to default value\\.",
+        "expected": 1
+      }
+    ]
   },
   "programming": {
     "cableType": "digilent",
