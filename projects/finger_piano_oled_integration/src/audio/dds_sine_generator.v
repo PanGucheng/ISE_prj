@@ -49,6 +49,22 @@ module dds_sine_generator #(
     localparam integer SAMPLE_DIV =
         (SYS_CLK_HZ / SAMPLE_RATE_HZ < 2) ? 2 : (SYS_CLK_HZ / SAMPLE_RATE_HZ);
 
+    // 计算表示非负整数所需的最小位宽(纯 Verilog-2001 常量函数)
+    function integer calc_bits;
+        input integer v;
+        integer bits;
+        begin
+            bits = 0;
+            while (v > 0) begin
+                bits = bits + 1;
+                v = v >> 1;
+            end
+            calc_bits = (bits < 1) ? 1 : bits;
+        end
+    endfunction
+
+    localparam integer SAMPLE_CNT_BITS = calc_bits(SAMPLE_DIV - 1);
+
     //-------------------------------------------------------------------------
     // ENABLE = 0:静音直连分支,无任何计数器/时钟逻辑
     //-------------------------------------------------------------------------
@@ -81,13 +97,13 @@ module dds_sine_generator #(
     //-------------------------------------------------------------------------
     // 内部状态(§19)
     //-------------------------------------------------------------------------
-    reg  [15:0] sample_cnt;
+    reg  [SAMPLE_CNT_BITS-1:0] sample_cnt;
     reg  [23:0] phase_acc;
     reg  [23:0] phase_inc;
     reg  [2:0]  note_q;
     reg  [11:0] dac_code_r;
     reg         r_valid;
-    wire        sample_tick = (sample_cnt == SAMPLE_DIV - 1);
+    wire        sample_tick = (sample_cnt == (SAMPLE_DIV - 1));
 
     wire [11:0] lut_code;
     sine_lut_12bit u_lut (
@@ -100,7 +116,7 @@ module dds_sine_generator #(
     //-------------------------------------------------------------------------
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            sample_cnt     <= 16'd0;
+            sample_cnt     <= {SAMPLE_CNT_BITS{1'b0}};
             phase_acc      <= 24'd0;
             phase_inc      <= 24'd0;
             note_q         <= 3'd0;
@@ -110,9 +126,9 @@ module dds_sine_generator #(
             // 采样节拍:独立于音符切换,严格恒定(§23)
             r_valid        <= sample_tick;
             if (sample_tick) begin
-                sample_cnt <= 16'd0;
+                sample_cnt <= {SAMPLE_CNT_BITS{1'b0}};
             end else begin
-                sample_cnt <= sample_cnt + 16'd1;
+                sample_cnt <= sample_cnt + 1'b1;
             end
 
             if (note_code != note_q) begin
