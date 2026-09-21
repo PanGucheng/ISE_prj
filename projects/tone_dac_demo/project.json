@@ -1,0 +1,142 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "tone_dac_demo_top",
+  "sources": [
+    {
+      "path": "src/reset_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/key_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_decoder.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_filter.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_frontend.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/tone_generator.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/sine_lut_12bit.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_sine_generator.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/i2c_master.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/mcp4725_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_mcp4725_pipeline.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/tone_dac_demo_top.v",
+      "language": "verilog",
+      "library": "work"
+    }
+  ],
+  "includeDirs": [
+    "src"
+  ],
+  "includeFiles": [
+    "src/finger_piano_cfg.vh"
+  ],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/tone_dac_demo.ucf",
+  "constraintsReviewed": true,
+  "optimization": "Speed",
+  "optimizationLevel": 1,
+  "simulations": [
+    {
+      "name": "sensor_code_frontend",
+      "top": "tb_sensor_code_frontend",
+      "sources": [
+        "sim/tb_sensor_code_frontend.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SENSOR_CODE_FRONTEND: PASS",
+      "failPattern": "TB_SENSOR_CODE_FRONTEND: FAIL"
+    },
+    {
+      "name": "tone_generator_12m",
+      "top": "tb_tone_generator",
+      "sources": [
+        "sim/tb_tone_generator.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_TONE_GENERATOR: PASS",
+      "failPattern": "TB_TONE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    }
+  ],
+  "verification": {
+    "expectImplementationBlocked": false,
+    "failOnSynthesisWarnings": true,
+    "clockName": "clk",
+    "resetNames": [
+      "rst_n",
+      "rst_n_sync"
+    ],
+    "forbiddenEdgeSignals": [
+      "square_out",
+      "dac_i2c_scl"
+    ]
+  },
+  "programming": {
+    "cableType": "digilent",
+    "cableSerial": "210241672559",
+    "cableFrequencyHz": 10000000,
+    "position": 1,
+    "probeTimeoutSeconds": 120,
+    "jtagTimeoutSeconds": 300,
+    "isfTimeoutSeconds": 600,
+    "verifyTimeoutSeconds": 300,
+    "cableRetryAttempts": 3
+  }
+}

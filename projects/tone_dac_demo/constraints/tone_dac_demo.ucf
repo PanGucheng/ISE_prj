@@ -1,0 +1,32 @@
+#=============================================================================
+# tone_dac_demo.ucf  --  XC3S50AN TQ144 独立验证工程引脚约束
+#
+# 板级引脚原则：严格复用最终 Stage-2 冻结引脚（P57/P3/P28~P30/P102/P103）。
+# 唯一特例：P110 在 tone_dac_demo 中临时作为 square_out；
+# 最终 finger_piano Stage-2 中恢复为 note_debug[0]。
+# ADS1115 引脚 P31/P32 保持空闲未分配。
+#=============================================================================
+
+# SYSTEM CLOCK: P57 (全局时钟输入, 12 MHz 有源晶振, 唯一时钟源)
+NET "clk" LOC = P57 | IOSTANDARD = LVCMOS33;
+
+# RESET: rst_n (低有效, 外部上拉/RC)
+NET "rst_n" LOC = P3 | IOSTANDARD = LVCMOS33;
+
+# 3-BIT SENSOR INPUT: LM393 比较器编码
+#   sensor_async[0] = CH0, 权重 1; [1] = CH1, 权重 2; [2] = CH2, 权重 4
+#   000 = 静音, 001~111 = C4~B4 (位序不得交换)
+NET "sensor_async<0>" LOC = P28 | IOSTANDARD = LVCMOS33;
+NET "sensor_async<1>" LOC = P29 | IOSTANDARD = LVCMOS33;
+NET "sensor_async<2>" LOC = P30 | IOSTANDARD = LVCMOS33;
+
+# SQUARE WAVE OUTPUT: P110 (推挽方波输出, 临时占用 note_debug[0])
+NET "square_out" LOC = P110 | IOSTANDARD = LVCMOS33;
+
+# MCP4725 INDEPENDENT I2C BUS (开漏, 外部 4.7 kΩ 上拉到 3.3 V)
+NET "dac_i2c_scl" LOC = P102 | IOSTANDARD = LVCMOS33;
+NET "dac_i2c_sda" LOC = P103 | IOSTANDARD = LVCMOS33;
+
+# TIMING: 12 MHz 单一系统时钟 (83.33 ns)
+NET "clk" TNM_NET = "clk_group";
+TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%;
