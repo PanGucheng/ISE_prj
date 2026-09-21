@@ -148,7 +148,7 @@
   "netlists": [],
   "ucf": "constraints/finger_piano_oled.ucf",
   "constraintsReviewed": true,
-  "optimization": "Speed",
+  "optimization": "Area",
   "optimizationLevel": 1,
   "simulations": [
     {
