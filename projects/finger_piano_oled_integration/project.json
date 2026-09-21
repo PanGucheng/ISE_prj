@@ -1,0 +1,256 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "finger_piano_stage2_oled_top",
+  "sources": [
+    {
+      "path": "src/periph/i2c_master.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/ads1115_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/periph/mcp4725_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_decoder.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/pressure/pressure_frame_capture.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/pressure/pressure_channel_corrector.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/pressure/pressure_processor.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_filter.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/input/sensor_code_frontend.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/sine_lut_12bit.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_sine_generator.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_mcp4725_pipeline.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/audio_gain_12bit.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/audio/dds_gain_mcp4725_pipeline.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/system/finger_piano_system.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/reset_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/key_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/key_filter.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/note_encoder.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/tone_generator.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/finger_piano_top.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/finger_piano_stage2_top.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_bitmap_rom.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_fixed_rom.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_i2c_write.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_ssd1306_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/finger_piano_stage2_oled_top.v",
+      "language": "verilog",
+      "library": "work"
+    }
+  ],
+  "includeDirs": [
+    "src"
+  ],
+  "includeFiles": [
+    "src/finger_piano_cfg.vh"
+  ],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/finger_piano_oled.ucf",
+  "constraintsReviewed": true,
+  "optimization": "Speed",
+  "optimizationLevel": 1,
+  "simulations": [],
+  "verification": {
+    "expectImplementationBlocked": false,
+    "failOnSynthesisWarnings": true,
+    "clockName": "clk",
+    "resetNames": [
+      "rst_n",
+      "rst_n_sync"
+    ],
+    "forbiddenEdgeSignals": [
+      "clk_2m",
+      "audio_out"
+    ],
+    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (2026-09-16, top=finger_piano_stage2_top). The 12-pin top has no consumer for the P6A status/debug/pressure outputs (sensor_code_stable, pressure_ch0/1/2, pressure_valid, adc_error/dac_error/dac_overrun, DDS/MCP debug ports), so XST legitimately trims that hierarchy. Baseline: Xst:2677=155, Xst:646=2, Xst:1710=4, Xst:1895=5, total 166. Any other warning, new path, or changed per-entry count fails verify.",
+    "synthesisWarningAllowlist": [
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <(u_piano/)?u_sys/u_pressure/u_capture/",
+        "expected": 49
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <(u_piano/)?u_sys/GEN_DAC_ON\\.u_dac_pipeline/GEN_PIPE\\.u_dac/",
+        "expected": 18
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <(u_piano/)?u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.u_i2c/",
+        "expected": 8
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <(u_piano/)?u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.(r_busy|r_error|r_errcode_\\d|r_sample_valid|err_code_q_\\d|raw_hi_\\d|raw_lo_\\d|ch[012]_q_\\d+)>",
+        "expected": 73
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <GEN_ADC\\.poll_hi_\\d+>",
+        "expected": 7
+      },
+      {
+        "id": "Xst:646",
+        "pattern": "Signal <GEN_ADC\\.poll_hi",
+        "expected": 1
+      },
+      {
+        "id": "Xst:646",
+        "pattern": "Signal <GEN_ADC\\.poll_lo>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <GEN_ADC\\.m_wdata_2>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <GEN_DDS\\.phase_inc_20>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <rd_nack>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "u_dac/GEN_DAC\\.u_i2c/is_read",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "FF/Latch <GEN_ADC\\.m_wdata_3>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "FF/Latch <GEN_DDS\\.phase_inc_2[123]>",
+        "expected": 3
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "u_dac/GEN_DAC\\.m_cmd_0",
+        "expected": 1
+      },
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <u_oled_ctrl/(oled_error|init_done)>",
+        "expected": 2
+      }
+    ]
+  },
+  "programming": {
+    "cableType": "digilent",
+    "cableSerial": "210241672559",
+    "cableFrequencyHz": 10000000,
+    "position": 1,
+    "probeTimeoutSeconds": 120,
+    "jtagTimeoutSeconds": 300,
+    "isfTimeoutSeconds": 600,
+    "verifyTimeoutSeconds": 300,
+    "cableRetryAttempts": 3
+  }
+}

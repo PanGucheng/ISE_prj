@@ -13,7 +13,7 @@
       "library": "work"
     },
     {
-      "path": "src/oled_title_rom.v",
+      "path": "src/oled_fixed_rom.v",
       "language": "verilog",
       "library": "work"
     },
