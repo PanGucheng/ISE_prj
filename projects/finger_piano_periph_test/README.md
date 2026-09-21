@@ -83,13 +83,21 @@
 ## 4. 板级验证状态与排查指南
 
 ```
-programmingCompleted = NOT_RUN
-programmingVerified  = NOT_RUN
+programmingCompleted = PASS
+programmingVerified  = VERIFIED
 userDesignFunctional = NOT_TESTED
 BOARD TEST           = NOT_TESTED
 ```
 
-**停机边界**：已完成全部软件验证与 Bitstream 构建，**未执行任何硬件烧录**。硬件下载必须由用户明确要求并带 `-ConfirmHardwareWrite` 触发。
+- **烧录运行 ID**: `program-20260921-152203-a86db90c` (用户明确要求 `-Mode Isf` + `-ConfirmHardwareWrite`)
+- **烧录模式**: `Isf` (Spartan-3AN 内部非易失 Flash，`program -p 1 -e -v`)
+- **下载线**: Digilent JTAG-HS2 (`SN: 210241672559`, 10000000 Hz)
+- **门禁证据**:
+  1. `Erasing device...` → `Erasure completed successfully.`
+  2. `Programming Flash...done.` → `Programming completed successfully.`
+  3. `Verifying device...done.` → `Verification completed successfully.`
+  4. `Checking done pin....done.` → `Programmed successfully.`
+- **注意**: 烧录成功不等于板卡功能正常（`userDesignFunctional = NOT_TESTED`），串口实际输出需通过串口终端排查。
 
 ### 串口排查现象判定指南
 
