@@ -1,0 +1,22 @@
+#=============================================================================
+# oled_test.ucf  --  XC3S50AN TQ144 Stage OLED-1 引脚约束
+#
+# 引脚分配：
+#   clk:          P57  (12 MHz 有源晶振输入)
+#   rst_n:        P3   (外部低有效复位)
+#   oled_i2c_scl: P104 (OLED SCL，开漏，板级 4.7k 上拉至 3.3V)
+#   oled_i2c_sda: P105 (OLED SDA，开漏，板级 4.7k 上拉至 3.3V)
+#   dbg_led:      P111 (调试 LED 输出)
+#   dbg_unused:   P113 (未占用调试脚，固定输出 0)
+#=============================================================================
+
+NET "clk"          LOC = P57  | IOSTANDARD = LVCMOS33;
+NET "rst_n"        LOC = P3   | IOSTANDARD = LVCMOS33;
+NET "oled_i2c_scl" LOC = P104 | IOSTANDARD = LVCMOS33;
+NET "oled_i2c_sda" LOC = P105 | IOSTANDARD = LVCMOS33;
+NET "dbg_led"      LOC = P111 | IOSTANDARD = LVCMOS33;
+NET "dbg_unused"   LOC = P113 | IOSTANDARD = LVCMOS33;
+
+# 12 MHz 单一系统时钟约束
+NET "clk" TNM_NET = "clk_group";
+TIMESPEC "TS_clk" = PERIOD "clk_group" 83.33 ns HIGH 50%;

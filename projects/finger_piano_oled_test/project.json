@@ -1,0 +1,73 @@
+{
+  "device": "xc3s50an-4-tqg144",
+  "top": "oled_test_top",
+  "sources": [
+    {
+      "path": "src/reset_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_i2c_write.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_ssd1306_ctrl.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
+      "path": "src/oled_test_top.v",
+      "language": "verilog",
+      "library": "work"
+    }
+  ],
+  "includeDirs": [
+    "src"
+  ],
+  "includeFiles": [],
+  "defines": [],
+  "netlists": [],
+  "ucf": "constraints/oled_test.ucf",
+  "constraintsReviewed": true,
+  "optimization": "Speed",
+  "optimizationLevel": 1,
+  "simulations": [
+    {
+      "name": "oled_test_top",
+      "top": "tb_oled_test_top",
+      "sources": [
+        "sim/tb_oled_test_top.v",
+        "sim/models/ssd1306_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 300,
+      "passPattern": "TB_OLED_TEST_TOP: PASS",
+      "failPattern": "TB_OLED_TEST_TOP: FAIL"
+    }
+  ],
+  "verification": {
+    "expectImplementationBlocked": false,
+    "failOnSynthesisWarnings": true,
+    "clockName": "clk",
+    "resetNames": [
+      "rst_n",
+      "rst_n_sync"
+    ],
+    "forbiddenEdgeSignals": [],
+    "synthesisWarningAllowlistNote": "Audited for Stage OLED-1 test.",
+    "synthesisWarningAllowlist": []
+  },
+  "programming": {
+    "cableType": "digilent",
+    "cableSerial": "210241672559",
+    "cableFrequencyHz": 10000000,
+    "position": 1,
+    "probeTimeoutSeconds": 120,
+    "jtagTimeoutSeconds": 300,
+    "isfTimeoutSeconds": 600,
+    "verifyTimeoutSeconds": 300,
+    "cableRetryAttempts": 3
+  }
+}
