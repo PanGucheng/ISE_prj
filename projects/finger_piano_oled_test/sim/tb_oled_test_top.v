@@ -2,7 +2,7 @@
 
 //=============================================================================
 // tb_oled_test_top.v
-// Stage OLED-2/3 综合仿真与验证平台
+// Stage OLED-2 完整 8 音符全状态行为与硬件交互仿真平台
 //
 // 验证项目：
 //   1. 上电复位与 20 ms (仿真加速为 120 拍) 延迟；
@@ -10,9 +10,13 @@
 //   3. 严格核验 Page Addressing Mode (0x20, 0x10)；
 //   4. 校验初始全屏铺底：Page 0~1 标题 ("FINGER PIANO") 与 Page 2~5 初始 MUTE；
 //   5. 校验静止特性：音符不跳变时，I2C 彻底静止，0 冗余帧；
-//   6. 校验局部增量刷新：note_code 切换为 1 (Do C4)，仅更新 Page 2~5，且字模准确；
-//   7. 校验防撕裂机制：刷新中途改变音符 (2 -> 3)，前帧刷完后自动连贯补刷第 3 音符；
-//   8. 校验 NACK 故障处理：注入从机 NACK，控制器立即中止、发出 STOP、置位 oled_error 并停机。
+//   6. 遍历测试全部 8 个音符状态 (000=MUTE, 001=Do, 010=Re, 011=Mi, 100=Fa, 101=Sol, 110=La, 111=Si)：
+//      - 每次音符跳转精确校验 256 字节数据更新 (4 Page x 64 Col)；
+//      - 逐状态核验 gram 显存中独特的字符点阵与标称频率点阵；
+//      - 每次切换后校验静止期 0 总线开销；
+//   7. 校验防撕裂原子锁存机制：动态刷新途中输入再变，当前帧刷完后连贯补刷，无半屏撕裂；
+//   8. 校验从机 NACK 故障处理：从机 NACK 时控制器立即中止、发出 STOP、置位 oled_error 并停机；
+//   9. 校验停机时 SCL 与 SDA 彻底释放为高阻态 (由外部上拉拉高至 1'b1)。
 //=============================================================================
 
 module tb_oled_test_top;
@@ -75,8 +79,9 @@ module tb_oled_test_top;
         .data_count             (model_data_cnt)
     );
 
-    integer initial_data_count;
-    integer step1_data_count;
+    integer prev_data_cnt;
+    integer step_data_cnt;
+    integer test_note;
 
     //-------------------------------------------------------------------------
     // 主测试流程
@@ -149,9 +154,10 @@ module tb_oled_test_top;
         end
         $display("[PASS] Page 0 Title 'FINGER PIANO' verified.");
 
-        // 校验 Page 2 初始 MUTE 点阵 ('M' 在列 49 处应为 0xF8)
-        if (u_ssd1306.gram[2][49] !== 8'hF8) begin
-            $display("ERROR: Page 2 Col 49 expected 0xF8 for 'M', got 0x%02X", u_ssd1306.gram[2][49]);
+        // 校验 Page 2 初始 MUTE 点阵 ('M' 在列 49 处应为 0xF8, 列 35 为空格 0x00)
+        if (u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[2][35] !== 8'h00) begin
+            $display("ERROR: Page 2 initial state not MUTE! Col 49=0x%02X, Col 35=0x%02X",
+                     u_ssd1306.gram[2][49], u_ssd1306.gram[2][35]);
             $display("TB_OLED_TEST_TOP: FAIL");
             $finish;
         end
@@ -168,91 +174,185 @@ module tb_oled_test_top;
         //---------------------------------------------------------------------
         // 2. 校验静止特性：音符不改变时无任何总线活动
         //---------------------------------------------------------------------
-        initial_data_count = model_data_cnt;
+        prev_data_cnt = model_data_cnt;
         #500000; // 等待 500 us
-        if (model_data_cnt !== initial_data_count) begin
+        if (model_data_cnt !== prev_data_cnt) begin
             $display("ERROR: Unwanted I2C traffic while note is stationary!");
             $display("TB_OLED_TEST_TOP: FAIL");
             $finish;
         end
-        $display("[PASS] Zero-refresh stationary idle verified.");
+        $display("[PASS] Zero-refresh stationary idle verified for Note 0.");
 
         //---------------------------------------------------------------------
-        // 3. 动态刷新测试：切换为音符 1 (1 Do C4, 261.62Hz)
+        // 3. 完整 8 音符全状态遍历测试 (1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 0)
         //---------------------------------------------------------------------
-        $display("[%t] Step 2: Triggering note change to 1 (Do C4)...", $time);
-        force u_dut.auto_note = 3'd1;
+        for (test_note = 1; test_note <= 7; test_note = test_note + 1) begin
+            $display("--------------------------------------------------");
+            $display("[%t] Testing transition to Note %0d...", $time, test_note);
+            prev_data_cnt = model_data_cnt;
+            force u_dut.auto_note = test_note[2:0];
 
-        // 等待刷新完成（4 页 x 64 字节 = 256 字节，在 100 kHz 下耗时约 27 ms）
-        fork
-            begin : WAIT_NOTE1
-                // 等待控制器返回 S_IDLE
-                wait (u_dut.u_ctrl.state == 5'd18 && u_dut.u_ctrl.display_note == 3'd1);
-                $display("[%t] Note 1 refresh completed!", $time);
-                disable TIMEOUT_NOTE1;
+            fork
+                begin : WAIT_NOTE_STEP
+                    wait (u_dut.u_ctrl.state == 5'd18 && u_dut.u_ctrl.display_note == test_note[2:0]);
+                    $display("[%t] Note %0d refresh complete!", $time, test_note);
+                    disable TIMEOUT_NOTE_STEP;
+                end
+                begin : TIMEOUT_NOTE_STEP
+                    #40000000; // 40 ms 超时
+                    $display("ERROR: Simulation timed out waiting for Note %0d refresh!", test_note);
+                    $display("TB_OLED_TEST_TOP: FAIL");
+                    $finish;
+                end
+            join
+
+            // 严格核验数据更新量：每帧必须恰好 4 Page x 64 Col = 256 字节
+            step_data_cnt = model_data_cnt - prev_data_cnt;
+            $display("  Note %0d delta data bytes: %0d (expected 256)", test_note, step_data_cnt);
+            if (step_data_cnt !== 256) begin
+                $display("ERROR: Expected exactly 256 bytes for Note %0d, got %0d", test_note, step_data_cnt);
+                $display("TB_OLED_TEST_TOP: FAIL");
+                $finish;
             end
-            begin : TIMEOUT_NOTE1
-                #40000000; // 40 ms 超时
-                $display("ERROR: Simulation timed out waiting for Note 1 refresh!");
+
+            // 校验各音符独特字模
+            case (test_note)
+                1: begin // "1 Do  C4", "261.62Hz"
+                    if (u_ssd1306.gram[2][35] !== 8'hF8 || u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[4][33] !== 8'h70) begin
+                        $display("ERROR: Note 1 bitmap check failed! G[2][35]=0x%02X, G[2][49]=0x%02X, G[4][33]=0x%02X",
+                                 u_ssd1306.gram[2][35], u_ssd1306.gram[2][49], u_ssd1306.gram[4][33]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+                2: begin // "2 Re  D4", "293.67Hz"
+                    if (u_ssd1306.gram[2][33] !== 8'h70 || u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[4][33] !== 8'h70) begin
+                        $display("ERROR: Note 2 bitmap check failed! G[2][33]=0x%02X, G[2][49]=0x%02X, G[4][33]=0x%02X",
+                                 u_ssd1306.gram[2][33], u_ssd1306.gram[2][49], u_ssd1306.gram[4][33]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+                3: begin // "3 Mi  E4", "329.63Hz"
+                    if (u_ssd1306.gram[2][35] !== 8'h88 || u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[4][33] !== 8'h30) begin
+                        $display("ERROR: Note 3 bitmap check failed! G[2][35]=0x%02X, G[2][49]=0x%02X, G[4][33]=0x%02X",
+                                 u_ssd1306.gram[2][35], u_ssd1306.gram[2][49], u_ssd1306.gram[4][33]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+                4: begin // "4 Fa  F4", "349.23Hz"
+                    if (u_ssd1306.gram[2][37] !== 8'hF8 || u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[4][33] !== 8'h30) begin
+                        $display("ERROR: Note 4 bitmap check failed! G[2][37]=0x%02X, G[2][49]=0x%02X, G[4][33]=0x%02X",
+                                 u_ssd1306.gram[2][37], u_ssd1306.gram[2][49], u_ssd1306.gram[4][33]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+                5: begin // "5 Sol G4", "391.99Hz"
+                    if (u_ssd1306.gram[2][33] !== 8'hF8 || u_ssd1306.gram[2][49] !== 8'h70 || u_ssd1306.gram[4][33] !== 8'h30) begin
+                        $display("ERROR: Note 5 bitmap check failed! G[2][33]=0x%02X, G[2][49]=0x%02X, G[4][33]=0x%02X",
+                                 u_ssd1306.gram[2][33], u_ssd1306.gram[2][49], u_ssd1306.gram[4][33]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+                6: begin // "6 La  A4", "440.00Hz"
+                    if (u_ssd1306.gram[2][33] !== 8'hE0 || u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[4][34] !== 8'hC0) begin
+                        $display("ERROR: Note 6 bitmap check failed! G[2][33]=0x%02X, G[2][49]=0x%02X, G[4][34]=0x%02X",
+                                 u_ssd1306.gram[2][33], u_ssd1306.gram[2][49], u_ssd1306.gram[4][34]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+                7: begin // "7 Si  B4", "493.88Hz"
+                    if (u_ssd1306.gram[2][36] !== 8'hC8 || u_ssd1306.gram[2][49] !== 8'h70 || u_ssd1306.gram[4][34] !== 8'hC0) begin
+                        $display("ERROR: Note 7 bitmap check failed! G[2][36]=0x%02X, G[2][49]=0x%02X, G[4][34]=0x%02X",
+                                 u_ssd1306.gram[2][36], u_ssd1306.gram[2][49], u_ssd1306.gram[4][34]);
+                        $display("TB_OLED_TEST_TOP: FAIL");
+                        $finish;
+                    end
+                end
+            endcase
+
+            // 校验标题栏 Page 0 未被覆盖
+            if (u_ssd1306.gram[0][17] !== 8'hF8) begin
+                $display("ERROR: Title in Page 0 corrupted during Note %0d refresh!", test_note);
+                $display("TB_OLED_TEST_TOP: FAIL");
+                $finish;
+            end
+
+            // 校验各状态静止期无总线活动
+            prev_data_cnt = model_data_cnt;
+            #200000; // 等待 200 us
+            if (model_data_cnt !== prev_data_cnt) begin
+                $display("ERROR: Unwanted I2C traffic during stationary idle on Note %0d!", test_note);
+                $display("TB_OLED_TEST_TOP: FAIL");
+                $finish;
+            end
+            $display("[PASS] Note %0d refresh (256 bytes) and stationary idle verified.", test_note);
+        end
+
+        // 切换回音符 0 (MUTE) 并核验
+        $display("--------------------------------------------------");
+        $display("[%t] Testing return to Note 0 (MUTE)...", $time);
+        prev_data_cnt = model_data_cnt;
+        force u_dut.auto_note = 3'd0;
+
+        fork
+            begin : WAIT_MUTE
+                wait (u_dut.u_ctrl.state == 5'd18 && u_dut.u_ctrl.display_note == 3'd0);
+                $display("[%t] Return to Note 0 (MUTE) complete!", $time);
+                disable TIMEOUT_MUTE;
+            end
+            begin : TIMEOUT_MUTE
+                #40000000;
+                $display("ERROR: Simulation timed out waiting for Note 0 return!");
                 $display("TB_OLED_TEST_TOP: FAIL");
                 $finish;
             end
         join
 
-        // 校验增量刷新只更新了 4 页 x 64 列 = 256 字节
-        step1_data_count = model_data_cnt - initial_data_count;
-        $display("  Note 1 delta data bytes received: %0d (expected 256)", step1_data_count);
-        if (step1_data_count !== 256) begin
-            $display("ERROR: Expected exactly 256 bytes for 4-page dynamic refresh, got %0d", step1_data_count);
+        step_data_cnt = model_data_cnt - prev_data_cnt;
+        if (step_data_cnt !== 256 || u_ssd1306.gram[2][49] !== 8'hF8 || u_ssd1306.gram[2][35] !== 8'h00) begin
+            $display("ERROR: MUTE return check failed! delta=%0d, G[2][49]=0x%02X, G[2][35]=0x%02X",
+                     step_data_cnt, u_ssd1306.gram[2][49], u_ssd1306.gram[2][35]);
             $display("TB_OLED_TEST_TOP: FAIL");
             $finish;
         end
-
-        // 校验 Page 2 列 35 应为 '1' 的笔画 0xF8
-        if (u_ssd1306.gram[2][35] !== 8'hF8) begin
-            $display("ERROR: Page 2 Col 35 expected 0xF8 for Note '1', got 0x%02X", u_ssd1306.gram[2][35]);
-            $display("TB_OLED_TEST_TOP: FAIL");
-            $finish;
-        end
-
-        // 校验 Page 0 标题没有被污染
-        if (u_ssd1306.gram[0][17] !== 8'hF8) begin
-            $display("ERROR: Title was corrupted after Note 1 refresh!");
-            $display("TB_OLED_TEST_TOP: FAIL");
-            $finish;
-        end
-        $display("[PASS] Dynamic refresh for Note 1 (Do C4) verified.");
+        $display("[PASS] All 8 note states successfully traversed and verified.");
 
         //---------------------------------------------------------------------
-        // 4. 防撕裂测试：在刷新中途快速跳变音符 (1 -> 2 -> 3)
+        // 4. 防撕裂测试：在动态刷新途中快速跳变音符 (0 -> 1 -> 2)
         //---------------------------------------------------------------------
         #200000;
-        $display("[%t] Step 3: Testing Anti-Tearing (switching to Note 2, then Note 3 mid-refresh)...", $time);
-        force u_dut.auto_note = 3'd2; // 触发刷新 Note 2
+        $display("--------------------------------------------------");
+        $display("[%t] Step 4: Testing Anti-Tearing (switching to Note 1, then Note 2 mid-refresh)...", $time);
+        force u_dut.auto_note = 3'd1;
 
-        // 等待控制器开始进入动态页刷新
+        // 等待控制器进入动态页刷新中途 (Page 3)
         wait (u_dut.u_ctrl.state == 5'd26 && u_dut.u_ctrl.dyn_page_idx == 2'd1);
-        $display("[%t] Controller is busy at Page 3, now changing note to 3'd3!", $time);
-        force u_dut.auto_note = 3'd3; // 刷新中途改变！
+        $display("[%t] Controller is busy at Page 3, now changing note to 3'd2!", $time);
+        force u_dut.auto_note = 3'd2; // 刷新途中改变！
 
-        // 等待完全稳定返回 S_IDLE
+        // 等待连贯补刷完成，稳定返回 S_IDLE
         fork
-            begin : WAIT_NOTE3
-                wait (u_dut.u_ctrl.state == 5'd18 && u_dut.u_ctrl.display_note == 3'd3 && u_dut.u_ctrl.has_pending == 1'b0);
-                $display("[%t] Both frames completed, settled on Note 3!", $time);
-                disable TIMEOUT_NOTE3;
+            begin : WAIT_NOTE2_SETTLE
+                wait (u_dut.u_ctrl.state == 5'd18 && u_dut.u_ctrl.display_note == 3'd2 && u_dut.u_ctrl.has_pending == 1'b0);
+                $display("[%t] Both frames completed, settled on Note 2!", $time);
+                disable TIMEOUT_NOTE2_SETTLE;
             end
-            begin : TIMEOUT_NOTE3
+            begin : TIMEOUT_NOTE2_SETTLE
                 #80000000; // 80 ms 超时 (两帧连续刷新)
-                $display("ERROR: Simulation timed out waiting for Anti-Tearing Note 3 settlement!");
+                $display("ERROR: Simulation timed out waiting for Anti-Tearing Note 2 settlement!");
                 $display("TB_OLED_TEST_TOP: FAIL");
                 $finish;
             end
         join
 
-        // 校验 Page 2 显示的是 Note 3 的点阵 ('3' 在列 35 处应为 0x88)
-        if (u_ssd1306.gram[2][35] !== 8'h88) begin
-            $display("ERROR: Page 2 Col 35 expected 0x88 for Note '3', got 0x%02X", u_ssd1306.gram[2][35]);
+        // 校验 Page 2 显示的是 Note 2 的点阵 ('2' 在列 33 处应为 0x70)
+        if (u_ssd1306.gram[2][33] !== 8'h70) begin
+            $display("ERROR: Page 2 Col 33 expected 0x70 for Note '2', got 0x%02X", u_ssd1306.gram[2][33]);
             $display("TB_OLED_TEST_TOP: FAIL");
             $finish;
         end
@@ -262,9 +362,10 @@ module tb_oled_test_top;
         // 5. NACK 故障注入与停机保护测试
         //---------------------------------------------------------------------
         #200000;
-        $display("[%t] Step 4: Injecting NACK fault on new note transition...", $time);
+        $display("--------------------------------------------------");
+        $display("[%t] Step 5: Injecting NACK fault on new note transition...", $time);
         sim_inject_nack = 1'b1; // 从机在 ACK 槽保持高阻 NACK
-        force u_dut.auto_note = 3'd4; // 触发刷新
+        force u_dut.auto_note = 3'd3; // 触发刷新
 
         // 等待 oled_error 置位
         fork
@@ -281,7 +382,7 @@ module tb_oled_test_top;
             end
         join
 
-        // 等待几个周期后核对状态
+        // 等待几个周期后核对状态与总线释放
         #20000;
         if (u_dut.u_ctrl.init_done !== 1'b0) begin
             $display("ERROR: init_done should be cleared to 0 after error!");
@@ -300,6 +401,15 @@ module tb_oled_test_top;
             $display("TB_OLED_TEST_TOP: FAIL");
             $finish;
         end
+
+        // 校验 SCL 与 SDA 彻底释放为高阻态 (由外部 pullup 保持为 1'b1)
+        if (oled_i2c_scl !== 1'b1 || oled_i2c_sda !== 1'b1) begin
+            $display("ERROR: I2C bus not released to high-Z after error! SCL=%b, SDA=%b",
+                     oled_i2c_scl, oled_i2c_sda);
+            $display("TB_OLED_TEST_TOP: FAIL");
+            $finish;
+        end
+        $display("[PASS] I2C bus release (SCL=1, SDA=1 high-Z) verified.");
 
         $display("[PASS] NACK error abort, bus release, and halt verified.");
         $display("--------------------------------------------------");

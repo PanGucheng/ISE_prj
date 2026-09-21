@@ -224,7 +224,7 @@ module ssd1306_model #(
                                 // 2. 寻址模式与双字节命令解析
                                 if (has_cmd_arg) begin
                                     if (pending_cmd == 8'h20) begin
-                                        if (shift_reg == 8'h10 || shift_reg == 8'h02) begin
+                                        if (shift_reg == 8'h10) begin
                                             memory_addressing_mode <= 2'b10;
                                         end else begin
                                             memory_addressing_mode <= shift_reg[1:0];

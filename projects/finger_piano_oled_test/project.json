@@ -48,6 +48,7 @@
       "name": "oled_test_top",
       "top": "tb_oled_test_top",
       "sources": [
+        "sim/models/ramb16_s9_model.v",
         "sim/tb_oled_test_top.v",
         "sim/models/ssd1306_model.v"
       ],
@@ -66,14 +67,7 @@
       "rst_n_sync"
     ],
     "forbiddenEdgeSignals": [],
-    "synthesisWarningAllowlistNote": "Audited 1 warning for oled_bitmap_rom read-only Block RAM table (Signal <mem> is used but never assigned. Tied to default value).",
-    "synthesisWarningAllowlist": [
-      {
-        "id": "Xst:1781",
-        "pattern": "Signal <mem> is used but never assigned\\. Tied to default value\\.",
-        "expected": 1
-      }
-    ]
+    "synthesisWarningAllowlist": []
   },
   "programming": {
     "cableType": "digilent",
