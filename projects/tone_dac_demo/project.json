@@ -113,6 +113,18 @@
       "timeoutSeconds": 600,
       "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
       "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "tone_dac_demo_top",
+      "top": "tb_tone_dac_demo_top",
+      "sources": [
+        "sim/tb_tone_dac_demo_top.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 1200,
+      "passPattern": "TB_TONE_DAC_DEMO_TOP: PASS",
+      "failPattern": "TB_TONE_DAC_DEMO_TOP: FAIL"
     }
   ],
   "verification": {
