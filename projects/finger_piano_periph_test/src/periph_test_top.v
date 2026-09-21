@@ -113,64 +113,124 @@ module periph_test_top #(
 
     //-------------------------------------------------------------------------
     //-------------------------------------------------------------------------
-    // 首次采样有效门控标志
+    // 状态机编码与控制变量声明 (前置以符合 Verilog-2001 先声明后引用)
     //-------------------------------------------------------------------------
-    reg have_valid_sample;
+    localparam [1:0] ST_IDLE = 2'd0;
+    localparam [1:0] ST_SEND = 2'd1;
+    localparam [1:0] ST_WAIT = 2'd2;
+
+    reg [1:0]  tx_fsm;
+    reg        err_pending;
+    reg [2:0]  latched_ecode;
+    reg        err_cleared;
+    reg        new_frame_ready;
 
     //-------------------------------------------------------------------------
-    // CH0 电压转换 (16-bit 原始码转 4 位小数伏特 BCD)
+    // 三通道时分复用高精度电压换算流水线 (单实例节约 400+ LUTs, 耗时仅 5.5 us)
     //-------------------------------------------------------------------------
-    wire       volt_done;
-    wire [3:0] conv_volt;
-    wire [3:0] conv_tenths;
-    wire [3:0] conv_hundredths;
-    wire [3:0] conv_thousandths;
-    wire [3:0] conv_tenthousands;
+    reg [1:0]  conv_fsm;
+    localparam C_IDLE = 2'd0,
+               C_CH0  = 2'd1,
+               C_CH1  = 2'd2,
+               C_CH2  = 2'd3;
 
-    reg [3:0]  latched_volt;
-    reg [3:0]  latched_tenths;
-    reg [3:0]  latched_hundredths;
-    reg [3:0]  latched_thousandths;
-    reg [3:0]  latched_tenthousands;
+    reg [15:0] held_ch1, held_ch2;
+    reg [15:0] conv_raw_in;
+    reg        conv_start;
+    wire       conv_done;
+    wire [3:0] conv_v, conv_t, conv_h, conv_m, conv_tm;
+
+    reg [3:0]  latched_v0, latched_t0, latched_h0, latched_m0, latched_tm0;
+    reg [3:0]  latched_v1, latched_t1, latched_h1, latched_m1, latched_tm1;
+    reg [3:0]  latched_v2, latched_t2, latched_h2, latched_m2, latched_tm2;
 
     bin_to_dec_volt u_volt_conv (
-        .clk              (clk),
-        .rst_n_sync       (rst_n_sync),
-        .start            (adc_sample_valid),
-        .raw_code         (adc_ch0_raw),
-        .done             (volt_done),
-        .d_volt           (conv_volt),
-        .d_tenths         (conv_tenths),
-        .d_hundredths     (conv_hundredths),
-        .d_thousandths    (conv_thousandths),
-        .d_tenthousands   (conv_tenthousands)
+        .clk            (clk),
+        .rst_n_sync     (rst_n_sync),
+        .start          (conv_start),
+        .raw_code       (conv_raw_in),
+        .done           (conv_done),
+        .d_volt         (conv_v),
+        .d_tenths       (conv_t),
+        .d_hundredths   (conv_h),
+        .d_thousandths  (conv_m),
+        .d_tenthousands (conv_tm)
     );
 
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            have_valid_sample    <= 1'b0;
-            latched_volt         <= 4'd0;
-            latched_tenths       <= 4'd0;
-            latched_hundredths   <= 4'd0;
-            latched_thousandths  <= 4'd0;
-            latched_tenthousands <= 4'd0;
-        end else if (volt_done) begin
-            have_valid_sample    <= 1'b1;
-            latched_volt         <= conv_volt;
-            latched_tenths       <= conv_tenths;
-            latched_hundredths   <= conv_hundredths;
-            latched_thousandths  <= conv_thousandths;
-            latched_tenthousands <= conv_tenthousands;
+            conv_fsm        <= C_IDLE;
+            conv_start      <= 1'b0;
+            conv_raw_in     <= 16'd0;
+            held_ch1        <= 16'd0;
+            held_ch2        <= 16'd0;
+            new_frame_ready <= 1'b0;
+            latched_v0  <= 4'd0; latched_t0  <= 4'd0; latched_h0  <= 4'd0; latched_m0  <= 4'd0; latched_tm0 <= 4'd0;
+            latched_v1  <= 4'd0; latched_t1  <= 4'd0; latched_h1  <= 4'd0; latched_m1  <= 4'd0; latched_tm1 <= 4'd0;
+            latched_v2  <= 4'd0; latched_t2  <= 4'd0; latched_h2  <= 4'd0; latched_m2  <= 4'd0; latched_tm2 <= 4'd0;
+        end else begin
+            conv_start <= 1'b0;
+            if (tx_fsm == ST_IDLE && !err_pending && new_frame_ready) begin
+                new_frame_ready <= 1'b0;
+            end
+
+            case (conv_fsm)
+                C_IDLE: begin
+                    if (adc_sample_valid) begin
+                        held_ch1    <= adc_ch1_raw;
+                        held_ch2    <= adc_ch2_raw;
+                        conv_raw_in <= adc_ch0_raw;
+                        conv_start  <= 1'b1;
+                        conv_fsm    <= C_CH0;
+                    end
+                end
+
+                C_CH0: begin
+                    if (conv_done) begin
+                        latched_v0  <= conv_v;
+                        latched_t0  <= conv_t;
+                        latched_h0  <= conv_h;
+                        latched_m0  <= conv_m;
+                        latched_tm0 <= conv_tm;
+                        conv_raw_in <= held_ch1;
+                        conv_start  <= 1'b1;
+                        conv_fsm    <= C_CH1;
+                    end
+                end
+
+                C_CH1: begin
+                    if (conv_done) begin
+                        latched_v1  <= conv_v;
+                        latched_t1  <= conv_t;
+                        latched_h1  <= conv_h;
+                        latched_m1  <= conv_m;
+                        latched_tm1 <= conv_tm;
+                        conv_raw_in <= held_ch2;
+                        conv_start  <= 1'b1;
+                        conv_fsm    <= C_CH2;
+                    end
+                end
+
+                C_CH2: begin
+                    if (conv_done) begin
+                        latched_v2      <= conv_v;
+                        latched_t2      <= conv_t;
+                        latched_h2      <= conv_h;
+                        latched_m2      <= conv_m;
+                        latched_tm2     <= conv_tm;
+                        new_frame_ready <= 1'b1;
+                        conv_fsm        <= C_IDLE;
+                    end
+                end
+
+                default: conv_fsm <= C_IDLE;
+            endcase
         end
     end
 
     //-------------------------------------------------------------------------
     // 错误状态捕获 (adc_error 脉冲到达时立即置位)
     //-------------------------------------------------------------------------
-    reg       err_pending;
-    reg [2:0] latched_ecode;
-    reg       err_cleared;
-
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
             err_pending   <= 1'b0;
@@ -184,57 +244,19 @@ module periph_test_top #(
     end
 
     //-------------------------------------------------------------------------
-    // 100 ms 报告定时器
-    //-------------------------------------------------------------------------
-    reg [20:0] timer_100ms_cnt; // 2^21 = 2097152 > 1200000
-    reg        timer_100ms_tick;
-
-    always @(posedge clk or negedge rst_n_sync) begin
-        if (!rst_n_sync) begin
-            timer_100ms_cnt  <= 21'd0;
-            timer_100ms_tick <= 1'b0;
-        end else if (timer_100ms_cnt == REPORT_CYCLES - 1) begin
-            timer_100ms_cnt  <= 21'd0;
-            timer_100ms_tick <= 1'b1;
-        end else begin
-            timer_100ms_cnt  <= timer_100ms_cnt + 21'd1;
-            timer_100ms_tick <= 1'b0;
-        end
-    end
-
-    //-------------------------------------------------------------------------
     // 行级报文生成与非抢占式调度状态机 (FireWater 协议)
     //-------------------------------------------------------------------------
-    localparam [1:0] ST_IDLE = 2'd0;
-    localparam [1:0] ST_SEND = 2'd1;
-    localparam [1:0] ST_WAIT = 2'd2;
-
-    reg [1:0]  tx_fsm;
     reg [5:0]  char_idx;
     reg [5:0]  line_len;
     reg        line_is_error;
     reg [2:0]  send_ecode;
-    reg [3:0]  snap_volt;
-    reg [3:0]  snap_tenths;
-    reg [3:0]  snap_hundredths;
-    reg [3:0]  snap_thousandths;
-    reg [3:0]  snap_tenthousands;
-    reg        report_pending;
+    reg [3:0]  snap_v0, snap_t0, snap_h0, snap_m0, snap_tm0;
+    reg [3:0]  snap_v1, snap_t1, snap_h1, snap_m1, snap_tm1;
+    reg [3:0]  snap_v2, snap_t2, snap_h2, snap_m2, snap_tm2;
 
     reg [7:0]  uart_tx_byte;
     reg        uart_tx_valid;
     wire       uart_tx_ready;
-
-    // 当 100ms tick 产生且处于发送状态时, 记录一次待发
-    always @(posedge clk or negedge rst_n_sync) begin
-        if (!rst_n_sync) begin
-            report_pending <= 1'b0;
-        end else if (timer_100ms_tick && have_valid_sample) begin
-            report_pending <= 1'b1;
-        end else if (tx_fsm == ST_IDLE && !err_pending && report_pending) begin
-            report_pending <= 1'b0;
-        end
-    end
 
     // 当前字符索引查找
     reg [7:0] cur_char;
@@ -263,20 +285,30 @@ module periph_test_top #(
                 default: cur_char = " ";
             endcase
         end else begin
-            // FireWater 协议: "ch0:X.XXXX\r\n" (12 字节)
+            // FireWater 协议: "V0.TTTT,V1.TTTT,V2.TTTT\r\n" (22 字节)
             case (char_idx)
-                6'd0:  cur_char = "c";
-                6'd1:  cur_char = "h";
-                6'd2:  cur_char = "0";
-                6'd3:  cur_char = ":";
-                6'd4:  cur_char = 8'h30 + {4'd0, snap_volt};
-                6'd5:  cur_char = ".";
-                6'd6:  cur_char = 8'h30 + {4'd0, snap_tenths};
-                6'd7:  cur_char = 8'h30 + {4'd0, snap_hundredths};
-                6'd8:  cur_char = 8'h30 + {4'd0, snap_thousandths};
-                6'd9:  cur_char = 8'h30 + {4'd0, snap_tenthousands};
-                6'd10: cur_char = 8'h0D; // \r
-                6'd11: cur_char = 8'h0A; // \n
+                6'd0:  cur_char = 8'h30 + {4'd0, snap_v0};
+                6'd1:  cur_char = ".";
+                6'd2:  cur_char = 8'h30 + {4'd0, snap_t0};
+                6'd3:  cur_char = 8'h30 + {4'd0, snap_h0};
+                6'd4:  cur_char = 8'h30 + {4'd0, snap_m0};
+                6'd5:  cur_char = 8'h30 + {4'd0, snap_tm0};
+                6'd6:  cur_char = ",";
+                6'd7:  cur_char = 8'h30 + {4'd0, snap_v1};
+                6'd8:  cur_char = ".";
+                6'd9:  cur_char = 8'h30 + {4'd0, snap_t1};
+                6'd10: cur_char = 8'h30 + {4'd0, snap_h1};
+                6'd11: cur_char = 8'h30 + {4'd0, snap_m1};
+                6'd12: cur_char = 8'h30 + {4'd0, snap_tm1};
+                6'd13: cur_char = ",";
+                6'd14: cur_char = 8'h30 + {4'd0, snap_v2};
+                6'd15: cur_char = ".";
+                6'd16: cur_char = 8'h30 + {4'd0, snap_t2};
+                6'd17: cur_char = 8'h30 + {4'd0, snap_h2};
+                6'd18: cur_char = 8'h30 + {4'd0, snap_m2};
+                6'd19: cur_char = 8'h30 + {4'd0, snap_tm2};
+                6'd20: cur_char = 8'h0D; // \r
+                6'd21: cur_char = 8'h0A; // \n
                 default: cur_char = " ";
             endcase
         end
@@ -285,19 +317,17 @@ module periph_test_top #(
     // 状态机主时序
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            tx_fsm            <= ST_IDLE;
-            char_idx          <= 6'd0;
-            line_len          <= 6'd0;
-            line_is_error     <= 1'b0;
-            send_ecode        <= 3'd0;
-            snap_volt         <= 4'd0;
-            snap_tenths       <= 4'd0;
-            snap_hundredths   <= 4'd0;
-            snap_thousandths  <= 4'd0;
-            snap_tenthousands <= 4'd0;
-            uart_tx_byte      <= 8'h00;
-            uart_tx_valid     <= 1'b0;
-            err_cleared       <= 1'b0;
+            tx_fsm        <= ST_IDLE;
+            char_idx      <= 6'd0;
+            line_len      <= 6'd0;
+            line_is_error <= 1'b0;
+            send_ecode    <= 3'd0;
+            snap_v0  <= 4'd0; snap_t0  <= 4'd0; snap_h0  <= 4'd0; snap_m0  <= 4'd0; snap_tm0 <= 4'd0;
+            snap_v1  <= 4'd0; snap_t1  <= 4'd0; snap_h1  <= 4'd0; snap_m1  <= 4'd0; snap_tm1 <= 4'd0;
+            snap_v2  <= 4'd0; snap_t2  <= 4'd0; snap_h2  <= 4'd0; snap_m2  <= 4'd0; snap_tm2 <= 4'd0;
+            uart_tx_byte  <= 8'h00;
+            uart_tx_valid <= 1'b0;
+            err_cleared   <= 1'b0;
         end else begin
             err_cleared   <= 1'b0;
             uart_tx_valid <= 1'b0;
@@ -312,16 +342,14 @@ module periph_test_top #(
                         line_len      <= 6'd18;
                         err_cleared   <= 1'b1; // 清除 pending
                         tx_fsm        <= ST_SEND;
-                    end else if ((timer_100ms_tick || report_pending) && have_valid_sample) begin
-                        // 正常采样报文 (必须在首次有效采样之后)
-                        line_is_error     <= 1'b0;
-                        snap_volt         <= latched_volt;
-                        snap_tenths       <= latched_tenths;
-                        snap_hundredths   <= latched_hundredths;
-                        snap_thousandths  <= latched_thousandths;
-                        snap_tenthousands <= latched_tenthousands;
-                        line_len          <= 6'd12;
-                        tx_fsm            <= ST_SEND;
+                    end else if (new_frame_ready) begin
+                        // 正常采样报文 (新帧就绪立即发送)
+                        line_is_error <= 1'b0;
+                        snap_v0  <= latched_v0; snap_t0  <= latched_t0; snap_h0  <= latched_h0; snap_m0  <= latched_m0; snap_tm0 <= latched_tm0;
+                        snap_v1  <= latched_v1; snap_t1  <= latched_t1; snap_h1  <= latched_h1; snap_m1  <= latched_m1; snap_tm1 <= latched_tm1;
+                        snap_v2  <= latched_v2; snap_t2  <= latched_t2; snap_h2  <= latched_h2; snap_m2  <= latched_m2; snap_tm2 <= latched_tm2;
+                        line_len <= 6'd22;
+                        tx_fsm   <= ST_SEND;
                     end
                 end
 
@@ -335,7 +363,6 @@ module periph_test_top #(
 
                 ST_WAIT: begin
                     uart_tx_valid <= 1'b0;
-                    // uart_tx 采纳并开始发送后 tx_ready 变低, 发送完成后重新变高
                     if (uart_tx_ready && !uart_tx_valid) begin
                         if (char_idx == line_len - 1) begin
                             // 整行完整结束

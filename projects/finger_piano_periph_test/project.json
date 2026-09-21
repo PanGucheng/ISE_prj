@@ -126,7 +126,7 @@
     "forbiddenEdgeSignals": [
       "clk_8k"
     ],
-    "synthesisWarningAllowlistNote": "Audited 2026-09-21 for ADS1115 FireWater CH0 voltage output version. Exactly 54 structural warnings reviewed: (a) ADS1115 internal poll/status trims (poll_hi, r_busy, u_i2c error, adc_busy, m_wdata), (b) released DAC inout pins tied to 1'bz (dac_i2c_scl/sda never assigned), (c) constant-folded ASCII bit-7 and line_len bits (line_len<5:5>, line_len_0, uart_tx_byte_7, tx_shift_7), (d) unused CH1 and CH2 ADC conversion registers (adc_ch1_raw, adc_ch2_raw, u_ads1115/GEN_ADC.ch(1|2)_q_*) trimmed by XST because FireWater stream specifically monitors CH0 voltage.",
+    "synthesisWarningAllowlistNote": "Audited 2026-09-21 for ADS1115 3-channel real-time FireWater voltage output (VOFA+). Exactly 21 structural warnings reviewed: (a) ADS1115 internal poll/status trims (poll_hi, r_busy, u_i2c error, adc_busy, m_wdata), (b) released DAC inout pins tied to 1'bz (dac_i2c_scl/sda never assigned), (c) constant-folded ASCII bit-7 and line_len bits (line_len<5:5>, line_len_0, line_len_3, uart_tx_byte_7, tx_shift_7). CH0/CH1/CH2 are fully connected and consumed by time-multiplexed bin_to_dec_volt pipeline.",
     "synthesisWarningAllowlist": [
       {
         "id": "Xst:2677",
@@ -144,11 +144,6 @@
         "expected": 1
       },
       {
-        "id": "Xst:2677",
-        "pattern": "Node <u_ads1115/GEN_ADC\\.ch(1|2)_q_",
-        "expected": 32
-      },
-      {
         "id": "Xst:646",
         "pattern": "Signal <GEN_ADC\\.poll_(hi<6:0>|lo)>",
         "expected": 2
@@ -157,11 +152,6 @@
         "id": "Xst:646",
         "pattern": "Signal <adc_busy>",
         "expected": 1
-      },
-      {
-        "id": "Xst:646",
-        "pattern": "Signal <adc_ch(1|2)_raw>",
-        "expected": 2
       },
       {
         "id": "Xst:2565",
@@ -186,6 +176,11 @@
       {
         "id": "Xst:1895",
         "pattern": "FF/Latch <GEN_ADC\\.m_wdata",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "FF/Latch <line_len_3>",
         "expected": 1
       }
     ]
