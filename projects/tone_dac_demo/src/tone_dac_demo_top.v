@@ -37,10 +37,6 @@ module tone_dac_demo_top (
         .rst_n_sync (rst_n_sync)
     );
 
-    //-------------------------------------------------------------------------
-    // 2. 3-bit 传感器输入前端（复用最终工程架构与语义）
-    //-------------------------------------------------------------------------
-    wire [2:0] sensor_code_stable;
     wire [2:0] note_code;
 
     sensor_code_frontend #(
@@ -52,7 +48,7 @@ module tone_dac_demo_top (
         .clk                (clk),
         .rst_n_sync         (rst_n_sync),
         .sensor_async       (sensor_async),
-        .sensor_code_stable (sensor_code_stable),
+        .sensor_code_stable (),
         .note_code          (note_code)
     );
 
@@ -71,13 +67,6 @@ module tone_dac_demo_top (
     //-------------------------------------------------------------------------
     // 4. DDS -> MCP4725 正弦波链路（复用已验证 pipeline）
     //-------------------------------------------------------------------------
-    wire        dac_busy;
-    wire        dac_error;
-    wire        dac_overrun;
-    wire [11:0] dds_code_debug;
-    wire        dds_valid_debug;
-    wire        dac_ready_debug;
-
     dds_mcp4725_pipeline #(
         .SYS_CLK_HZ     (`SYS_CLK_HZ),
         .SAMPLE_RATE_HZ (`CFG_DAC_SAMPLE_RATE),
@@ -90,12 +79,12 @@ module tone_dac_demo_top (
         .note_code       (note_code),
         .dac_i2c_scl     (dac_i2c_scl),
         .dac_i2c_sda     (dac_i2c_sda),
-        .dac_busy        (dac_busy),
-        .dac_error       (dac_error),
-        .dac_overrun     (dac_overrun),
-        .dds_code_debug  (dds_code_debug),
-        .dds_valid_debug (dds_valid_debug),
-        .dac_ready_debug (dac_ready_debug)
+        .dac_busy        (),
+        .dac_error       (),
+        .dac_overrun     (),
+        .dds_code_debug  (),
+        .dds_valid_debug (),
+        .dac_ready_debug ()
     );
 
 endmodule

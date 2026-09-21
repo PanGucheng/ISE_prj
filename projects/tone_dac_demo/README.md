@@ -62,7 +62,8 @@
   - `dds_mcp4725_pipeline`: run `sim-20260921-140027-8600e28a` (PASS)
 - **Stage D (Top Integration)**: PASS
   - `tone_dac_demo_top`: run `sim-20260921-140138-b0107917` (PASS, 88 checks, 0 errors)
-- **Stage E (Full Verify)**: TODO
+- **Stage E (Full Verify)**: PASS
+  - `verify`: run `verify-20260921-140458-3b273ad1` (Overall PASS, synthesis `20260921-140458-1cea9935`: 0 errors / 25 audited allowed warnings / 0 unexpected / 0 latches; all 4 simulations PASS)
 - **Stage F (Bitstream)**: TODO
 
 ## 6. 板级验证状态

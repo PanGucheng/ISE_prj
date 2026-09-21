@@ -264,8 +264,8 @@ module tb_tone_dac_demo_top;
             check_true(dac_max_val > 2048, "DAC sine sample swung above 2048");
             check_true(dac_min_val < 2048, "DAC sine sample swung below 2048");
             check_eq32(u_dac_model.eeprom_viol, 1'b0, "EEPROM violation is 0");
-            check_eq32(u_dut.dac_error, 1'b0, "dac_error is 0");
-            check_eq32(u_dut.dac_overrun, 1'b0, "dac_overrun is 0");
+            check_eq32(u_dut.u_dac_pipeline.dac_error, 1'b0, "dac_error is 0");
+            check_eq32(u_dut.u_dac_pipeline.dac_overrun, 1'b0, "dac_overrun is 0");
         end
 
         // 4. 返回静音测试 (sensor_async = 000)

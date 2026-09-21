@@ -138,6 +138,39 @@
     "forbiddenEdgeSignals": [
       "square_out",
       "dac_i2c_scl"
+    ],
+    "synthesisWarningAllowlistNote": "Audited tone_dac_demo synthesis trims. tone_dac_demo_top has no external consumers for DAC debug/status ports (dac_busy, dac_error, dac_overrun, rd_data), so XST trims the unused read/status logic in mcp4725_ctrl and i2c_master (18 FFs). High bits of 24-bit phase_inc for 7 notes are constant 0 (4 FFs), read ack/command in write-only DAC are constant 0 (3 FFs). Total: 25 audited warnings. Any other warning or count change fails verify.",
+    "synthesisWarningAllowlist": [
+      {
+        "id": "Xst:2677",
+        "pattern": "Node <u_dac_pipeline/GEN_PIPE\\.u_dac/",
+        "expected": 18
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <GEN_DDS\\.phase_inc_20>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <rd_nack>",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "u_dac_pipeline/GEN_PIPE\\.u_dac/GEN_DAC\\.u_i2c/is_read",
+        "expected": 1
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "FF/Latch <GEN_DDS\\.phase_inc_2[123]>",
+        "expected": 3
+      },
+      {
+        "id": "Xst:1895",
+        "pattern": "u_dac_pipeline/GEN_PIPE\\.u_dac/GEN_DAC\\.m_cmd_0",
+        "expected": 1
+      }
     ]
   },
   "programming": {
