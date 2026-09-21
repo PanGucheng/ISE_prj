@@ -112,24 +112,55 @@ module periph_test_top #(
     );
 
     //-------------------------------------------------------------------------
-    // 单槽最新值缓存与首次采样门控
     //-------------------------------------------------------------------------
-    reg [15:0] latest_ch0;
-    reg [15:0] latest_ch1;
-    reg [15:0] latest_ch2;
-    reg        have_valid_sample;
+    // 首次采样有效门控标志
+    //-------------------------------------------------------------------------
+    reg have_valid_sample;
+
+    //-------------------------------------------------------------------------
+    // CH0 电压转换 (16-bit 原始码转 4 位小数伏特 BCD)
+    //-------------------------------------------------------------------------
+    wire       volt_done;
+    wire [3:0] conv_volt;
+    wire [3:0] conv_tenths;
+    wire [3:0] conv_hundredths;
+    wire [3:0] conv_thousandths;
+    wire [3:0] conv_tenthousands;
+
+    reg [3:0]  latched_volt;
+    reg [3:0]  latched_tenths;
+    reg [3:0]  latched_hundredths;
+    reg [3:0]  latched_thousandths;
+    reg [3:0]  latched_tenthousands;
+
+    bin_to_dec_volt u_volt_conv (
+        .clk              (clk),
+        .rst_n_sync       (rst_n_sync),
+        .start            (adc_sample_valid),
+        .raw_code         (adc_ch0_raw),
+        .done             (volt_done),
+        .d_volt           (conv_volt),
+        .d_tenths         (conv_tenths),
+        .d_hundredths     (conv_hundredths),
+        .d_thousandths    (conv_thousandths),
+        .d_tenthousands   (conv_tenthousands)
+    );
 
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            latest_ch0        <= 16'h0000;
-            latest_ch1        <= 16'h0000;
-            latest_ch2        <= 16'h0000;
-            have_valid_sample <= 1'b0;
-        end else if (adc_sample_valid) begin
-            latest_ch0        <= adc_ch0_raw;
-            latest_ch1        <= adc_ch1_raw;
-            latest_ch2        <= adc_ch2_raw;
-            have_valid_sample <= 1'b1;
+            have_valid_sample    <= 1'b0;
+            latched_volt         <= 4'd0;
+            latched_tenths       <= 4'd0;
+            latched_hundredths   <= 4'd0;
+            latched_thousandths  <= 4'd0;
+            latched_tenthousands <= 4'd0;
+        end else if (volt_done) begin
+            have_valid_sample    <= 1'b1;
+            latched_volt         <= conv_volt;
+            latched_tenths       <= conv_tenths;
+            latched_hundredths   <= conv_hundredths;
+            latched_thousandths  <= conv_thousandths;
+            latched_tenthousands <= conv_tenthousands;
         end
     end
 
@@ -172,34 +203,7 @@ module periph_test_top #(
     end
 
     //-------------------------------------------------------------------------
-    // 十六进制半字节转 ASCII 字符函数
-    //-------------------------------------------------------------------------
-    function [7:0] hex2ascii;
-        input [3:0] nibble;
-        begin
-            case (nibble)
-                4'h0: hex2ascii = "0";
-                4'h1: hex2ascii = "1";
-                4'h2: hex2ascii = "2";
-                4'h3: hex2ascii = "3";
-                4'h4: hex2ascii = "4";
-                4'h5: hex2ascii = "5";
-                4'h6: hex2ascii = "6";
-                4'h7: hex2ascii = "7";
-                4'h8: hex2ascii = "8";
-                4'h9: hex2ascii = "9";
-                4'hA: hex2ascii = "A";
-                4'hB: hex2ascii = "B";
-                4'hC: hex2ascii = "C";
-                4'hD: hex2ascii = "D";
-                4'hE: hex2ascii = "E";
-                default: hex2ascii = "F";
-            endcase
-        end
-    endfunction
-
-    //-------------------------------------------------------------------------
-    // 行级报文生成与非抢占式调度状态机
+    // 行级报文生成与非抢占式调度状态机 (FireWater 协议)
     //-------------------------------------------------------------------------
     localparam [1:0] ST_IDLE = 2'd0;
     localparam [1:0] ST_SEND = 2'd1;
@@ -210,7 +214,11 @@ module periph_test_top #(
     reg [5:0]  line_len;
     reg        line_is_error;
     reg [2:0]  send_ecode;
-    reg [15:0] snap_ch0, snap_ch1, snap_ch2;
+    reg [3:0]  snap_volt;
+    reg [3:0]  snap_tenths;
+    reg [3:0]  snap_hundredths;
+    reg [3:0]  snap_thousandths;
+    reg [3:0]  snap_tenthousands;
     reg        report_pending;
 
     reg [7:0]  uart_tx_byte;
@@ -255,49 +263,20 @@ module periph_test_top #(
                 default: cur_char = " ";
             endcase
         end else begin
-            // "ADC OK CH0=0x1234 CH1=0x5678 CH2=0x9ABC\r\n" (41 字节)
+            // FireWater 协议: "ch0:X.XXXX\r\n" (12 字节)
             case (char_idx)
-                6'd0:  cur_char = "A";
-                6'd1:  cur_char = "D";
-                6'd2:  cur_char = "C";
-                6'd3:  cur_char = " ";
-                6'd4:  cur_char = "O";
-                6'd5:  cur_char = "K";
-                6'd6:  cur_char = " ";
-                6'd7:  cur_char = "C";
-                6'd8:  cur_char = "H";
-                6'd9:  cur_char = "0";
-                6'd10: cur_char = "=";
-                6'd11: cur_char = "0";
-                6'd12: cur_char = "x";
-                6'd13: cur_char = hex2ascii(snap_ch0[15:12]);
-                6'd14: cur_char = hex2ascii(snap_ch0[11:8]);
-                6'd15: cur_char = hex2ascii(snap_ch0[7:4]);
-                6'd16: cur_char = hex2ascii(snap_ch0[3:0]);
-                6'd17: cur_char = " ";
-                6'd18: cur_char = "C";
-                6'd19: cur_char = "H";
-                6'd20: cur_char = "1";
-                6'd21: cur_char = "=";
-                6'd22: cur_char = "0";
-                6'd23: cur_char = "x";
-                6'd24: cur_char = hex2ascii(snap_ch1[15:12]);
-                6'd25: cur_char = hex2ascii(snap_ch1[11:8]);
-                6'd26: cur_char = hex2ascii(snap_ch1[7:4]);
-                6'd27: cur_char = hex2ascii(snap_ch1[3:0]);
-                6'd28: cur_char = " ";
-                6'd29: cur_char = "C";
-                6'd30: cur_char = "H";
-                6'd31: cur_char = "2";
-                6'd32: cur_char = "=";
-                6'd33: cur_char = "0";
-                6'd34: cur_char = "x";
-                6'd35: cur_char = hex2ascii(snap_ch2[15:12]);
-                6'd36: cur_char = hex2ascii(snap_ch2[11:8]);
-                6'd37: cur_char = hex2ascii(snap_ch2[7:4]);
-                6'd38: cur_char = hex2ascii(snap_ch2[3:0]);
-                6'd39: cur_char = 8'h0D; // \r
-                6'd40: cur_char = 8'h0A; // \n
+                6'd0:  cur_char = "c";
+                6'd1:  cur_char = "h";
+                6'd2:  cur_char = "0";
+                6'd3:  cur_char = ":";
+                6'd4:  cur_char = 8'h30 + {4'd0, snap_volt};
+                6'd5:  cur_char = ".";
+                6'd6:  cur_char = 8'h30 + {4'd0, snap_tenths};
+                6'd7:  cur_char = 8'h30 + {4'd0, snap_hundredths};
+                6'd8:  cur_char = 8'h30 + {4'd0, snap_thousandths};
+                6'd9:  cur_char = 8'h30 + {4'd0, snap_tenthousands};
+                6'd10: cur_char = 8'h0D; // \r
+                6'd11: cur_char = 8'h0A; // \n
                 default: cur_char = " ";
             endcase
         end
@@ -306,17 +285,19 @@ module periph_test_top #(
     // 状态机主时序
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            tx_fsm        <= ST_IDLE;
-            char_idx      <= 6'd0;
-            line_len      <= 6'd0;
-            line_is_error <= 1'b0;
-            send_ecode    <= 3'd0;
-            snap_ch0      <= 16'h0000;
-            snap_ch1      <= 16'h0000;
-            snap_ch2      <= 16'h0000;
-            uart_tx_byte  <= 8'h00;
-            uart_tx_valid <= 1'b0;
-            err_cleared   <= 1'b0;
+            tx_fsm            <= ST_IDLE;
+            char_idx          <= 6'd0;
+            line_len          <= 6'd0;
+            line_is_error     <= 1'b0;
+            send_ecode        <= 3'd0;
+            snap_volt         <= 4'd0;
+            snap_tenths       <= 4'd0;
+            snap_hundredths   <= 4'd0;
+            snap_thousandths  <= 4'd0;
+            snap_tenthousands <= 4'd0;
+            uart_tx_byte      <= 8'h00;
+            uart_tx_valid     <= 1'b0;
+            err_cleared       <= 1'b0;
         end else begin
             err_cleared   <= 1'b0;
             uart_tx_valid <= 1'b0;
@@ -333,12 +314,14 @@ module periph_test_top #(
                         tx_fsm        <= ST_SEND;
                     end else if ((timer_100ms_tick || report_pending) && have_valid_sample) begin
                         // 正常采样报文 (必须在首次有效采样之后)
-                        line_is_error <= 1'b0;
-                        snap_ch0      <= latest_ch0;
-                        snap_ch1      <= latest_ch1;
-                        snap_ch2      <= latest_ch2;
-                        line_len      <= 6'd41;
-                        tx_fsm        <= ST_SEND;
+                        line_is_error     <= 1'b0;
+                        snap_volt         <= latched_volt;
+                        snap_tenths       <= latched_tenths;
+                        snap_hundredths   <= latched_hundredths;
+                        snap_thousandths  <= latched_thousandths;
+                        snap_tenthousands <= latched_tenthousands;
+                        line_len          <= 6'd12;
+                        tx_fsm            <= ST_SEND;
                     end
                 end
 

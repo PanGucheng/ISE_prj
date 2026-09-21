@@ -23,6 +23,11 @@
       "library": "work"
     },
     {
+      "path": "src/bin_to_dec_volt.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/periph_test_top.v",
       "language": "verilog",
       "library": "work"
@@ -41,6 +46,17 @@
   "optimization": "Speed",
   "optimizationLevel": 1,
   "simulations": [
+    {
+      "name": "bin_to_dec_volt_unit",
+      "top": "tb_bin_to_dec_volt",
+      "sources": [
+        "sim/tb_bin_to_dec_volt.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 300,
+      "passPattern": "PASS: All bin_to_dec_volt tests passed!",
+      "failPattern": "ERROR: mismatch"
+    },
     {
       "name": "uart_tx_unit",
       "top": "tb_uart_tx",
@@ -110,7 +126,7 @@
     "forbiddenEdgeSignals": [
       "clk_8k"
     ],
-    "synthesisWarningAllowlistNote": "Audited 2026-09-21 for ADC UART diagnostic version. Exactly 19 structural warnings reviewed: (a) ADS1115 internal poll/status trims (poll_hi, r_busy, u_i2c error, adc_busy, m_wdata), (b) released DAC inout pins tied to 1'bz (dac_i2c_scl/sda never assigned), (c) constant-folded ASCII bit-7 in UART datapath (uart_tx_byte_7, tx_shift_7), (d) constant bit in line length (line_len_2 under 41/18 bytes). All raw ADC conversion bits are consumed by UART.",
+    "synthesisWarningAllowlistNote": "Audited 2026-09-21 for ADS1115 FireWater CH0 voltage output version. Exactly 54 structural warnings reviewed: (a) ADS1115 internal poll/status trims (poll_hi, r_busy, u_i2c error, adc_busy, m_wdata), (b) released DAC inout pins tied to 1'bz (dac_i2c_scl/sda never assigned), (c) constant-folded ASCII bit-7 and line_len bits (line_len<5:5>, line_len_0, uart_tx_byte_7, tx_shift_7), (d) unused CH1 and CH2 ADC conversion registers (adc_ch1_raw, adc_ch2_raw, u_ads1115/GEN_ADC.ch(1|2)_q_*) trimmed by XST because FireWater stream specifically monitors CH0 voltage.",
     "synthesisWarningAllowlist": [
       {
         "id": "Xst:2677",
@@ -128,6 +144,11 @@
         "expected": 1
       },
       {
+        "id": "Xst:2677",
+        "pattern": "Node <u_ads1115/GEN_ADC\\.ch(1|2)_q_",
+        "expected": 32
+      },
+      {
         "id": "Xst:646",
         "pattern": "Signal <GEN_ADC\\.poll_(hi<6:0>|lo)>",
         "expected": 2
@@ -138,13 +159,23 @@
         "expected": 1
       },
       {
+        "id": "Xst:646",
+        "pattern": "Signal <adc_ch(1|2)_raw>",
+        "expected": 2
+      },
+      {
         "id": "Xst:2565",
         "pattern": "Inout <dac_i2c_s(da|cl)> is never assigned",
         "expected": 2
       },
       {
+        "id": "Xst:2404",
+        "pattern": "FFs/Latches <line_len<5:5>>",
+        "expected": 1
+      },
+      {
         "id": "Xst:1710",
-        "pattern": "FF/Latch <(line_len_2|uart_tx_byte_7|u_uart_tx/tx_shift_7)>",
+        "pattern": "FF/Latch <(line_len_0|uart_tx_byte_7|u_uart_tx/tx_shift_7)>",
         "expected": 3
       },
       {

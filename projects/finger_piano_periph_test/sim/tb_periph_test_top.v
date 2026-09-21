@@ -194,27 +194,23 @@ module tb_periph_test_top;
         input integer len;
         integer i;
         reg match;
-        reg [7:0] exp [0:40];
+        reg [7:0] exp [0:11];
         begin
             match = 1;
-            check_eq32(len, 41, "normal report length == 41");
-            exp[0]="A"; exp[1]="D"; exp[2]="C"; exp[3]=" "; exp[4]="O"; exp[5]="K"; exp[6]=" ";
-            exp[7]="C"; exp[8]="H"; exp[9]="0"; exp[10]="="; exp[11]="0"; exp[12]="x";
-            exp[13]="1"; exp[14]="2"; exp[15]="3"; exp[16]="4"; exp[17]=" ";
-            exp[18]="C"; exp[19]="H"; exp[20]="1"; exp[21]="="; exp[22]="0"; exp[23]="x";
-            exp[24]="3"; exp[25]="4"; exp[26]="5"; exp[27]="6"; exp[28]=" ";
-            exp[29]="C"; exp[30]="H"; exp[31]="2"; exp[32]="="; exp[33]="0"; exp[34]="x";
-            exp[35]="5"; exp[36]="6"; exp[37]="7"; exp[38]="8";
-            exp[39]=8'h0D; exp[40]=8'h0A;
+            check_eq32(len, 12, "normal FireWater report length == 12");
+            // VAL_AIN0 = 16'h1234 = 4660. 4660 * 125 = 582500 uV -> 0.5825 V
+            exp[0]="c"; exp[1]="h"; exp[2]="0"; exp[3]=":";
+            exp[4]="0"; exp[5]="."; exp[6]="5"; exp[7]="8"; exp[8]="2"; exp[9]="5";
+            exp[10]=8'h0D; exp[11]=8'h0A;
 
-            for (i = 0; i < 41; i = i + 1) begin
+            for (i = 0; i < 12; i = i + 1) begin
                 if (line_buf[i] !== exp[i]) begin
                     $display("FAIL: char[%0d] mismatch: got 0x%02X (%c), exp 0x%02X (%c)",
                              i, line_buf[i], line_buf[i], exp[i], exp[i]);
                     match = 0;
                 end
             end
-            check_true(match, "all 41 characters match expected normal report");
+            check_true(match, "all 12 characters match expected FireWater report (ch0:0.5825)");
         end
     endtask
 
