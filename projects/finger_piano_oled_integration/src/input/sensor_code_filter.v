@@ -52,31 +52,49 @@ module sensor_code_filter #(
     localparam integer STABLE_CYCLES     =
         (STABLE_CYCLES_RAW < 1) ? 1 : STABLE_CYCLES_RAW;
 
+    // 计算表示非负整数所需的最小位宽(纯 Verilog-2001 常量函数)
+    function integer calc_bits;
+        input integer v;
+        integer bits;
+        begin
+            bits = 0;
+            while (v > 0) begin
+                bits = bits + 1;
+                v = v >> 1;
+            end
+            calc_bits = (bits < 1) ? 1 : bits;
+        end
+    endfunction
+
+    localparam integer REQ_WIDTH = calc_bits(STABLE_CYCLES - 1);
+    localparam integer EFF_WIDTH = (CNT_WIDTH < REQ_WIDTH) ? REQ_WIDTH :
+                                   ((CNT_WIDTH == `FP_FILTER_CNT_WIDTH) ? REQ_WIDTH : CNT_WIDTH);
+
     generate
         if (ENABLE != 0) begin : GEN_FILTER
 
             reg [2:0]            stable_q;     // 当前稳定码字
             reg [2:0]            candidate_q;  // 候选码字(整个向量)
-            reg [CNT_WIDTH-1:0]  stable_count; // 候选连续被观察到的次数-1
+            reg [EFF_WIDTH-1:0]  stable_count; // 候选连续被观察到的次数-1
 
             always @(posedge clk or negedge rst_n_sync) begin
                 if (!rst_n_sync) begin
                     stable_q     <= 3'b000;               // 复位 = 静音
                     candidate_q  <= 3'b000;
-                    stable_count <= {CNT_WIDTH{1'b0}};
+                    stable_count <= {EFF_WIDTH{1'b0}};
                 end else if (code_sync == stable_q) begin
                     // 与稳定值一致:计数清零,candidate 同步回 stable
-                    stable_count <= {CNT_WIDTH{1'b0}};
+                    stable_count <= {EFF_WIDTH{1'b0}};
                     candidate_q  <= stable_q;
                 end else if (code_sync != candidate_q) begin
                     // 新候选:记录整个向量,计数重新开始(首次观察记 1)
                     candidate_q  <= code_sync;
-                    stable_count <= {{(CNT_WIDTH-1){1'b0}}, 1'b1};
+                    stable_count <= {{(EFF_WIDTH-1){1'b0}}, 1'b1};
                 end else begin
                     // 连续观察同一候选:累计,达到门限一次性更新
                     if (stable_count >= STABLE_CYCLES - 1) begin
                         stable_q     <= candidate_q;      // 三个 bit 一次更新
-                        stable_count <= {CNT_WIDTH{1'b0}};
+                        stable_count <= {EFF_WIDTH{1'b0}};
                     end else begin
                         stable_count <= stable_count + 1'b1;
                     end
