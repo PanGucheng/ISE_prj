@@ -12,9 +12,9 @@
 //=============================================================================
 
 module oled_test_top #(
-    parameter integer SYS_CLK_HZ            = 12000000,
-    parameter integer POWER_ON_DELAY_CYCLES = 240000,    // 20 ms @ 12 MHz
-    parameter integer AUTO_STEP_CYCLES      = 18000000   // 硬件下 1.5 秒步进一个音符 (0 时禁止自动步进)
+    parameter integer SYS_CLK_HZ       = 12000000,
+    parameter integer SIM_FAST_INIT    = 0,
+    parameter integer AUTO_STEP_CYCLES = 18000000   // 硬件下 1.5 秒步进一个音符 (0 时禁止自动步进)
 ) (
     input  wire clk,
     input  wire rst_n,
@@ -82,8 +82,8 @@ module oled_test_top #(
     );
 
     oled_ssd1306_ctrl #(
-        .SYS_CLK_HZ            (SYS_CLK_HZ),
-        .POWER_ON_DELAY_CYCLES (POWER_ON_DELAY_CYCLES)
+        .SYS_CLK_HZ    (SYS_CLK_HZ),
+        .SIM_FAST_INIT (SIM_FAST_INIT)
     ) u_ctrl (
         .clk                (clk),
         .rst_n_sync         (rst_n_sync),

@@ -9,7 +9,7 @@
 //      - start_req: 发送 START 条件并自动发送从机写地址 8'h78（7-bit 0x3C << 1），采样 ACK；
 //      - write_byte_req: 发送单字节（MSB first）并采样 ACK；
 //      - stop_req: 发送 STOP 条件并释放总线为高阻态。
-//   4. 占用极小：无读支持、无重复起始、无总线仲裁，预计仅消耗约 30~40 Slices。
+//   4. 资源极致优化：单相位预分频计数器，消除各状态多路比较器。
 //=============================================================================
 
 module oled_i2c_write #(
@@ -36,13 +36,13 @@ module oled_i2c_write #(
 );
 
     //-------------------------------------------------------------------------
-    // 时钟分频计算（四相位发生器）
-    // 100 kHz 在 12 MHz 下周期为 120 拍，每相位 30 拍
+    // 时钟分频计算（半周期计数器）
+    // 100 kHz 在 12 MHz 下周期为 120 拍，每半周期 60 拍 (0..59)
     //-------------------------------------------------------------------------
-    localparam integer CYCLES_PER_BIT   = SYS_CLK_HZ / I2C_BUS_HZ;
-    localparam integer CYCLES_PER_PHASE = CYCLES_PER_BIT / 4;
+    localparam integer CYCLES_HALF_BIT = (SYS_CLK_HZ / I2C_BUS_HZ) / 2;
 
     reg [5:0] clk_cnt;
+    wire      tick = (clk_cnt == CYCLES_HALF_BIT - 1);
 
     // 内部驱动控制（1 = 拉低为0，0 = 释放为Z）
     reg scl_drive_low;
@@ -83,9 +83,16 @@ module oled_i2c_write #(
         end else begin
             byte_done <= 1'b0;
 
+            if (state == ST_IDLE) begin
+                clk_cnt <= 6'd0;
+            end else if (tick) begin
+                clk_cnt <= 6'd0;
+            end else begin
+                clk_cnt <= clk_cnt + 1'b1;
+            end
+
             case (state)
                 ST_IDLE: begin
-                    clk_cnt <= 6'd0;
                     if (start_req) begin
                         shift_reg <= I2C_ADDR_WRITE; // START 自动带入写地址 0x78
                         bit_cnt   <= 3'd7;
@@ -95,7 +102,7 @@ module oled_i2c_write #(
                         bit_cnt   <= 3'd7;
                         state     <= ST_BIT_LOW;
                     end else if (stop_req) begin
-                        state <= ST_STOP_PRE;
+                        state     <= ST_STOP_PRE;
                     end
                 end
 
@@ -105,63 +112,39 @@ module oled_i2c_write #(
                 ST_START_PRE: begin
                     sda_drive_low <= 1'b0; // 释放 SDA 为高
                     scl_drive_low <= 1'b0; // 释放 SCL 为高
-                    if (clk_cnt == CYCLES_PER_PHASE - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_START_SDA;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_START_SDA;
                 end
 
                 ST_START_SDA: begin
                     sda_drive_low <= 1'b1; // SCL 为高时拉低 SDA (产生 START)
                     scl_drive_low <= 1'b0;
-                    if (clk_cnt == CYCLES_PER_PHASE - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_START_SCL;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_START_SCL;
                 end
 
                 ST_START_SCL: begin
                     sda_drive_low <= 1'b1;
                     scl_drive_low <= 1'b1; // 拉低 SCL
-                    if (clk_cnt == CYCLES_PER_PHASE - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_BIT_LOW;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_BIT_LOW;
                 end
 
                 //-------------------------------------------------------------
-                // 数据位发送序列（MSB 先发）
+                // 数据位发送序列（MSB 先发，每半周期 60 周期 = 5us）
                 //-------------------------------------------------------------
                 ST_BIT_LOW: begin
                     scl_drive_low <= 1'b1;
-                    // 设置数据位：若为0则拉低，若为1则释放Z
                     sda_drive_low <= (shift_reg[bit_cnt] == 1'b0);
-                    if (clk_cnt == (CYCLES_PER_BIT / 2) - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_BIT_HIGH;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_BIT_HIGH;
                 end
 
                 ST_BIT_HIGH: begin
                     scl_drive_low <= 1'b0; // 释放 SCL 为高让从机采样
-                    if (clk_cnt == (CYCLES_PER_BIT / 2) - 1) begin
-                        clk_cnt <= 6'd0;
+                    if (tick) begin
                         if (bit_cnt == 3'd0) begin
                             state <= ST_ACK_LOW;
                         end else begin
                             bit_cnt <= bit_cnt - 1'b1;
                             state   <= ST_BIT_LOW;
                         end
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
                     end
                 end
 
@@ -171,27 +154,20 @@ module oled_i2c_write #(
                 ST_ACK_LOW: begin
                     scl_drive_low <= 1'b1; // 拉低 SCL
                     sda_drive_low <= 1'b0; // 释放 SDA 为高阻输入
-                    if (clk_cnt == (CYCLES_PER_BIT / 2) - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_ACK_HIGH;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_ACK_HIGH;
                 end
 
                 ST_ACK_HIGH: begin
                     scl_drive_low <= 1'b0; // 释放 SCL 为高
-                    // 在时钟高电平中间采样 ACK (0 = 从机拉低表示 ACK, 1 = NACK)
-                    if (clk_cnt == (CYCLES_PER_PHASE) - 1) begin
+                    // 在时钟高电平中间采样 ACK (第 30 个周期采样)
+                    if (clk_cnt == (CYCLES_HALF_BIT / 2) - 1) begin
                         ack_error <= oled_sda; // 采样 SDA 线路电平
                     end
-                    if (clk_cnt == (CYCLES_PER_BIT / 2) - 1) begin
-                        clk_cnt       <= 6'd0;
+                    // 半周期结束完成握手
+                    if (tick) begin
                         scl_drive_low <= 1'b1; // 拉低 SCL 保持总线锁定
                         byte_done     <= 1'b1; // 通知上层单字节完成
                         state         <= ST_IDLE;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
                     end
                 end
 
@@ -201,34 +177,21 @@ module oled_i2c_write #(
                 ST_STOP_PRE: begin
                     scl_drive_low <= 1'b1; // SCL=0
                     sda_drive_low <= 1'b1; // 先拉低 SDA
-                    if (clk_cnt == CYCLES_PER_PHASE - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_STOP_SCL;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_STOP_SCL;
                 end
 
                 ST_STOP_SCL: begin
                     scl_drive_low <= 1'b0; // SCL 释放为高
                     sda_drive_low <= 1'b1; // SDA 保持拉低
-                    if (clk_cnt == CYCLES_PER_PHASE - 1) begin
-                        clk_cnt <= 6'd0;
-                        state   <= ST_STOP_SDA;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
-                    end
+                    if (tick) state <= ST_STOP_SDA;
                 end
 
                 ST_STOP_SDA: begin
                     scl_drive_low <= 1'b0; // SCL 保持为高
                     sda_drive_low <= 1'b0; // 释放 SDA 为高（产生 STOP 条件）
-                    if (clk_cnt == CYCLES_PER_PHASE - 1) begin
-                        clk_cnt   <= 8'd0;
+                    if (tick) begin
                         byte_done <= 1'b1;
                         state     <= ST_IDLE;
-                    end else begin
-                        clk_cnt <= clk_cnt + 1'b1;
                     end
                 end
 

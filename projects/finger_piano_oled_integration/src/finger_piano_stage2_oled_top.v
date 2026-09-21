@@ -67,8 +67,8 @@ module finger_piano_stage2_oled_top (
     wire       i2c_ack_error;
 
     oled_ssd1306_ctrl #(
-        .SYS_CLK_HZ            (12000000),
-        .POWER_ON_DELAY_CYCLES (240000)
+        .SYS_CLK_HZ    (12000000),
+        .SIM_FAST_INIT (0)
     ) u_oled_ctrl (
         .clk                (clk),
         .rst_n_sync         (oled_rst_n_sync),

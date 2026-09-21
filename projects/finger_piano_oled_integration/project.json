@@ -237,8 +237,8 @@
       },
       {
         "id": "Xst:2677",
-        "pattern": "Node <u_oled_ctrl/(oled_error|init_done)>",
-        "expected": 2
+        "pattern": "Node <u_oled_ctrl/oled_error>",
+        "expected": 1
       }
     ]
   },
