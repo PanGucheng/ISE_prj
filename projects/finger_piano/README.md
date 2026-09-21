@@ -17,6 +17,8 @@
 
 ## 0. 当前状态（Toolchain Freeze v1 口径）
 
+**2026-09-21 文档新增：** [OLED 集成资源优化与音量余量计划](../finger_piano_oled_integration/docs/resource_optimization_plan.md)已建立，执行对象为独立 OLED 集成工程。计划状态为 PLANNED，包含基线证据、回归补齐、综合策略对比、计数器收窄、DDS BRAM 评估和后续压力音量预算。本次仅增加文档入口，未修改本工程 RTL、配置或历史验证结论。
+
 > 正式顶层已迁移到 Stage-2；legacy 7-key baseline 的验证事实保留在 §12 与
 > §13 后续轮次。系统集成与引脚状态见 §12.5 / §12.6 与 §13 第十四轮。
 

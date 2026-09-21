@@ -34,6 +34,7 @@
 | P7 启动/时钟板级验证 | **SOFTWARE PREPARATION = COMPLETE**（独立诊断工程 `finger_piano_clock_test`，verify/implement/bitstream 全过）；HARDWARE TEST = WAITING USER | 独立工程 | WAITING USER |
 | P8 数字音量 | SIMULATED / STANDALONE（DDS→gain→MCP4725 端到端通过；刻意不接 Stage-2 顶层；PRESSURE→VOLUME = NOT_IMPLEMENTED，FSR = NOT_CALIBRATED） | NO（刻意） | NO（BOARD AUDIO VOLUME = NOT_TESTED） |
 | P9 ADC/DAC 板级诊断 | **BOARD TEST = IN PROGRESS**（`finger_piano_periph_test`：7 仿真 + verify/implement/bitstream 全过；2026-09-17 经用户授权完成 ISF(mode 0) 与 volatile Jtag(mode 3→切回 mode 0) 写入；板上测量仍 TODO） | 独立工程 | IN PROGRESS |
+| OLED 集成资源优化 | **PLANNED**：[详细计划](../projects/finger_piano_oled_integration/docs/resource_optimization_plan.md)已编写；先补齐集成回归，再评估综合策略、计数器收窄和 DDS BRAM；音量余量待真实集成测量 | OLED 试验工程，优化未实施 | 本计划不含板测 |
 
 **P1~P6 已全部完成并交叉集成**：正式 Stage-2 顶层 `finger_piano_stage2_top`
 （12 个用户 I/O，引脚 2026-09-16 逐脚冻结）已通过全量 verify（Overall PASS，
