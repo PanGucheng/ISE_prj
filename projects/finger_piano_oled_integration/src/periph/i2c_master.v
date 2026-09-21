@@ -93,6 +93,37 @@ module i2c_master #(
     //-------------------------------------------------------------------------
     // 周期参数钳制（常量表达式，综合期完成）
     //-------------------------------------------------------------------------
+    // 周期参数钳制与紧凑位宽推导（常量函数，纯 Verilog-2001，综合期静态求解）
+    //-------------------------------------------------------------------------
+    function integer calc_bits;
+        input integer val;
+        integer v, bits;
+        begin
+            if (val <= 1)
+                calc_bits = 1;
+            else begin
+                v = val;
+                bits = 0;
+                while (v > 0) begin
+                    bits = bits + 1;
+                    v = v >> 1;
+                end
+                calc_bits = bits;
+            end
+        end
+    endfunction
+
+    function integer calc_max7;
+        input integer a, b, c, d, e, f, g;
+        integer m1, m2;
+        begin
+            m1 = (a > b) ? ((a > c) ? a : c) : ((b > c) ? b : c);
+            m1 = (m1 > d) ? m1 : d;
+            m2 = (e > f) ? ((e > g) ? e : g) : ((f > g) ? f : g);
+            calc_max7 = (m1 > m2) ? m1 : m2;
+        end
+    endfunction
+
     localparam integer LOW_SAFE =
         ((SCL_LOW_CYCLES < 1) ? 1 : ((SCL_LOW_CYCLES > 65535) ? 65535 : SCL_LOW_CYCLES));
     localparam integer HIGH_SAFE =
@@ -103,20 +134,27 @@ module i2c_master #(
     localparam integer BUF_SAFE     = ((T_BUF_CYCLES    < 1) ? 1 : T_BUF_CYCLES);
     localparam integer TIMEOUT_SAFE = ((TIMEOUT_CYCLES  < 1) ? 1 : TIMEOUT_CYCLES);
 
+    localparam integer PHASE_MAX    = calc_max7(LOW_SAFE, HIGH_SAFE, HDSTA_SAFE, SUSTA_SAFE, SUSTO_SAFE, BUF_SAFE, 2);
+    localparam integer PHASE_BITS   = calc_bits(PHASE_MAX);
+    localparam integer TIMEOUT_BITS = calc_bits(TIMEOUT_SAFE);
+
     //-------------------------------------------------------------------------
     // 状态寄存器
     //-------------------------------------------------------------------------
-    reg [3:0]  state;
-    reg        xact;             // 1 = 事务进行中（START 之后、STOP/中止之前）
-    reg [7:0]  shifter;          // WRITE：待发字节 / READ：移入字节
-    reg [3:0]  bit_i;            // 0..7 数据位，8 = ACK/NACK 槽
-    reg        is_read;          // 当前命令是 READ
-    reg        rd_nack;          // READ 的 nack_after 捕获
-    reg        aborting;         // 1 = 正在为 NACK 补发 STOP
-    reg [31:0] phase_cnt;        // 相位内倒计数
-    reg [31:0] timeout_cnt;      // 当前命令已消耗周期（看门狗）
-    reg        scl_drive_low;
-    reg        sda_drive_low;
+    reg [3:0]              state;
+    reg                    xact;             // 1 = 事务进行中（START 之后、STOP/中止之前）
+    reg [7:0]              shifter;          // WRITE：待发字节 / READ：移入字节
+    reg [3:0]              bit_i;            // 0..7 数据位，8 = ACK/NACK 槽
+    reg                    is_read;          // 当前命令是 READ
+    reg                    rd_nack;          // READ 的 nack_after 捕获
+    reg                    aborting;         // 1 = 正在为 NACK 补发 STOP
+    reg [PHASE_BITS-1:0]   phase_cnt;        // 相位内倒计数 (按参数动态推导紧凑位宽)
+    reg [TIMEOUT_BITS-1:0] timeout_cnt;      // 当前命令已消耗周期 (看门狗紧凑位宽)
+    reg                    scl_drive_low;
+    reg                    sda_drive_low;
+
+    wire phase_done      = (phase_cnt == {{(PHASE_BITS-1){1'b0}}, 1'b1});
+    wire timeout_expired = (timeout_cnt >= TIMEOUT_SAFE[TIMEOUT_BITS-1:0]);
 
     // 开漏驱动：只输出 0 或 Z，绝不输出 1；高电平来自外部上拉。
     assign scl = scl_drive_low ? 1'b0 : 1'bz;
@@ -134,8 +172,8 @@ module i2c_master #(
             is_read       <= 1'b0;
             rd_nack       <= 1'b0;
             aborting      <= 1'b0;
-            phase_cnt     <= 32'd0;
-            timeout_cnt   <= 32'd0;
+            phase_cnt     <= {PHASE_BITS{1'b0}};
+            timeout_cnt   <= {TIMEOUT_BITS{1'b0}};
             scl_drive_low <= 1'b0;      // 复位后总线释放
             sda_drive_low <= 1'b0;
             cmd_ready     <= 1'b1;
@@ -149,7 +187,7 @@ module i2c_master #(
                 //-----------------------------------------------------------------
                 // 看门狗：任何命令超过 TIMEOUT_CYCLES 立即中止并释放总线
                 //-----------------------------------------------------------------
-                if (timeout_cnt >= TIMEOUT_SAFE) begin
+                if (timeout_expired) begin
                     state         <= ST_IDLE;
                     xact          <= 1'b0;
                     aborting      <= 1'b0;
@@ -159,29 +197,29 @@ module i2c_master #(
                     error         <= 1'b1;
                     error_code    <= 2'd2;
                 end else begin
-                    timeout_cnt <= timeout_cnt + 32'd1;
+                    timeout_cnt <= timeout_cnt + 1'b1;
 
                     case (state)
 
                     // START 第一步：SCL 高、SDA 高，等待 t_BUF（总线空闲）
                     ST_START_BUF: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             sda_drive_low <= 1'b1;      // SCL 高电平期间 SDA 下落 = START
-                            phase_cnt     <= HDSTA_SAFE;
+                            phase_cnt     <= HDSTA_SAFE[PHASE_BITS-1:0];
                             state         <= ST_START_HD;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
                     // SDA 已低：保持 t_HD;STA 后拉低 SCL
                     ST_START_HD: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             scl_drive_low <= 1'b1;
-                            phase_cnt     <= LOW_SAFE;
+                            phase_cnt     <= LOW_SAFE[PHASE_BITS-1:0];
                             state         <= ST_START_LOW;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
@@ -189,33 +227,33 @@ module i2c_master #(
                     // 期间变化，合法；必须释放以便 READ 时从机驱动数据位），
                     // 回 IDLE 等下一条命令
                     ST_START_LOW: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             sda_drive_low <= 1'b0;
                             state         <= ST_IDLE;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
                     // 重复起始：SCL 低相位短暂稳定（SDA 保持释放为高）
                     ST_RST_SETUP: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             scl_drive_low <= 1'b0;      // SCL 释放 -> 高
-                            phase_cnt     <= SUSTA_SAFE;
+                            phase_cnt     <= SUSTA_SAFE[PHASE_BITS-1:0];
                             state         <= ST_RST_SCLHI;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
                     // 重复起始：SCL 高、SDA 高，等 t_SU;STA 后拉低 SDA
                     ST_RST_SCLHI: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             sda_drive_low <= 1'b1;      // SCL 高电平期间 SDA 下落
-                            phase_cnt     <= HDSTA_SAFE;
+                            phase_cnt     <= HDSTA_SAFE[PHASE_BITS-1:0];
                             state         <= ST_START_HD;   // 与 START 共用保持/拉低序列
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
@@ -234,20 +272,20 @@ module i2c_master #(
                             sda_drive_low <= ~shifter[7 - bit_i[2:0]];  // 写数据位，MSB first
                         end
 
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             scl_drive_low <= 1'b0;          // SCL 释放 -> 高
-                            phase_cnt     <= HIGH_SAFE;
+                            phase_cnt     <= HIGH_SAFE[PHASE_BITS-1:0];
                             state         <= ST_BIT_HIGH;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
                     // 位高相位：结束沿上采样/推进
                     ST_BIT_HIGH: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             scl_drive_low <= 1'b1;          // SCL 拉低
-                            phase_cnt     <= LOW_SAFE;
+                            phase_cnt     <= LOW_SAFE[PHASE_BITS-1:0];
                             bit_i         <= bit_i + 4'd1;
                             if (bit_i == 4'd8) begin
                                 // 第 9 个时钟（ACK/NACK 槽）结束
@@ -258,7 +296,7 @@ module i2c_master #(
                                 end else if (sda == 1'b1) begin
                                     // 写字节被 NACK：补发 STOP，事务结束（error_code=1）
                                     aborting  <= 1'b1;
-                                    phase_cnt <= LOW_SAFE;
+                                    phase_cnt <= LOW_SAFE[PHASE_BITS-1:0];
                                     state     <= ST_STOP_SDA;
                                 end else begin
                                     state <= ST_IDLE;       // 写字节 ACK 成功
@@ -270,7 +308,7 @@ module i2c_master #(
                                 state <= ST_BIT_LOW;
                             end
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
@@ -278,29 +316,29 @@ module i2c_master #(
                     // 避免 SDA/SCL 同沿下落造成条件歧义）
                     ST_STOP_SDA: begin
                         sda_drive_low <= 1'b1;
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             scl_drive_low <= 1'b0;          // SCL 释放 -> 高
-                            phase_cnt     <= SUSTO_SAFE;
+                            phase_cnt     <= SUSTO_SAFE[PHASE_BITS-1:0];
                             state         <= ST_STOP_SCLHI;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
                     // 停止：SCL 高、SDA 低，等 t_SU;STO 后释放 SDA
                     ST_STOP_SCLHI: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             sda_drive_low <= 1'b0;          // SCL 高电平期间 SDA 上升 = STOP
-                            phase_cnt     <= BUF_SAFE;
+                            phase_cnt     <= BUF_SAFE[PHASE_BITS-1:0];
                             state         <= ST_STOP_FREE;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
                     // 停止：等 t_BUF 总线空闲后真正结束事务
                     ST_STOP_FREE: begin
-                        if (phase_cnt == 32'd1) begin
+                        if (phase_done) begin
                             xact      <= 1'b0;
                             aborting  <= 1'b0;
                             state     <= ST_IDLE;
@@ -308,7 +346,7 @@ module i2c_master #(
                             error     <= aborting;             // 仅 NACK 补发的 STOP 报错
                             error_code<= aborting ? 2'd1 : 2'd0;
                         end else begin
-                            phase_cnt <= phase_cnt - 32'd1;
+                            phase_cnt <= phase_cnt - 1'b1;
                         end
                     end
 
@@ -327,7 +365,7 @@ module i2c_master #(
 
                 if (cmd_valid) begin
                     error_code  <= 2'd0;        // 新命令清空粘滞错误码
-                    timeout_cnt <= 32'd0;
+                    timeout_cnt <= {TIMEOUT_BITS{1'b0}};
 
                     case (cmd)
 
@@ -335,7 +373,7 @@ module i2c_master #(
                         if (!xact) begin
                             xact      <= 1'b1;
                             cmd_ready <= 1'b0;
-                            phase_cnt <= BUF_SAFE;
+                            phase_cnt <= BUF_SAFE[PHASE_BITS-1:0];
                             state     <= ST_START_BUF;
                         end else begin
                             error      <= 1'b1;     // 事务中重复 START：协议错误
@@ -346,7 +384,7 @@ module i2c_master #(
                     CMD_RESTART: begin
                         if (xact) begin
                             cmd_ready <= 1'b0;
-                            phase_cnt <= 32'd2;     // RST_SETUP 稳定一拍
+                            phase_cnt <= 2'd2;     // RST_SETUP 稳定一拍
                             state     <= ST_RST_SETUP;
                         end else begin
                             error      <= 1'b1;     // 无事务时的 RESTART：协议错误
@@ -373,7 +411,7 @@ module i2c_master #(
                         if (xact) begin
                             cmd_ready <= 1'b0;
                             aborting  <= 1'b0;
-                            phase_cnt <= LOW_SAFE;
+                            phase_cnt <= LOW_SAFE[PHASE_BITS-1:0];
                             state     <= ST_STOP_SDA;
                         end else begin
                             error      <= 1'b1;     // 无事务时的 STOP：协议错误
