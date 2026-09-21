@@ -76,12 +76,45 @@
   - DRC: 0 errors / 0 warnings
   - 产物: `design.bit` (54 738 字节, SHA-256: `9E36A9718625F7D4AB3D7CE1A18467AF66FE90873DC377A5BC9A8EE36BE0E4FD`)
 
-## 6. 板级验证状态
+- **Stage G (Hardware Program - ISF)**: PASS
+  - 命令: `ise.ps1 program -Project tone_dac_demo -Mode Isf -BitFile projects\tone_dac_demo\artifacts\20260921-140556-ded16c9b\results\design.bit -ConfirmHardwareWrite`
+  - 运行 ID: `program-20260921-143137-c3f2eea6`
+  - 下载线: Digilent JTAG-HS2 (`SN: 210241672559`, 10000000 Hz)
+  - 烧录事务执行（一次性通过，`programAttempts = 1`）：
+    - 静态与 Preflight: `xc3s50an` (IDCODE `0x02610093`) 匹配，Preflight `COMPLETE`
+    - 擦除阶段 (Erase): `Erasing device...` → `Erasure completed successfully.`
+    - 写入阶段 (Program): `Programming Flash...done.` → `Programming completed successfully.`
+    - 校验阶段 (Verify): `Verifying device...done.` → `Verification completed successfully.`
+    - 完成状态: `Checking done pin....done.` → `Programmed successfully.`
+  - 六个状态字段:
+    - `cableDetected        = PASS`
+    - `jtagChainDetected    = PASS`
+    - `deviceMatched        = PASS`
+    - `programmingCompleted = PASS`
+    - `programmingVerified  = VERIFIED`
+    - `userDesignFunctional = NOT_TESTED`
+
+## 6. 板级验证状态与测量指南
 
 ```
+programmingVerified  = VERIFIED
 userDesignFunctional = NOT_TESTED
 BOARD TEST           = NOT_TESTED
 ```
 
-未执行任何未经用户明确授权的硬件写入（`program`）。
-烧录成功（`programmingVerified = VERIFIED`）并不等同于板级功能正常，板级功能需通过真实示波器/万用表测量确认。
+烧录已按用户明确指令完成（`programmingVerified = VERIFIED`），但根据项目宪法，**烧录成功不等于设计工作正常**。板级功能测量固定标记为 `NOT_TESTED`。
+
+### 硬件测试与测量引脚指引
+
+上电/复位后，板卡内部 ISF 会自动配置 FPGA（要求跳线 `M[2:0] = 011`，`VCCAUX = 3.3V`）：
+
+| 信号 | 板级引脚 | 测量方式 / 预期行为 |
+| :--- | :--- | :--- |
+| `rst_n` | **P3** | 低电平有效复位（默认上拉时为工作态） |
+| `clk` | **P57** | 12 MHz 板载有源晶振输入 |
+| `sensor_async[2:0]` | **P28 (bit 0), P29 (bit 1), P30 (bit 2)** | 3-bit 编码输入（000: 静音; 001~111: 音符 1~7） |
+| `square_out` | **P110** | 示波器或蜂鸣器：输出对应音符频率的 50% 占空比方波（3.3V LVCMOS） |
+| `dac_i2c_scl` | **P102** | 示波器探头：MCP4725 I2C 时钟（~375 kHz） |
+| `dac_i2c_sda` | **P103** | 示波器探头：MCP4725 I2C 数据（Fast Mode 写 DAC 寄存器） |
+| MCP4725 VOUT | 外接模块 | 示波器：对应音符频率的平滑模拟正弦波（0~3.3V 动态范围） |
+
