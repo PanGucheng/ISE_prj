@@ -13,17 +13,12 @@
       "library": "work"
     },
     {
-      "path": "src/periph/mcp4725_ctrl.v",
-      "language": "verilog",
-      "library": "work"
-    },
-    {
       "path": "src/reset_sync.v",
       "language": "verilog",
       "library": "work"
     },
     {
-      "path": "src/dac_diag_source.v",
+      "path": "src/uart_tx.v",
       "language": "verilog",
       "library": "work"
     },
@@ -47,6 +42,17 @@
   "optimizationLevel": 1,
   "simulations": [
     {
+      "name": "uart_tx_unit",
+      "top": "tb_uart_tx",
+      "sources": [
+        "sim/tb_uart_tx.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 300,
+      "passPattern": "TB_UART_TX: PASS",
+      "failPattern": "TB_UART_TX: FAIL"
+    },
+    {
       "name": "periph_test_normal",
       "top": "tb_periph_test_top",
       "sources": [
@@ -55,8 +61,7 @@
         "sim/models/mcp4725_model.v"
       ],
       "generics": {
-        "TB_MODE": "0",
-        "TB_DAC_TEST_MODE": "0"
+        "TB_MODE": "0"
       },
       "timeoutSeconds": 600,
       "passPattern": "TB_PERIPH_TEST_TOP: PASS",
@@ -73,70 +78,7 @@
       "generics": {
         "TB_MODE": "1"
       },
-      "timeoutSeconds": 900,
-      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
-      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
-    },
-    {
-      "name": "periph_test_dac_nack",
-      "top": "tb_periph_test_top",
-      "sources": [
-        "sim/tb_periph_test_top.v",
-        "sim/models/ads1115_model.v",
-        "sim/models/mcp4725_model.v"
-      ],
-      "generics": {
-        "TB_MODE": "2"
-      },
-      "timeoutSeconds": 900,
-      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
-      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
-    },
-    {
-      "name": "periph_test_dac_400",
-      "top": "tb_periph_test_top",
-      "sources": [
-        "sim/tb_periph_test_top.v",
-        "sim/models/ads1115_model.v",
-        "sim/models/mcp4725_model.v"
-      ],
-      "generics": {
-        "TB_MODE": "0",
-        "TB_DAC_TEST_MODE": "1"
-      },
       "timeoutSeconds": 600,
-      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
-      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
-    },
-    {
-      "name": "periph_test_dac_c00",
-      "top": "tb_periph_test_top",
-      "sources": [
-        "sim/tb_periph_test_top.v",
-        "sim/models/ads1115_model.v",
-        "sim/models/mcp4725_model.v"
-      ],
-      "generics": {
-        "TB_MODE": "0",
-        "TB_DAC_TEST_MODE": "2"
-      },
-      "timeoutSeconds": 600,
-      "passPattern": "TB_PERIPH_TEST_TOP: PASS",
-      "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
-    },
-    {
-      "name": "periph_test_dac_1khz",
-      "top": "tb_periph_test_top",
-      "sources": [
-        "sim/tb_periph_test_top.v",
-        "sim/models/ads1115_model.v",
-        "sim/models/mcp4725_model.v"
-      ],
-      "generics": {
-        "TB_MODE": "3",
-        "TB_DAC_TEST_MODE": "3"
-      },
-      "timeoutSeconds": 900,
       "passPattern": "TB_PERIPH_TEST_TOP: PASS",
       "failPattern": "TB_PERIPH_TEST_TOP: FAIL"
     },
@@ -149,7 +91,7 @@
         "sim/models/mcp4725_model.v"
       ],
       "generics": {
-        "TB_MODE": "0",
+        "TB_MODE": "2",
         "TB_HEARTBEAT_HALF_CYC": "6000000"
       },
       "timeoutSeconds": 1500,
@@ -168,32 +110,12 @@
     "forbiddenEdgeSignals": [
       "clk_8k"
     ],
-    "synthesisWarningAllowlistNote": "Audited 2026-09-17 (P9-E). P9 sec 28 bans reusing the formal 166-entry allowlist and demands 0 warnings, but the diagnostic top deliberately never consumes the ADS1115 conversion values (P9 sec 12: values are not verified) and TEST_MODE is a compile-time constant (DC modes make the DAC payload constant by design), so XST trimming is structural, not accidental. Every one of the 144 lines was reviewed and folded into the exact-match entries below (143+1): (a) ADC raw datapath trims (ch/raw/poll/rd_data/rd_nack/m_wdata/poll_lo), (b) unconsumed diagnostic outputs (adc_error_code/adc_busy/dac_busy/errcode/r_busy/u_i2c error), (c) constant-folded DAC payload under DC TEST_MODE (pend_code/code_q/m_wdata/m_cmd). Any new warning, changed path or shifted count fails verify.",
+    "synthesisWarningAllowlistNote": "Audited 2026-09-21 for ADC UART diagnostic version. Exactly 19 structural warnings reviewed: (a) ADS1115 internal poll/status trims (poll_hi, r_busy, u_i2c error, adc_busy, m_wdata), (b) released DAC inout pins tied to 1'bz (dac_i2c_scl/sda never assigned), (c) constant-folded ASCII bit-7 in UART datapath (uart_tx_byte_7, tx_shift_7), (d) constant bit in line length (line_len_2 under 41/18 bytes). All raw ADC conversion bits are consumed by UART.",
     "synthesisWarningAllowlist": [
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_ads1115/GEN_ADC\\.ch[012]_q",
-        "expected": 48
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_ads1115/GEN_ADC\\.raw_(hi|lo)",
-        "expected": 16
-      },
       {
         "id": "Xst:2677",
         "pattern": "Node <GEN_ADC\\.poll_hi",
         "expected": 7
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_ads1115/GEN_ADC\\.u_i2c/rd_data",
-        "expected": 7
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_ads1115/GEN_ADC\\.(r_errcode|err_code_q)",
-        "expected": 6
       },
       {
         "id": "Xst:2677",
@@ -206,78 +128,28 @@
         "expected": 1
       },
       {
-        "id": "Xst:2677",
-        "pattern": "Node <u_mcp4725/GEN_DAC\\.u_i2c/rd_data",
-        "expected": 8
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_mcp4725/GEN_DAC\\.(r_errcode|err_code_q)",
-        "expected": 6
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_mcp4725/GEN_DAC\\.r_busy>",
-        "expected": 1
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <u_mcp4725/GEN_DAC\\.u_i2c/error",
-        "expected": 1
-      },
-      {
         "id": "Xst:646",
         "pattern": "Signal <GEN_ADC\\.poll_(hi<6:0>|lo)>",
         "expected": 2
       },
       {
         "id": "Xst:646",
-        "pattern": "Signal <adc_(ch[012]_raw|busy|error_code)>",
-        "expected": 5
+        "pattern": "Signal <adc_busy>",
+        "expected": 1
       },
       {
-        "id": "Xst:646",
-        "pattern": "Signal <(adc_busy|dac_busy)>",
-        "expected": 1
+        "id": "Xst:2565",
+        "pattern": "Inout <dac_i2c_s(da|cl)> is never assigned",
+        "expected": 2
       },
       {
         "id": "Xst:1710",
-        "pattern": "rd_nack",
-        "expected": 1
+        "pattern": "FF/Latch <(line_len_2|uart_tx_byte_7|u_uart_tx/tx_shift_7)>",
+        "expected": 3
       },
       {
         "id": "Xst:1710",
         "pattern": "FF/Latch <GEN_ADC\\.m_wdata",
-        "expected": 1
-      },
-      {
-        "id": "Xst:1710",
-        "pattern": "u_mcp4725/GEN_DAC\\.m_wdata",
-        "expected": 1
-      },
-      {
-        "id": "Xst:1895",
-        "pattern": "FF/Latch <u_mcp4725/GEN_DAC\\.pend_code",
-        "expected": 12
-      },
-      {
-        "id": "Xst:1895",
-        "pattern": "FF/Latch <u_mcp4725/GEN_DAC\\.code_q",
-        "expected": 12
-      },
-      {
-        "id": "Xst:1895",
-        "pattern": "FF/Latch <u_mcp4725/GEN_DAC\\.m_wdata",
-        "expected": 4
-      },
-      {
-        "id": "Xst:1895",
-        "pattern": "FF/Latch <u_mcp4725/GEN_DAC\\.u_i2c",
-        "expected": 1
-      },
-      {
-        "id": "Xst:1895",
-        "pattern": "FF/Latch <u_mcp4725/GEN_DAC\\.m_cmd",
         "expected": 1
       },
       {

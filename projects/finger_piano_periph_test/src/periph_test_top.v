@@ -1,59 +1,60 @@
 //=============================================================================
 // periph_test_top.v
-// P9 ADS1115 / MCP4725 板级诊断顶层(P9 计划 §7~§18)。
+// P9 ADS1115 ADC UART 调试版本顶层
 //
-// 职责只有:reset + ADS1115 controller + MCP4725 诊断源/controller +
-// 三个状态脚。**不**实例化 sensor frontend、pressure processor、七音 DDS、
-// 显示、UART(诊断工程越小越好,§7)。
+// 硬件引脚与电气规范:
+//   P57  : clk (12 MHz 唯一系统时钟)
+//   P3   : rst_n (外部低有效复位)
+//   P31  : adc_i2c_scl (ADS1115 独立开漏 100 kHz I2C, 无内部上拉)
+//   P32  : adc_i2c_sda (ADS1115 独立开漏 100 kHz I2C, 无内部上拉)
+//   P102 : dac_i2c_scl (关闭 DAC 诊断链, 保持 1'bz 高阻释放)
+//   P103 : dac_i2c_sda (关闭 DAC 诊断链, 保持 1'bz 高阻释放)
+//   P110 : uart_tx (115200 baud, 8N1, 104 拍/bit, 仅发送)
+//   P111 : dbg_heartbeat (约 1 Hz 方波, 6,000,000 拍翻转)
+//   P113 : dbg_unused (固定 1'b0 安全接地)
 //
-//   rst_n -> reset_sync -> rst_n_sync --+--> ads1115_ctrl  (P31/P32)
-//                                       +--> dac_diag_source -> mcp4725_ctrl
-//                                                            (P102/P103)
-//   dbg_alive (P110):~1 Hz heartbeat 方波(HEARTBEAT_HALF_CYC 拍翻转),
-//                     只证明 FPGA configured / clock running / reset
-//                     released,**不代表** ADC/DAC PASS(§8);
-//   dbg_adc   (P111):每个完整 ADS1115 三通道帧翻转一次(§9,板上易观察,
-//                     不输出单拍 adc_sample_valid);
-//   dbg_error (P113):sticky error = adc_error | dac_error | dac_overrun,
-//                     一旦置位保持到下一次 reset(§10)。
-//
-// 两条 I2C 物理独立(P9 §5);开漏 0/Z(P9 §6);全工程只有 clk 一个
-// 时钟域;HEARTBEAT_HALF_CYC 是板上 1 Hz 方波的真实常量(6,000,000 拍
-// 翻转),仿真可用参数覆盖以加速(TB 传递)。
-//
-// DAC_TEST_MODE(P9 §13):0=0x800 / 1=0x400 / 2=0xC00 / 3=1 kHz 波形,
-// compile-time 参数,不加 mode pin;正式 finger_piano 工程零影响。
-// 默认 0x800 DC(与已审阅的 mode-0 synthesis warning allowlist 对应);
-// 板测需要 1 kHz 波形时在 project.json 的 defines 里临时加 "P9_DAC_MODE3"
-// 重新构建(该变体的 trim 计数不同,不参与 verify 门禁)。
+// 报文与数据机制:
+//   1. 正常上报: 约 100 ms 一次, 纯 ASCII:
+//      ADC OK CH0=0x1234 CH1=0x5678 CH2=0x9ABC\r\n
+//   2. 首次采样门控: have_valid_sample=0 期间保持静默, 不输出假 0x0000 报文。
+//   3. 单槽最新值缓存: latest_ch0/ch1/ch2 原子更新, 零阻塞 ADS1115 采样。
+//   4. 错误上报: adc_error 到来时锁存错误码并置位 err_pending。
+//      非抢占式行完整性: 若正发正常报文, 先发完当前行, 再立即优先发错误报文:
+//      ADC ERROR CODE=x\r\n
+//      (错误码严格沿用 ads1115_ctrl.v 定义: 1=地址NACK, 2=数据NACK, 3=超时,
+//       4=其它错误包括转换超时或协议异常)
 //=============================================================================
 
 `include "finger_piano_cfg.vh"
 
 module periph_test_top #(
-    parameter integer HEARTBEAT_HALF_CYC = 6000000,   // 1 Hz 方波 @ 12 MHz
-`ifdef P9_DAC_MODE3
-    parameter integer DAC_TEST_MODE      = 3          // 1 kHz / 8 kS/s 板测镜像
-`else
-    parameter integer DAC_TEST_MODE      = 0          // 0x800 DC(默认,与 allowlist 对应)
-`endif
+    parameter integer HEARTBEAT_HALF_CYC = 6000000, // 1 Hz 方波 @ 12 MHz (500 ms 翻转)
+    parameter integer REPORT_CYCLES      = 1200000, // 100 ms 报告周期 @ 12 MHz
+    parameter integer UART_BAUD_RATE     = 115200
 ) (
-    input  wire       clk,           // P57,12 MHz,唯一时钟
-    input  wire       rst_n,         // P3,外部异步低有效复位
+    input  wire clk,           // P57, 12 MHz
+    input  wire rst_n,         // P3, 外部低有效复位
 
-    inout  wire       adc_i2c_scl,   // P31/P32,ADS1115 独立总线
-    inout  wire       adc_i2c_sda,
+    inout  wire adc_i2c_scl,   // P31, ADS1115 SCL
+    inout  wire adc_i2c_sda,   // P32, ADS1115 SDA
 
-    inout  wire       dac_i2c_scl,   // P102/P103,MCP4725 独立总线
-    inout  wire       dac_i2c_sda,
+    inout  wire dac_i2c_scl,   // P102, 保持 1'bz
+    inout  wire dac_i2c_sda,   // P103, 保持 1'bz
 
-    output reg        dbg_alive,     // P110 heartbeat
-    output wire       dbg_adc,       // P111 ADC frame toggle
-    output wire       dbg_error      // P113 sticky error
+    output wire uart_tx,       // P110, UART TX
+    output reg  dbg_heartbeat, // P111, 约 1 Hz heartbeat
+    output wire dbg_unused     // P113, 固定 1'b0
 );
 
     //-------------------------------------------------------------------------
-    // 复位同步(全工程唯一 reset_sync 实例)
+    // 安全静默与释放
+    //-------------------------------------------------------------------------
+    assign dac_i2c_scl = 1'bz;
+    assign dac_i2c_sda = 1'bz;
+    assign dbg_unused  = 1'b0;
+
+    //-------------------------------------------------------------------------
+    // 复位同步 (reset_sync 实例)
     //-------------------------------------------------------------------------
     wire rst_n_sync;
 
@@ -64,16 +65,26 @@ module periph_test_top #(
     );
 
     //-------------------------------------------------------------------------
-    // ADS1115 三通道轮询(P9 §11:0x48 / PGA +-4.096 V / 860 SPS /
-    // single-shot / OS polling,与正式工程同一 driver,driver 本身零修改)
-    //
-    // P9 专用速率覆盖:仅本诊断工程把 ADS1115 总线目标改为 100 kHz
-    //   (override ads1115_ctrl 的 I2C_HZ 参数,不修改复用 driver,也不改
-    //    finger_piano_cfg.vh 的 CFG_ADC_I2C_SPEED=333333)。
-    //   12 MHz 下 100 kHz -> SCL_LOW=16 / SCL_HIGH=104 拍(周期 120 拍);
-    //   MCP4725 总线保持 CFG_DAC_I2C_SPEED=333333 不变。
+    // Heartbeat: 约 1 Hz 方波 (P111)
     //-------------------------------------------------------------------------
-    localparam integer P9_ADC_I2C_HZ = 100000;   // P9 诊断:ADS1115 总线 100 kHz
+    reg [22:0] heartbeat_cnt; // 2^23 = 8388608 > 6000000
+
+    always @(posedge clk or negedge rst_n_sync) begin
+        if (!rst_n_sync) begin
+            heartbeat_cnt <= 23'd0;
+            dbg_heartbeat <= 1'b0;
+        end else if (heartbeat_cnt == HEARTBEAT_HALF_CYC - 1) begin
+            heartbeat_cnt <= 23'd0;
+            dbg_heartbeat <= ~dbg_heartbeat;
+        end else begin
+            heartbeat_cnt <= heartbeat_cnt + 23'd1;
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // ADS1115 控制器 (保持 100 kHz 速率与独立开漏总线)
+    //-------------------------------------------------------------------------
+    localparam integer P9_ADC_I2C_HZ = 100000;
 
     wire [15:0] adc_ch0_raw;
     wire [15:0] adc_ch1_raw;
@@ -101,76 +112,276 @@ module periph_test_top #(
     );
 
     //-------------------------------------------------------------------------
-    // DAC 诊断源 + MCP4725 controller(Fast Write only,不开 EEPROM,§17)
+    // 单槽最新值缓存与首次采样门控
     //-------------------------------------------------------------------------
-    wire [11:0] dac_code;
-    wire        dac_code_valid;
-    wire        dac_busy;
-    wire        dac_error;
-    wire        dac_overrun;
-
-    dac_diag_source #(
-        .SYS_CLK_HZ     (`SYS_CLK_HZ),
-        .SAMPLE_RATE_HZ (`CFG_DAC_SAMPLE_RATE),
-        .TEST_MODE      (DAC_TEST_MODE)
-    ) u_diag_src (
-        .clk            (clk),
-        .rst_n_sync     (rst_n_sync),
-        .dac_code       (dac_code),
-        .dac_code_valid (dac_code_valid)
-    );
-
-    mcp4725_ctrl #(
-        .ENABLE (1)
-    ) u_mcp4725 (
-        .clk            (clk),
-        .rst_n_sync     (rst_n_sync),
-        .dac_code       (dac_code),
-        .dac_code_valid (dac_code_valid),
-        .dac_code_ready (),
-        .dac_busy       (dac_busy),
-        .dac_error      (dac_error),
-        .dac_overrun    (dac_overrun),
-        .error_code     (),
-        .dac_i2c_scl    (dac_i2c_scl),
-        .dac_i2c_sda    (dac_i2c_sda)
-    );
-
-    //-------------------------------------------------------------------------
-    // 状态脚(P9 §8~§10)
-    //-------------------------------------------------------------------------
-    reg [22:0] heartbeat_cnt;   // 2^23 > 6e6
+    reg [15:0] latest_ch0;
+    reg [15:0] latest_ch1;
+    reg [15:0] latest_ch2;
+    reg        have_valid_sample;
 
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            heartbeat_cnt <= 23'd0;
-            dbg_alive     <= 1'b0;
-        end else if (heartbeat_cnt == HEARTBEAT_HALF_CYC - 1) begin
-            heartbeat_cnt <= 23'd0;
-            dbg_alive     <= ~dbg_alive;
-        end else begin
-            heartbeat_cnt <= heartbeat_cnt + 23'd1;
-        end
-    end
-
-    reg dbg_adc_toggle;
-    always @(posedge clk or negedge rst_n_sync) begin
-        if (!rst_n_sync) begin
-            dbg_adc_toggle <= 1'b0;
+            latest_ch0        <= 16'h0000;
+            latest_ch1        <= 16'h0000;
+            latest_ch2        <= 16'h0000;
+            have_valid_sample <= 1'b0;
         end else if (adc_sample_valid) begin
-            dbg_adc_toggle <= ~dbg_adc_toggle;
+            latest_ch0        <= adc_ch0_raw;
+            latest_ch1        <= adc_ch1_raw;
+            latest_ch2        <= adc_ch2_raw;
+            have_valid_sample <= 1'b1;
         end
     end
-    assign dbg_adc = dbg_adc_toggle;
 
-    reg dbg_error_sticky;
+    //-------------------------------------------------------------------------
+    // 错误状态捕获 (adc_error 脉冲到达时立即置位)
+    //-------------------------------------------------------------------------
+    reg       err_pending;
+    reg [2:0] latched_ecode;
+    reg       err_cleared;
+
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            dbg_error_sticky <= 1'b0;
-        end else if (adc_error || dac_error || dac_overrun) begin
-            dbg_error_sticky <= 1'b1;
+            err_pending   <= 1'b0;
+            latched_ecode <= 3'd0;
+        end else if (adc_error) begin
+            err_pending   <= 1'b1;
+            latched_ecode <= adc_error_code;
+        end else if (err_cleared) begin
+            err_pending   <= 1'b0;
         end
     end
-    assign dbg_error = dbg_error_sticky;
+
+    //-------------------------------------------------------------------------
+    // 100 ms 报告定时器
+    //-------------------------------------------------------------------------
+    reg [20:0] timer_100ms_cnt; // 2^21 = 2097152 > 1200000
+    reg        timer_100ms_tick;
+
+    always @(posedge clk or negedge rst_n_sync) begin
+        if (!rst_n_sync) begin
+            timer_100ms_cnt  <= 21'd0;
+            timer_100ms_tick <= 1'b0;
+        end else if (timer_100ms_cnt == REPORT_CYCLES - 1) begin
+            timer_100ms_cnt  <= 21'd0;
+            timer_100ms_tick <= 1'b1;
+        end else begin
+            timer_100ms_cnt  <= timer_100ms_cnt + 21'd1;
+            timer_100ms_tick <= 1'b0;
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // 十六进制半字节转 ASCII 字符函数
+    //-------------------------------------------------------------------------
+    function [7:0] hex2ascii;
+        input [3:0] nibble;
+        begin
+            case (nibble)
+                4'h0: hex2ascii = "0";
+                4'h1: hex2ascii = "1";
+                4'h2: hex2ascii = "2";
+                4'h3: hex2ascii = "3";
+                4'h4: hex2ascii = "4";
+                4'h5: hex2ascii = "5";
+                4'h6: hex2ascii = "6";
+                4'h7: hex2ascii = "7";
+                4'h8: hex2ascii = "8";
+                4'h9: hex2ascii = "9";
+                4'hA: hex2ascii = "A";
+                4'hB: hex2ascii = "B";
+                4'hC: hex2ascii = "C";
+                4'hD: hex2ascii = "D";
+                4'hE: hex2ascii = "E";
+                default: hex2ascii = "F";
+            endcase
+        end
+    endfunction
+
+    //-------------------------------------------------------------------------
+    // 行级报文生成与非抢占式调度状态机
+    //-------------------------------------------------------------------------
+    localparam [1:0] ST_IDLE = 2'd0;
+    localparam [1:0] ST_SEND = 2'd1;
+    localparam [1:0] ST_WAIT = 2'd2;
+
+    reg [1:0]  tx_fsm;
+    reg [5:0]  char_idx;
+    reg [5:0]  line_len;
+    reg        line_is_error;
+    reg [2:0]  send_ecode;
+    reg [15:0] snap_ch0, snap_ch1, snap_ch2;
+    reg        report_pending;
+
+    reg [7:0]  uart_tx_byte;
+    reg        uart_tx_valid;
+    wire       uart_tx_ready;
+
+    // 当 100ms tick 产生且处于发送状态时, 记录一次待发
+    always @(posedge clk or negedge rst_n_sync) begin
+        if (!rst_n_sync) begin
+            report_pending <= 1'b0;
+        end else if (timer_100ms_tick && have_valid_sample) begin
+            report_pending <= 1'b1;
+        end else if (tx_fsm == ST_IDLE && !err_pending && report_pending) begin
+            report_pending <= 1'b0;
+        end
+    end
+
+    // 当前字符索引查找
+    reg [7:0] cur_char;
+    always @(*) begin
+        if (line_is_error) begin
+            // "ADC ERROR CODE=x\r\n" (18 字节)
+            case (char_idx)
+                6'd0:  cur_char = "A";
+                6'd1:  cur_char = "D";
+                6'd2:  cur_char = "C";
+                6'd3:  cur_char = " ";
+                6'd4:  cur_char = "E";
+                6'd5:  cur_char = "R";
+                6'd6:  cur_char = "R";
+                6'd7:  cur_char = "O";
+                6'd8:  cur_char = "R";
+                6'd9:  cur_char = " ";
+                6'd10: cur_char = "C";
+                6'd11: cur_char = "O";
+                6'd12: cur_char = "D";
+                6'd13: cur_char = "E";
+                6'd14: cur_char = "=";
+                6'd15: cur_char = 8'h30 + {5'd0, send_ecode}; // '0' + code
+                6'd16: cur_char = 8'h0D; // \r
+                6'd17: cur_char = 8'h0A; // \n
+                default: cur_char = " ";
+            endcase
+        end else begin
+            // "ADC OK CH0=0x1234 CH1=0x5678 CH2=0x9ABC\r\n" (41 字节)
+            case (char_idx)
+                6'd0:  cur_char = "A";
+                6'd1:  cur_char = "D";
+                6'd2:  cur_char = "C";
+                6'd3:  cur_char = " ";
+                6'd4:  cur_char = "O";
+                6'd5:  cur_char = "K";
+                6'd6:  cur_char = " ";
+                6'd7:  cur_char = "C";
+                6'd8:  cur_char = "H";
+                6'd9:  cur_char = "0";
+                6'd10: cur_char = "=";
+                6'd11: cur_char = "0";
+                6'd12: cur_char = "x";
+                6'd13: cur_char = hex2ascii(snap_ch0[15:12]);
+                6'd14: cur_char = hex2ascii(snap_ch0[11:8]);
+                6'd15: cur_char = hex2ascii(snap_ch0[7:4]);
+                6'd16: cur_char = hex2ascii(snap_ch0[3:0]);
+                6'd17: cur_char = " ";
+                6'd18: cur_char = "C";
+                6'd19: cur_char = "H";
+                6'd20: cur_char = "1";
+                6'd21: cur_char = "=";
+                6'd22: cur_char = "0";
+                6'd23: cur_char = "x";
+                6'd24: cur_char = hex2ascii(snap_ch1[15:12]);
+                6'd25: cur_char = hex2ascii(snap_ch1[11:8]);
+                6'd26: cur_char = hex2ascii(snap_ch1[7:4]);
+                6'd27: cur_char = hex2ascii(snap_ch1[3:0]);
+                6'd28: cur_char = " ";
+                6'd29: cur_char = "C";
+                6'd30: cur_char = "H";
+                6'd31: cur_char = "2";
+                6'd32: cur_char = "=";
+                6'd33: cur_char = "0";
+                6'd34: cur_char = "x";
+                6'd35: cur_char = hex2ascii(snap_ch2[15:12]);
+                6'd36: cur_char = hex2ascii(snap_ch2[11:8]);
+                6'd37: cur_char = hex2ascii(snap_ch2[7:4]);
+                6'd38: cur_char = hex2ascii(snap_ch2[3:0]);
+                6'd39: cur_char = 8'h0D; // \r
+                6'd40: cur_char = 8'h0A; // \n
+                default: cur_char = " ";
+            endcase
+        end
+    end
+
+    // 状态机主时序
+    always @(posedge clk or negedge rst_n_sync) begin
+        if (!rst_n_sync) begin
+            tx_fsm        <= ST_IDLE;
+            char_idx      <= 6'd0;
+            line_len      <= 6'd0;
+            line_is_error <= 1'b0;
+            send_ecode    <= 3'd0;
+            snap_ch0      <= 16'h0000;
+            snap_ch1      <= 16'h0000;
+            snap_ch2      <= 16'h0000;
+            uart_tx_byte  <= 8'h00;
+            uart_tx_valid <= 1'b0;
+            err_cleared   <= 1'b0;
+        end else begin
+            err_cleared   <= 1'b0;
+            uart_tx_valid <= 1'b0;
+
+            case (tx_fsm)
+                ST_IDLE: begin
+                    char_idx <= 6'd0;
+                    if (err_pending) begin
+                        // 错误报文优先级最高
+                        line_is_error <= 1'b1;
+                        send_ecode    <= latched_ecode;
+                        line_len      <= 6'd18;
+                        err_cleared   <= 1'b1; // 清除 pending
+                        tx_fsm        <= ST_SEND;
+                    end else if ((timer_100ms_tick || report_pending) && have_valid_sample) begin
+                        // 正常采样报文 (必须在首次有效采样之后)
+                        line_is_error <= 1'b0;
+                        snap_ch0      <= latest_ch0;
+                        snap_ch1      <= latest_ch1;
+                        snap_ch2      <= latest_ch2;
+                        line_len      <= 6'd41;
+                        tx_fsm        <= ST_SEND;
+                    end
+                end
+
+                ST_SEND: begin
+                    if (uart_tx_ready) begin
+                        uart_tx_byte  <= cur_char;
+                        uart_tx_valid <= 1'b1;
+                        tx_fsm        <= ST_WAIT;
+                    end
+                end
+
+                ST_WAIT: begin
+                    uart_tx_valid <= 1'b0;
+                    // uart_tx 采纳并开始发送后 tx_ready 变低, 发送完成后重新变高
+                    if (uart_tx_ready && !uart_tx_valid) begin
+                        if (char_idx == line_len - 1) begin
+                            // 整行完整结束
+                            tx_fsm <= ST_IDLE;
+                        end else begin
+                            char_idx <= char_idx + 6'd1;
+                            tx_fsm   <= ST_SEND;
+                        end
+                    end
+                end
+
+                default: tx_fsm <= ST_IDLE;
+            endcase
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // UART TX 发送器实例 (P110)
+    //-------------------------------------------------------------------------
+    uart_tx #(
+        .CLK_HZ    (`SYS_CLK_HZ),
+        .BAUD_RATE (UART_BAUD_RATE)
+    ) u_uart_tx (
+        .clk        (clk),
+        .rst_n_sync (rst_n_sync),
+        .tx_byte    (uart_tx_byte),
+        .tx_valid   (uart_tx_valid),
+        .tx_ready   (uart_tx_ready),
+        .tx_pin     (uart_tx)
+    );
 
 endmodule

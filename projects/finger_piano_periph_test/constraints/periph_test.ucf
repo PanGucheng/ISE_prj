@@ -1,28 +1,23 @@
 #=============================================================================
-# periph_test.ucf  --  P9 ADS1115/MCP4725 板级诊断工程引脚约束
+# periph_test.ucf  --  P9 ADS1115 ADC UART 调试版本引脚约束
 #
-# 只使用用户已确认的 Stage-2 引脚(P9 计划 §3 冻结,2026-09-16):
+# 物理引脚分配 (严格固定, 不改引脚, 不加内部上拉):
 #
 #   Signal          LOC     用途
 #   --------------  ------  --------------------------------
-#   clk             P57     12 MHz 有源晶振(唯一时钟)
-#   rst_n           P3      外部复位(低有效)
-#   adc_i2c_scl     P31     ADS1115 SCL(独立总线 1)
-#   adc_i2c_sda     P32     ADS1115 SDA
-#   dac_i2c_scl     P102    MCP4725 SCL(独立总线 2)
-#   dac_i2c_sda     P103    MCP4725 SDA
-#   dbg_alive       P110    heartbeat(本工程内重定义,正式 Stage-2
-#                           的 note_debug 定义不受影响)
-#   dbg_adc         P111    ADC frame activity toggle
-#   dbg_error       P113    sticky error
+#   clk             P57     12 MHz 有源晶振 (唯一时钟)
+#   rst_n           P3      外部复位 (低有效)
+#   adc_i2c_scl     P31     ADS1115 SCL (独立总线, 100 kHz 开漏)
+#   adc_i2c_sda     P32     ADS1115 SDA (独立总线, 100 kHz 开漏)
+#   dac_i2c_scl     P102    MCP4725 SCL (关闭 DAC, 保持 1'bz 释放)
+#   dac_i2c_sda     P103    MCP4725 SDA (关闭 DAC, 保持 1'bz 释放)
+#   uart_tx         P110    UART TX (115200 baud, 8N1)
+#   dbg_heartbeat   P111    约 1 Hz heartbeat 方波
+#   dbg_unused      P113    安全接地 (固定 1'b0)
 #
-# 全部 LVCMOS33,相关 Bank VCCO = 3.3 V(用户 2026-09-16 确认)。
-#
-# I2C 上拉是板级 4.7 kΩ 电阻:UCF 刻意**不写** PULLUP 来假装上拉
-# (P9 §6/§29);控制器输出保持 0/Z 开漏语义。
-# 不写 OFFSET 约束,不做任何自动 LOC。
+# 全部 LVCMOS33, 相关 Bank VCCO = 3.3 V
+# I2C 上拉依赖板级 4.7 kΩ 外部电阻, 严禁配置 PULLUP
 #=============================================================================
-
 
 #-----------------------------------------------------------------------------
 # SYSTEM CLOCK / RESET
@@ -30,28 +25,24 @@
 NET "clk"   LOC = P57 | IOSTANDARD = LVCMOS33;
 NET "rst_n" LOC = P3  | IOSTANDARD = LVCMOS33;
 
-
 #-----------------------------------------------------------------------------
 # ADS1115 INDEPENDENT I2C BUS
 #-----------------------------------------------------------------------------
 NET "adc_i2c_scl" LOC = P31 | IOSTANDARD = LVCMOS33;
 NET "adc_i2c_sda" LOC = P32 | IOSTANDARD = LVCMOS33;
 
-
 #-----------------------------------------------------------------------------
-# MCP4725 INDEPENDENT I2C BUS
+# MCP4725 INDEPENDENT I2C BUS (RELEASED / 1'bz)
 #-----------------------------------------------------------------------------
 NET "dac_i2c_scl" LOC = P102 | IOSTANDARD = LVCMOS33;
 NET "dac_i2c_sda" LOC = P103 | IOSTANDARD = LVCMOS33;
 
-
 #-----------------------------------------------------------------------------
-# DEBUG / STATUS OUTPUTS
+# DEBUG / UART OUTPUTS
 #-----------------------------------------------------------------------------
-NET "dbg_alive"  LOC = P110 | IOSTANDARD = LVCMOS33;
-NET "dbg_adc"    LOC = P111 | IOSTANDARD = LVCMOS33;
-NET "dbg_error"  LOC = P113 | IOSTANDARD = LVCMOS33;
-
+NET "uart_tx"       LOC = P110 | IOSTANDARD = LVCMOS33;
+NET "dbg_heartbeat" LOC = P111 | IOSTANDARD = LVCMOS33;
+NET "dbg_unused"    LOC = P113 | IOSTANDARD = LVCMOS33;
 
 #-----------------------------------------------------------------------------
 # TIMING: 12 MHz 单一系统时钟

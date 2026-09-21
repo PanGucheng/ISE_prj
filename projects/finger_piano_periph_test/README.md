@@ -1,132 +1,111 @@
-# finger_piano_periph_test — ADS1115 / MCP4725 板级诊断工程(P9)
+# finger_piano_periph_test — ADS1115 ADC UART 诊断版本
 
-独立、可观测、低风险的 ADC/DAC 诊断 bitstream:把 ADS1115 / MCP4725 的
-板级排故从完整电子琴中拆出来,提供**确定输入、确定输出、明确状态脚**
-(P9 计划 §0)。
+独立、可观测、低风险的 ADC UART 调试 bitstream：将 ADS1115 的硬件排查从完整电子琴中剥离，关闭 MCP4725/DAC 诊断链，通过串口实时输出 16-bit 原始采样值与精确错误码。
 
-- 器件:`xc3s50an-4-tqg144`;时钟 P57(12 MHz,唯一时钟域);复位 P3
-- ADS1115:0x48 / PGA ±4.096 V / 860 SPS / single-shot / CH0-CH1-CH2 轮询,
-  **ADS1115 总线目标 100 kHz**(P9 专用覆盖,见下);
-  与正式工程同一 driver(复用副本零修改)
-- MCP4725:0x60 / Fast Write only / 不写 EEPROM;诊断源 8 kS/s;**MCP4725 总线
-  保持 333333 Hz 不变**
-- 状态脚:**P110 `dbg_alive`**(~1 Hz heartbeat,只证明 FPGA 活着)、
-  **P111 `dbg_adc`**(每完成一个三通道帧翻转一次)、**P113 `dbg_error`**
-  (sticky,任一 ADC/DAC 错误或 overrun 置位,仅 reset 清除)
-- DAC 诊断模式(compile-time `DAC_TEST_MODE`,无 mode pin):
-  `0`=0x800 DC、`1`=0x400 DC、`2`=0xC00 DC、`3`=1 kHz / 8 kS/s 八点波形
-  (2048, 3316, 3840, 3316, 2048, 780, 256, 780,由
-  round(1792·sin(2πk/8)) 离线复核)
-  **默认 `DAC_TEST_MODE=0`**(对应已审阅的 mode-0 synthesis warning allowlist)。
-  板测需要 1 kHz 波形时,在 `project.json` 的 `defines` 里临时加 `"P9_DAC_MODE3"`
-  重新构建(`periph_test_top.v` 用 `` `ifdef P9_DAC_MODE3 `` 选 3);该变体的
-  trim 计数与 mode 0 不同,**不参与 verify 门禁**,构建后必须把 defines 还原
-  为 `[]`。mode 3 实测 121 warnings(mode 0 基线 144)。
+---
 
-## 与正式工程的关系
+## 1. 硬件引脚与电气规范
 
-正式 `finger_piano` 工程(Stage-2)**零修改**。本工程持有一份复用 RTL 的
-逐字副本(工具限制 sources 不能越出工程目录):`src/periph/i2c_master.v`、
-`src/periph/ads1115_ctrl.v`、`src/periph/mcp4725_ctrl.v`、`src/reset_sync.v`、
-`src/finger_piano_cfg.vh` 与 `sim/models/*.v` 均复制自
-`projects/finger_piano/` 同名文件——**不构成第二套实现**,禁止在本工程内
-单独修改这些文件;如需变更,先改正式工程再同步副本。
+- 器件型号：`xc3s50an-4-tqg144`；单一系统时钟：`P57` (12 MHz)；外部复位：`P3` (低有效)
+- 电气标准：全部引脚均为 **LVCMOS33**，Bank VCCO = 3.3 V
+- 引脚分配与用途：
 
-**P9 专用 I²C 速率覆盖(2026-09-17)**:ADS1115 总线的目标速率只在
-`periph_test_top.v` 里通过实例参数覆盖(`ads1115_ctrl #(.I2C_HZ (P9_ADC_I2C_HZ))`,
-`P9_ADC_I2C_HZ = 100000`),**不修改**复用 driver,也**不改**
-`finger_piano_cfg.vh` 的 `CFG_ADC_I2C_SPEED`/`CFG_DAC_I2C_SPEED`。
-12 MHz 下 100 kHz → `SCL_LOW=16` / `SCL_HIGH=104` 拍(周期 120 拍 = 10 µs,
-`tLOW=1.333 µs ≥ 1300 ns`、`tHIGH=8.667 µs ≥ 600 ns`);**MCP4725 总线仍为
-333333 Hz**。正式 Stage-2 配置完全未动。
+| 信号名 | 物理引脚 | I/O 类型 | 描述与接线指南 |
+| :--- | :--- | :--- | :--- |
+| **`clk`** | **P57** | INPUT | 12 MHz 板载有源晶振输入 |
+| **`rst_n`** | **P3** | INPUT | 外部异步复位（低有效，平时保持高电平） |
+| **`adc_i2c_scl`** | **P31** | TRISTATE | ADS1115 I2C SCL（100 kHz 开漏，依赖板级 4.7 kΩ 外部上拉） |
+| **`adc_i2c_sda`** | **P32** | BIDIR | ADS1115 I2C SDA（100 kHz 开漏，依赖板级 4.7 kΩ 外部上拉） |
+| **`dac_i2c_scl`** | **P102** | TRISTATE | 关闭 DAC，**严格保持 `1'bz` 高阻释放**，无任何 I2C 活动 |
+| **`dac_i2c_sda`** | **P103** | TRISTATE | 关闭 DAC，**严格保持 `1'bz` 高阻释放**，无任何 I2C 活动 |
+| **`uart_tx`** | **P110** | OUTPUT | **UART TX (115200 baud, 8N1)**，接 USB 转串口模块 RXD |
+| **`dbg_heartbeat`** | **P111** | OUTPUT | **约 1 Hz 方波心跳**（500 ms 翻转，证明 FPGA 配置及时钟/复位正常） |
+| **`dbg_unused`** | **P113** | OUTPUT | **固定输出 `1'b0`**，安全接地 |
 
-## 仿真
+> [!NOTE]
+> I2C 上拉依赖板级 4.7 kΩ 外部硬件电阻，UCF 严禁配置 `PULLUP`。
+> 上位机串口接收端配置：波特率 **115200**、数据位 **8**、校验位 **None**、停止位 **1** (8N1)。
 
-```powershell
-pwsh -File .\ise.ps1 sim    -Project finger_piano_periph_test          # 全部 7 项
-pwsh -File .\ise.ps1 verify -Project finger_piano_periph_test          # 综合+全部仿真+门禁
-pwsh -File .\ise.ps1 build  -Project finger_piano_periph_test -Stage implement
-pwsh -File .\ise.ps1 build  -Project finger_piano_periph_test -Stage bitstream
+---
+
+## 2. UART 报文协议与调度机制
+
+### 2.1 报文格式（纯 ASCII）
+- **正常采样上报**（约 100 ms 一次，长 41 字节）：
+  ```text
+  ADC OK CH0=0x1234 CH1=0x5678 CH2=0x9ABC\r\n
+  ```
+- **错误状态上报**（`adc_error` 触发时立即调度，长 18 字节）：
+  ```text
+  ADC ERROR CODE=x\r\n
+  ```
+
+### 2.2 错误码定义（严格沿用 `ads1115_ctrl.v` 事实）
+- **`CODE=1`**：地址字节 NACK（ADS1115 未应答其 `0x48` 地址，常见于未上电、虚焊、ADDR 引脚未接地、SCL/SDA 断线）
+- **`CODE=2`**：Pointer 或数据字节 NACK（写寄存器或 Pointer 过程中被从机拒收）
+- **`CODE=3`**：I2C Master 超时（SCL/SDA 被外部强制拉低超过 36 个位周期阈值）
+- **`CODE=4`**：其它错误，包括转换等待超时或协议异常（Config 写入后等待 OS 位就绪超时）
+
+### 2.3 缓冲与仲裁机制
+1. **最新值单槽缓存**：`adc_sample_valid` 脉冲到来时原子更新 `latest_ch0/ch1/ch2`，不建采样队列，UART 发送绝对零阻塞 ADS1115 采样 FSM。
+2. **首次采样门控**：增设 `have_valid_sample` 标志（初值 0，首次有效采样后置 1）。在初次采样完成前，100 ms 定时器保持静默，严禁输出虚假的 `0x0000` 报文。
+3. **行完整性保证（非抢占式）**：当 `adc_error` 到来时立即锁存 `err_pending` 与错误码；若此时 UART 正在发送正常报文，先完整发完当前这一行（41 字节 + `\r\n`），进入空闲态后下一拍立即优先发出错误报文，杜绝串口端接收乱码。
+
+---
+
+## 3. 仿真与门禁结果
+
+- **全量门禁 (`verify`)**：run `verify-20260921-151844-5d21a112` (**Overall PASS**)
+  - **静态检查**：Verilog-2001 PASS，单一时钟域 PASS，无虚构约束 PASS，引用文件 PASS
+  - **综合阶段**：run `20260921-151844-7c13ab00`，0 errors，0 latches，**19 audited allowed / 0 unexpected**（窄口径精准白名单，严格覆盖结构性裁剪，无泛化规则）
+  - **仿真阶段**：4 / 4 项仿真全部 **PASS**
+    - `uart_tx_unit` (top: `tb_uart_tx`): 严格验证 idle=1, start=0, 8 bits LSB first, stop=1 及每 bit 严格 104 拍时钟周期 (PASS)
+    - `periph_test_normal` (top: `tb_periph_test_top`, `TB_MODE=0`): 验证首帧门控、41 字节 ASCII 解码、心跳翻转及 DAC 释放 (PASS)
+    - `periph_test_adc_nack` (top: `tb_periph_test_top`, `TB_MODE=1`): 验证注入地址 NACK 时输出 `ADC ERROR CODE=1\r\n` (PASS)
+    - `periph_test_heartbeat_real` (top: `tb_periph_test_top`, `TB_MODE=2`): 验证真实 6,000,000 拍半周期方波接线与时钟周期 (PASS)
+  - **实现门禁**：PASS (`expectImplementationBlocked=false`, gate open)
+
+- **完整实现与 Bitstream 构建**：run `20260921-151944-f93a3045`
+  - **MAP / PAR**：0 errors / 0 warnings，全部 8 个用户 I/O 100% `LOCATED`
+  - **时序分析 (`timing.twr`)**：
+    - 约束：`TS_clk = PERIOD TIMEGRP "clk_group" 83.33 ns HIGH 50%;`
+    - 分析路径：16,525 paths, 1,438 endpoints, **0 failing endpoints, 0 timing errors**
+    - Setup 最差 slack: **72.514 ns**，最小周期: **10.816 ns**（最高时钟支持 **92.456 MHz**）
+    - Hold 最差 slack: 满足要求，`All constraints were met.` (Timing PASS)
+  - **DRC**：0 errors, 2 warnings (因 DAC inout 引脚严格释放至 `1'bz` 导致的正常输入缓冲空载告警)
+  - **比特流产物**：
+    - 路径：`projects/finger_piano_periph_test/artifacts/20260921-151944-f93a3045/results/design.bit`
+    - 大小：**54,738 字节**
+    - SHA-256：`AA92B01010D96B2E082125F29DE9AF41D3EBAB5D2364E178C2063DAE80F38DDF`
+
+---
+
+## 4. 板级验证状态与排查指南
+
+```
+programmingCompleted = NOT_RUN
+programmingVerified  = NOT_RUN
+userDesignFunctional = NOT_TESTED
+BOARD TEST           = NOT_TESTED
 ```
 
-7 个仿真:normal(0x800)、dac_400、dac_c00、dac_1khz、adc_nack、
-dac_nack、heartbeat_real(板上 1 Hz 常量验证)。综合 warning 实际结果:
-**144 audited / 0 unexpected / 0 latches / 0 errors**——诊断顶层刻意
-不消费 ADS 转换值(P9 §12)且 `DAC_TEST_MODE` 为编译期常量(DC 模式下
-DAC 载荷恒定),结构性 trim 已逐行人工审核进**本工程自己的精确
-allowlist**(见 `project.json` 审核注记;任何新 warning 或计数漂移仍判
-FAIL);正式 `finger_piano` 的 166-warning allowlist **未修改**,两者
-互不相干。
+**停机边界**：已完成全部软件验证与 Bitstream 构建，**未执行任何硬件烧录**。硬件下载必须由用户明确要求并带 `-ConfirmHardwareWrite` 触发。
 
-## 软件准备状态
+### 串口排查现象判定指南
 
-```
-P9 SOFTWARE PREPARATION       = COMPLETE
-PERIPH DIAGNOSTIC BITSTREAM   = READY(见下节记录)
-BOARD TEST                    = IN PROGRESS(授权写入已完成,板上测量仍 TODO)
-```
-
-**烧录必须由用户明确要求并带 `-ConfirmHardwareWrite`**(本工程任何阶段都不会
-自动 program)。2026-09-17 经用户逐次明确授权完成了本节的 ISF 与 volatile
-写入(见「授权烧录记录」);板上电压/波形测量仍全部 TODO,板测完成后是否恢复
-Stage-2 ISF 由用户决定(P9 §37)。
-
-## Bitstream 记录
-
-| 镜像 | DAC_TEST_MODE | run id | SHA256 | size |
-|---|---|---|---|---|
-| mode 0 + **ADS 100 kHz**(当前 HEAD 默认,可复现) | 0(0x800 DC) | bitstream `20260917-170512-33e884e2`(verify `verify-20260917-170347-72d5aef5`) | `40949c9d4286ceceaf5ba11458f0d659d97878b465c1460b3b6b94c46b0df603` | 54 738 B |
-| mode 0 + ADS 333333 Hz(历史,当前 ISF 内容) | 0(0x800 DC) | bitstream `20260917-004330-18966658`(implement `20260917-004237-e5b4c5b2`,verify `verify-20260917-004113-3c4a791f`) | `9654a942b3ca1aab9acc6ac6ddcbbee19768069ecc3096c9254008ef764ae09a` | 54 738 B |
-| mode 3 + ADS 333333 Hz(可复现变体,不参与 verify 门禁) | 3(1 kHz / 8 kS/s) | bitstream `20260917-152127-13a3ee2f`(`-define P9_DAC_MODE3`,121 warnings) | `1b84780a31570c799d89ad1e954d050e19e04362f37daf56fbef5c595901633e` | 54 738 B |
-
-三个镜像均为 xc3s50an-4-tqg144、DRC 0/0;当前 HEAD(mode 0 / ADS 100 kHz、
-无 defines)回归 `verify-20260917-170347-72d5aef5` Overall **PASS**
-(144 allowed / 0 unexpected、0 latches、7/7 仿真 PASS、implement 门禁 open)。
-
-implement 记录(人工阅读 `map.log` / `routed.pad` / `timing.twr`;ADS 100 kHz 版
-run `20260917-170512-33e884e2`):
-MAP/PAR **0 errors / 0 warnings**,317 FF / 449 slices,**9 个 bonded IOB
-全部 `LOCATED`** 且与 §3 冻结表逐脚一致(P57/P3/P31/P32/P102/P103/
-P110/P111/P113,全部 LVCMOS33),无自动分配 I/O;`TS_clk = 83.33 ns` →
-**0 timing errors**(setup/hold/switching 全 0)、最小周期 9.220 ns、
-`All constraints were met.`。
-结论边界(P9 §51/§35):这是 DIGITAL IMPLEMENTATION PASS,不构成
-I2C BOARD PASS;上升时间/绝对精度必须由示波器/已知输入实测。
-
-## 授权烧录记录(2026-09-17,均由用户明确要求 + `-ConfirmHardwareWrite`)
-
-| # | 模式 | run id | 结果 | 关键证据 |
-|---|---|---|---|---|
-| 1 | Isf(非易失,mode 0) | `program-20260917-150508-cb48ed1d` | `programmingCompleted=PASS` / `programmingVerified=VERIFIED` | `Erasing device...` → `Erasure completed successfully.` → `Programming Flash...done.` → `Programming completed successfully.` → `Verification completed successfully.`;cable SN 210241672559 / 10 MHz |
-| 2 | Jtag(易失,mode 3) | `program-20260917-152236-2c99ad5e` | `PASS` / `CONFIG_STATUS_OK` | `Programming device` → `Completed downloading bit file to device` → `Programmed successfully`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1` |
-| 3 | Jtag(易失,由 mode 3 切回 mode 0) | `program-20260917-153713-a2dbc37a` | `PASS` / `CONFIG_STATUS_OK` | 同上 fabric 配置证据;当前 volatile fabric = mode 0 |
-| 4 | Isf(非易失,重写 mode 0 镜像) | `program-20260917-163937-54107e0d` | `programmingCompleted=PASS` / `programmingVerified=VERIFIED` | `Erasing device...` → `Erasure completed successfully.` → `Programming Flash...done.` → `Programming completed successfully.` → `Verification completed successfully.`;内容与 row 1 相同(SHA256 `9654a942…764ae09a`)
-| 5 | Jtag(易失,ADS 100 kHz mode 0) | `program-20260917-170737-86a70094` | `PASS` / `CONFIG_STATUS_OK` | `Programming device` → `Completed downloading bit file to device`;转录无任何 SPI/Flash/sector 行;`M[2:0]=011`、`DONEIN=1`、`CRC error=0`、`GWE=1`;镜像 SHA256 `40949c9d…6b0df603` |
-
-- 若干次尝试(`program-20260917-145845-239e3f35` 等)在 preflight 阶段因下载线
-  `DIGILENT_OPEN_FAILED`(`failed to open device (DmgrOpenEx, erc = 3072)`)失败,
-  **未写入任何内容**(`run.status=PREFLIGHT_FAILED`);重试后成功。属 fpga-vm
-  USB 透传层问题,与工具/板卡无关。
-- **当前硬件状态**:内部 ISF = mode 0 诊断镜像(2026-09-17 重新擦除写入,run
-  `program-20260917-163937-54107e0d`,其 ADS 总线为 **333333 Hz** 旧镜像);
-  FPGA fabric = **ADS 100 kHz mode 0** 易失镜像(2026-09-17,run
-  `program-20260917-170737-86a70094`),掉电重启会回到 ISF 的 333333 Hz mode 0。
-- `userDesignFunctional` 依旧 **NOT_TESTED**:烧录成功 ≠ 设计在板上可用。
-
-## 板测记录表(P9 §34,实测值必须由用户填写)
-
-| 项目 | 理论/预期 | 实测 | 结果 |
-|---|---|---|---|
-| P110 heartbeat | ~1 Hz 固定慢速翻转 | TODO | TODO |
-| P111 ADC toggle | 持续活动 | TODO | TODO |
-| P113 error | 正常时 0 | TODO | TODO |
-| ADC SCL | **~100 kHz**(P9 覆盖;16+104=120 拍 @12 MHz) | TODO | TODO |
-| DAC SCL | ~333 kHz | TODO | TODO |
-| DAC 0x400 VOUT | 低于 0x800 | TODO | TODO |
-| DAC 0x800 VOUT | ~VDD/2(3.3 V 时约 1.65 V,仅理论参考) | TODO | TODO |
-| DAC 0xC00 VOUT | 高于 0x800 | TODO | TODO |
-| DAC 1 kHz | 1 kHz / 8 段阶梯 | TODO | TODO |
-
-板测顺序与判读见 `doc/P9_ADS1115与MCP4725板级诊断工程计划.md` §33;
-结论边界(§35):逻辑分析仪解码成功 ≠ I2C 上升时间 PASS;raw code
-变化 ≠ ADC 绝对精度 PASS。LM386 / 扬声器不在本阶段。
+1. **上电观察 P111 (Heartbeat)**：
+   - 若 P111 约为 1 Hz 规律闪烁（点亮 0.5s，熄灭 0.5s），证明 FPGA 比特流加载成功、12 MHz 晶振与系统复位工作完全正常。
+2. **连接串口终端 (P110 与 GND)**：
+   - 终端配置：115200 baud, 8N1。
+   - **若输出 `ADC OK CH0=0x... CH1=0x... CH2=0x...`**：
+     - 说明 ADS1115 通信正常，三通道采样正在持续工作！观察手指按压压力传感器时 CH0/CH1/CH2 的读数变化。
+   - **若输出 `ADC ERROR CODE=1`**：
+     - 说明 ADS1115 从机地址 `0x48` 未被应答（地址字节 NACK）。请重点检查：
+       a) ADS1115 模块 VCC 是否已接 3.3V，GND 是否共地；
+       b) ADDR 引脚是否已可靠接 GND（若悬空或接 VDD，地址会变为 0x49/0x4A/0x4B）；
+       c) P31 (SCL) 与 P32 (SDA) 杜邦线是否接反或接触不良；
+       d) I2C 外部上拉电阻是否有效。
+   - **若输出 `ADC ERROR CODE=3`**：
+     - 说明 I2C 总线超时，SCL/SDA 可能被意外短路接地。
+   - **若输出 `ADC ERROR CODE=4`**：
+     - 说明已向 ADS1115 写入配置，但在等待转换完成（轮询 OS 就绪位）时超时。
