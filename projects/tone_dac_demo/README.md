@@ -64,7 +64,17 @@
   - `tone_dac_demo_top`: run `sim-20260921-140138-b0107917` (PASS, 88 checks, 0 errors)
 - **Stage E (Full Verify)**: PASS
   - `verify`: run `verify-20260921-140458-3b273ad1` (Overall PASS, synthesis `20260921-140458-1cea9935`: 0 errors / 25 audited allowed warnings / 0 unexpected / 0 latches; all 4 simulations PASS)
-- **Stage F (Bitstream)**: TODO
+- **Stage F (Bitstream)**: PASS
+  - `build -Stage bitstream`: run `20260921-140556-ded16c9b`
+  - MAP / PAR: 0 errors / 0 warnings, 全部布线完成 (`Timing Score: 0`)
+  - I/O 绑定: 8 / 8 (100%) 全部 `LOCATED`（`rst_n` P3, `sensor_async` P28/P29/P30, `clk` P57, `dac_i2c_scl` P102, `dac_i2c_sda` P103, `square_out` P110；P31/P32/P111/P113 保持未占用）
+  - 时序核对（人工阅读 `timing.twr` 与 `par.log`）：
+    - 约束：`TS_clk = PERIOD 83.33 ns HIGH 50%`
+    - Setup 最差 slack: `70.800 ns`，最小周期 `12.530 ns`（最高等效频率 `79.808 MHz`）
+    - Hold 最差 slack: `0.872 ns`
+    - Timing errors: 0, Failing endpoints: 0, All constraints were met (Timing PASS)
+  - DRC: 0 errors / 0 warnings
+  - 产物: `design.bit` (54 738 字节, SHA-256: `9E36A9718625F7D4AB3D7CE1A18467AF66FE90873DC377A5BC9A8EE36BE0E4FD`)
 
 ## 6. 板级验证状态
 
