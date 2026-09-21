@@ -12,7 +12,9 @@
 
 `include "finger_piano_cfg.vh"
 
-module finger_piano_stage2_oled_top (
+module finger_piano_stage2_oled_top #(
+    parameter integer SIM_FAST_INIT = 0
+) (
     input  wire       clk,           // 唯一系统时钟 (12 MHz, P57)
     input  wire       rst_n,         // 外部异步低有效复位 (P3)
 
@@ -68,7 +70,7 @@ module finger_piano_stage2_oled_top (
 
     oled_ssd1306_ctrl #(
         .SYS_CLK_HZ    (12000000),
-        .SIM_FAST_INIT (0)
+        .SIM_FAST_INIT (SIM_FAST_INIT)
     ) u_oled_ctrl (
         .clk                (clk),
         .rst_n_sync         (oled_rst_n_sync),

@@ -150,7 +150,484 @@
   "constraintsReviewed": true,
   "optimization": "Speed",
   "optimizationLevel": 1,
-  "simulations": [],
+  "simulations": [
+    {
+      "name": "note_encoder",
+      "top": "tb_note_encoder",
+      "sources": [
+        "sim/tb_note_encoder.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_NOTE_ENCODER: PASS",
+      "failPattern": "TB_NOTE_ENCODER: FAIL"
+    },
+    {
+      "name": "tone_generator",
+      "top": "tb_tone_generator",
+      "sources": [
+        "sim/tb_tone_generator.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_TONE_GENERATOR: PASS",
+      "failPattern": "TB_TONE_GENERATOR: FAIL"
+    },
+    {
+      "name": "tone_generator_12m",
+      "top": "tb_tone_generator",
+      "sources": [
+        "sim/tb_tone_generator.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_TONE_GENERATOR: PASS",
+      "failPattern": "TB_TONE_GENERATOR: FAIL"
+    },
+    {
+      "name": "top_default",
+      "top": "tb_finger_piano_top",
+      "sources": [
+        "sim/tb_finger_piano_top.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_FINGER_PIANO_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
+    },
+    {
+      "name": "top_active_low",
+      "top": "tb_finger_piano_top",
+      "sources": [
+        "sim/tb_finger_piano_top.v"
+      ],
+      "generics": {
+        "TB_KEY_ACTIVE_HIGH": "0"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_FINGER_PIANO_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
+    },
+    {
+      "name": "top_filter_bypass",
+      "top": "tb_finger_piano_top",
+      "sources": [
+        "sim/tb_finger_piano_top.v"
+      ],
+      "generics": {
+        "TB_KEY_FILTER_ENABLE": "0"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_FINGER_PIANO_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_TOP: FAIL"
+    },
+    {
+      "name": "i2c_master",
+      "top": "tb_i2c_master",
+      "sources": [
+        "sim/tb_i2c_master.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_I2C_MASTER: PASS",
+      "failPattern": "TB_I2C_MASTER: FAIL"
+    },
+    {
+      "name": "ads1115_ctrl",
+      "top": "tb_ads1115_ctrl",
+      "sources": [
+        "sim/tb_ads1115_ctrl.v",
+        "sim/models/ads1115_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_ADS1115_CTRL: PASS",
+      "failPattern": "TB_ADS1115_CTRL: FAIL"
+    },
+    {
+      "name": "mcp4725_ctrl",
+      "top": "tb_mcp4725_ctrl",
+      "sources": [
+        "sim/tb_mcp4725_ctrl.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_MCP4725_CTRL: PASS",
+      "failPattern": "TB_MCP4725_CTRL: FAIL"
+    },
+    {
+      "name": "sensor_code_decoder",
+      "top": "tb_sensor_code_decoder",
+      "sources": [
+        "sim/tb_sensor_code_decoder.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SENSOR_CODE_DECODER: PASS",
+      "failPattern": "TB_SENSOR_CODE_DECODER: FAIL"
+    },
+    {
+      "name": "sensor_code_filter",
+      "top": "tb_sensor_code_filter",
+      "sources": [
+        "sim/tb_sensor_code_filter.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SENSOR_CODE_FILTER: PASS",
+      "failPattern": "TB_SENSOR_CODE_FILTER: FAIL"
+    },
+    {
+      "name": "sensor_code_frontend_high",
+      "top": "tb_sensor_code_frontend",
+      "sources": [
+        "sim/tb_sensor_code_frontend.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SENSOR_CODE_FRONTEND: PASS",
+      "failPattern": "TB_SENSOR_CODE_FRONTEND: FAIL"
+    },
+    {
+      "name": "sensor_code_frontend_low",
+      "top": "tb_sensor_code_frontend",
+      "sources": [
+        "sim/tb_sensor_code_frontend.v"
+      ],
+      "generics": {
+        "TB_ACTIVE_HIGH": "0"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SENSOR_CODE_FRONTEND: PASS",
+      "failPattern": "TB_SENSOR_CODE_FRONTEND: FAIL"
+    },
+    {
+      "name": "sine_lut_12bit",
+      "top": "tb_sine_lut_12bit",
+      "sources": [
+        "sim/tb_sine_lut_12bit.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_SINE_LUT_12BIT: PASS",
+      "failPattern": "TB_SINE_LUT_12BIT: FAIL"
+    },
+    {
+      "name": "dds_sine_generator",
+      "top": "tb_dds_sine_generator",
+      "sources": [
+        "sim/tb_dds_sine_generator.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
+      "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_sine_generator_12m",
+      "top": "tb_dds_sine_generator",
+      "sources": [
+        "sim/tb_dds_sine_generator.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 240,
+      "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
+      "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_sine_generator_disabled",
+      "top": "tb_dds_sine_generator",
+      "sources": [
+        "sim/tb_dds_sine_generator.v"
+      ],
+      "generics": {
+        "TB_ENABLE": "0"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_DDS_SINE_GENERATOR: PASS",
+      "failPattern": "TB_DDS_SINE_GENERATOR: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline_12m",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "1",
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline_error",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "2",
+        "TB_ADDR": "97",
+        "TB_SYS_CLK_HZ": "12000000"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "dds_mcp4725_pipeline_disabled",
+      "top": "tb_dds_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "3"
+      },
+      "timeoutSeconds": 120,
+      "passPattern": "TB_DDS_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "pressure_frame_capture",
+      "top": "tb_pressure_frame_capture",
+      "sources": [
+        "sim/tb_pressure_frame_capture.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_PRESSURE_FRAME_CAPTURE: PASS",
+      "failPattern": "TB_PRESSURE_FRAME_CAPTURE: FAIL"
+    },
+    {
+      "name": "pressure_channel_corrector",
+      "top": "tb_pressure_channel_corrector",
+      "sources": [
+        "sim/tb_pressure_channel_corrector.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_PRESSURE_CHANNEL_CORRECTOR: PASS",
+      "failPattern": "TB_PRESSURE_CHANNEL_CORRECTOR: FAIL"
+    },
+    {
+      "name": "pressure_processor",
+      "top": "tb_pressure_processor",
+      "sources": [
+        "sim/tb_pressure_processor.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_PRESSURE_PROCESSOR: PASS",
+      "failPattern": "TB_PRESSURE_PROCESSOR: FAIL"
+    },
+    {
+      "name": "ads1115_pressure_pipeline",
+      "top": "tb_ads1115_pressure_pipeline",
+      "sources": [
+        "sim/tb_ads1115_pressure_pipeline.v",
+        "sim/models/ads1115_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_ADS1115_PRESSURE_PIPELINE: PASS",
+      "failPattern": "TB_ADS1115_PRESSURE_PIPELINE: FAIL"
+    },
+    {
+      "name": "system_stage2_basic",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "0"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_dual_i2c",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "1"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_error_isolation",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "2"
+      },
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_longrun",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "3",
+        "TB_CONV_CYCLES": "13956"
+      },
+      "timeoutSeconds": 2400,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_disabled",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "4"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_adc_only",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "5"
+      },
+      "timeoutSeconds": 600,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "system_stage2_dac_only",
+      "top": "tb_finger_piano_system",
+      "sources": [
+        "sim/tb_finger_piano_system.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {
+        "TB_MODE": "6"
+      },
+      "timeoutSeconds": 900,
+      "passPattern": "TB_FINGER_PIANO_SYSTEM: PASS",
+      "failPattern": "TB_FINGER_PIANO_SYSTEM: FAIL"
+    },
+    {
+      "name": "stage2_top",
+      "top": "tb_finger_piano_stage2_top",
+      "sources": [
+        "sim/tb_finger_piano_stage2_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 1500,
+      "passPattern": "TB_FINGER_PIANO_STAGE2_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_STAGE2_TOP: FAIL"
+    },
+    {
+      "name": "audio_gain_12bit",
+      "top": "tb_audio_gain_12bit",
+      "sources": [
+        "sim/tb_audio_gain_12bit.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 240,
+      "passPattern": "TB_AUDIO_GAIN_12BIT: PASS",
+      "failPattern": "TB_AUDIO_GAIN_12BIT: FAIL"
+    },
+    {
+      "name": "dds_gain_mcp4725_pipeline",
+      "top": "tb_dds_gain_mcp4725_pipeline",
+      "sources": [
+        "sim/tb_dds_gain_mcp4725_pipeline.v",
+        "sim/models/mcp4725_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 1200,
+      "passPattern": "TB_DDS_GAIN_MCP4725_PIPELINE: PASS",
+      "failPattern": "TB_DDS_GAIN_MCP4725_PIPELINE: FAIL"
+    },
+    {
+      "name": "oled_test_top",
+      "top": "tb_oled_test_top",
+      "sources": [
+        "sim/models/ramb16_s9_model.v",
+        "sim/models/oled_test_top.v",
+        "sim/tb_oled_test_top.v",
+        "sim/models/ssd1306_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 300,
+      "passPattern": "TB_OLED_TEST_TOP: PASS",
+      "failPattern": "TB_OLED_TEST_TOP: FAIL"
+    },
+    {
+      "name": "stage2_oled_top",
+      "top": "tb_finger_piano_stage2_oled_top",
+      "sources": [
+        "sim/models/ramb16_s9_model.v",
+        "sim/tb_finger_piano_stage2_oled_top.v",
+        "sim/models/ads1115_model.v",
+        "sim/models/mcp4725_model.v",
+        "sim/models/ssd1306_model.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 600,
+      "passPattern": "TB_FINGER_PIANO_STAGE2_OLED_TOP: PASS",
+      "failPattern": "TB_FINGER_PIANO_STAGE2_OLED_TOP: FAIL"
+    }
+  ],
   "verification": {
     "expectImplementationBlocked": false,
     "failOnSynthesisWarnings": true,
