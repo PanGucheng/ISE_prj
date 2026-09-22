@@ -1212,7 +1212,31 @@ Assert ($guiRunner -match 'call ".*settings32\.bat"') 'the runner must load the 
 Write-Host 'PASS: GUI project helpers parse device facts, bridge encodings and emit valid Tcl.'
 
 Write-Host ''
+# Optional Spartan-3 MAP packing: validate typed values before shell generation.
+New-Fixture 'packing' @{ constraintsReviewed = $true; mapPackFactor = 80 }
+$packProject = Read-Project 'packing' 'implement'
+$packInput = "$root/packing-explicit"
+New-Item -ItemType Directory -Path $packInput | Out-Null
+$null = New-RunScript $packProject 'implement' $packInput
+Assert ((Get-TextSafe "$packInput/_tool/run.cmd") -match 'map -p xc3s50an-4-tqg144 -c 80 -o mapped.ncd') 'explicit MAP packing option missing'
+Write-FixtureConfig 'packing' @{ constraintsReviewed = $true }
+$packDefault = Read-Project 'packing' 'implement'
+$packDefaultInput = "$root/packing-default"
+New-Item -ItemType Directory -Path $packDefaultInput | Out-Null
+$null = New-RunScript $packDefault 'implement' $packDefaultInput
+Assert ((Get-TextSafe "$packDefaultInput/_tool/run.cmd") -match 'map -p xc3s50an-4-tqg144 -o mapped.ncd') 'default MAP command changed'
+foreach ($invalidFactor in @(-1, 101, 80.5, '80', $true, $null, '80 & echo injected')) {
+    Write-FixtureConfig 'packing' @{ mapPackFactor = $invalidFactor }
+    Expect-Failure { Read-Project 'packing' 'implement' } 'mapPackFactor must be a JSON integer'
+}
+foreach ($validFactor in @(0, 100)) {
+    Write-FixtureConfig 'packing' @{ constraintsReviewed = $true; mapPackFactor = $validFactor }
+    $null = Read-Project 'packing' 'implement'
+}
+Write-FixtureConfig 'packing' @{ mapPackFactor = 80; device = 'xc6slx9-2-tqg144' }
+Expect-Failure { Read-Project 'packing' 'implement' } 'supported only for the Spartan-3'
+Write-Host 'PASS: optional MAP packing, unchanged defaults, integer/range/family validation.'
+
 Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'
 Write-Host "Test evidence retained: $root"
-
 

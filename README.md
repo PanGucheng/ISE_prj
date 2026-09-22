@@ -17,6 +17,8 @@
 
 ## 日常流程（Toolchain Freeze v1）
 
+Spartan-3 系列工程可在 `project.json` 设置可选的 `mapPackFactor`（JSON 整数 0～100），映射到 ISE MAP 的 `-c` 无关逻辑打包目标百分比。省略时保留原命令及 ISE 默认值 100。该值不是资源上限，也不会减少逻辑本身；更紧的打包必须用新的 MAP/PAR 和时序报告验收。不改变现有命令集合或烧录流程。
+
 **只需要这五条命令。** 底层细节（iMPACT 批处理、`fuse`、SSH staging 目录、Digilent target 语法、ISF 擦除顺序）都由工具负责，使用课程设计时不需要理解它们。
 
 ```powershell

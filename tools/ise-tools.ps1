@@ -105,6 +105,15 @@ function Read-Project([string]$Name, [string]$Target) {
     if (@($cfg.sources).Count -eq 0) { throw 'List source files explicitly in project.json.' }
     if ($cfg.optimization -notin @('Speed','Area')) { throw 'optimization must be Speed or Area.' }
     if ($cfg.optimizationLevel -notin @(1,2)) { throw 'optimizationLevel must be 1 or 2.' }
+    if ($cfg.PSObject.Properties['mapPackFactor']) {
+        $factor = $cfg.mapPackFactor
+        if (($factor -isnot [int] -and $factor -isnot [long]) -or $factor -lt 0 -or $factor -gt 100) {
+            throw 'mapPackFactor must be a JSON integer between 0 and 100.'
+        }
+        if ($cfg.device -notmatch '^xc3s[0-9]+(?:a|an|adsp|e)?-') {
+            throw 'mapPackFactor is supported only for the Spartan-3 family.'
+        }
+    }
     $files = New-Object 'System.Collections.Generic.List[string]'
     foreach ($s in $cfg.sources) {
         if ($s.language -notin @('verilog','vhdl')) { throw 'Source language must be verilog or vhdl.' }
@@ -167,7 +176,8 @@ function New-RunScript($ProjectData, [string]$Target, [string]$InputDir) {
     if ($Target -ne 'synth') {
         $sd = (@($cfg.netlists | ForEach-Object { [IO.Path]::GetDirectoryName($_).Replace('\','/') } | Sort-Object -Unique) | ForEach-Object { '-sd "../inputs/' + $_ + '"' }) -join ' '
         $steps += @{Name='translate'; Cmd="ngdbuild -p $($cfg.device) -uc ../inputs/$($cfg.ucf) $sd design.ngc design.ngd"; Output='design.ngd'}
-        $steps += @{Name='map'; Cmd="map -p $($cfg.device) -o mapped.ncd design.ngd design.pcf"; Output='mapped.ncd'}
+        $packing = if ($cfg.PSObject.Properties['mapPackFactor']) { " -c $($cfg.mapPackFactor)" } else { '' }
+        $steps += @{Name='map'; Cmd="map -p $($cfg.device)$packing -o mapped.ncd design.ngd design.pcf"; Output='mapped.ncd'}
         $steps += @{Name='par'; Cmd='par mapped.ncd routed.ncd design.pcf'; Output='routed.ncd'}
         $steps += @{Name='timing'; Cmd='trce -v 10 -u 10 -o timing.twr routed.ncd design.pcf'; Output='timing.twr'}
     }
