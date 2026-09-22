@@ -4,7 +4,8 @@
 
 ## 开发入口
 
-- [ADC ERR=4 诊断与板测交接](docs/adc_err4_debug_handoff.md)：两工程差异、错误码 4/5 分流、UART 采集脚本及下一位调测 agent 的任务。当前为诊断准备；全量 verify 按用户要求中止，未完成新版本板测。
+- [ADC ERR=4 解决与验证报告](docs/adc_err4_resolution_report.md)：根因分析（XST integer 常量切片缺陷）、修复方法、方案 B 实时三通道串口上报实现及真机闭环采集证据（已彻底解决）。
+- [ADC ERR=4 诊断与板测交接（历史调测档）](docs/adc_err4_debug_handoff.md)：两工程差异、错误码 4/5 分流设计、UART 采集工具说明与解决记录（第 7 节）。
 
 - [资源优化与音量余量详细计划](docs/resource_optimization_plan.md)：基线证据、O0～O6 阶段、计数器位宽、DDS BRAM、回归矩阵、预算、回退及交付标准。
 - [主工程规则](../finger_piano/AGENTS.md)与[仓库规则](../../AGENTS.md)。
@@ -19,6 +20,8 @@
 已有 `verify-20260921-220344-887dc140` 为 PASS，但 `simulations` 为空，仿真状态为 NOT_CONFIGURED。资源优化开始前必须按计划 O0 补齐集成回归。
 
 ## 本轮文档记录
+
+2026-09-22：完成 ADC ERR=4 调测与板级真机闭环。查明根因为 XST 综合器对 `integer` 常量参数执行带参数边界的位切片异常（求值恒为 0 导致超时恒有效）；修复为固定 16 位计数器标量比较；按方案 B 接入三通道实时串口上报并压紧资源（Slices 702/704，Slack +70.999 ns，构建 `20260922-202944-3b5f28a9`）；COM20 实际采集 10 秒 14 帧数据，错误率为 0，三通道真实物理采样电压闭环，详见 [ADC ERR=4 解决与验证报告](docs/adc_err4_resolution_report.md)。
 
 2026-09-21：新增详细优化计划。状态为 PLANNED；尚未实施计数器、DDS BRAM 或综合配置优化。初步预算为音量接入前 ≤560 Slice、真实压力音量接入后争取 ≤600 Slice，均须后续实测，不能视为保证结果。
 

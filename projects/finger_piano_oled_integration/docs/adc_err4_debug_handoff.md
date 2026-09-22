@@ -129,3 +129,4 @@ pwsh -NoProfile -File .\tools\test-capture-adc-uart.ps1
    `ADC ERR=4` 降至 0 次（0.0 错误/秒）；
    收到 14 帧实时三通道转换数据（CH0~2.86V, CH1~2.87V, CH2~3.40V），噪声微波动符合真实物理采样，确认根因彻底消除。
 
+完整排查过程、XST 语法缺陷分析、资源指标与换算电压详见独立报告：[ADC ERR=4 根因排查与板级闭环解决报告](adc_err4_resolution_report.md)。
