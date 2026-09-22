@@ -140,6 +140,34 @@ module tb_i2c_master;
         .sda        (sda2)
     );
 
+    //-------------------------------------------------------------------------
+    // 边界矩阵测试实例：覆盖 2 的幂次相邻值与位宽边界
+    //-------------------------------------------------------------------------
+    reg  [2:0] bm_cmd;
+    reg        bm_valid;
+    reg  [7:0] bm_wr_data;
+
+    wire bm_scl_7,  bm_sda_7,  bm_ready_7;  wire [1:0] bm_ec_7;
+    wire bm_scl_8,  bm_sda_8,  bm_ready_8;  wire [1:0] bm_ec_8;
+    wire bm_scl_15, bm_sda_15, bm_ready_15; wire [1:0] bm_ec_15;
+    wire bm_scl_16, bm_sda_16, bm_ready_16; wire [1:0] bm_ec_16;
+    wire bm_scl_31, bm_sda_31, bm_ready_31; wire [1:0] bm_ec_31;
+    wire bm_scl_32, bm_sda_32, bm_ready_32; wire [1:0] bm_ec_32;
+
+    pullup pu_bm_scl7 (bm_scl_7);   pullup pu_bm_sda7 (bm_sda_7);
+    pullup pu_bm_scl8 (bm_scl_8);   pullup pu_bm_sda8 (bm_sda_8);
+    pullup pu_bm_scl15(bm_scl_15);  pullup pu_bm_sda15(bm_sda_15);
+    pullup pu_bm_scl16(bm_scl_16);  pullup pu_bm_sda16(bm_sda_16);
+    pullup pu_bm_scl31(bm_scl_31);  pullup pu_bm_sda31(bm_sda_31);
+    pullup pu_bm_scl32(bm_scl_32);  pullup pu_bm_sda32(bm_sda_32);
+
+    i2c_master #(.SCL_LOW_CYCLES(7),  .SCL_HIGH_CYCLES(7),  .TIMEOUT_CYCLES(255))  u_bm_7  (.clk(clk), .rst_n_sync(rst_n), .cmd(bm_cmd), .cmd_valid(bm_valid), .wr_data(bm_wr_data), .nack_after(1'b0), .cmd_ready(bm_ready_7),  .rd_data(), .error(), .error_code(bm_ec_7),  .scl(bm_scl_7),  .sda(bm_sda_7));
+    i2c_master #(.SCL_LOW_CYCLES(8),  .SCL_HIGH_CYCLES(8),  .TIMEOUT_CYCLES(256))  u_bm_8  (.clk(clk), .rst_n_sync(rst_n), .cmd(bm_cmd), .cmd_valid(bm_valid), .wr_data(bm_wr_data), .nack_after(1'b0), .cmd_ready(bm_ready_8),  .rd_data(), .error(), .error_code(bm_ec_8),  .scl(bm_scl_8),  .sda(bm_sda_8));
+    i2c_master #(.SCL_LOW_CYCLES(15), .SCL_HIGH_CYCLES(15), .TIMEOUT_CYCLES(511)) u_bm_15 (.clk(clk), .rst_n_sync(rst_n), .cmd(bm_cmd), .cmd_valid(bm_valid), .wr_data(bm_wr_data), .nack_after(1'b0), .cmd_ready(bm_ready_15), .rd_data(), .error(), .error_code(bm_ec_15), .scl(bm_scl_15), .sda(bm_sda_15));
+    i2c_master #(.SCL_LOW_CYCLES(16), .SCL_HIGH_CYCLES(16), .TIMEOUT_CYCLES(512)) u_bm_16 (.clk(clk), .rst_n_sync(rst_n), .cmd(bm_cmd), .cmd_valid(bm_valid), .wr_data(bm_wr_data), .nack_after(1'b0), .cmd_ready(bm_ready_16), .rd_data(), .error(), .error_code(bm_ec_16), .scl(bm_scl_16), .sda(bm_sda_16));
+    i2c_master #(.SCL_LOW_CYCLES(31), .SCL_HIGH_CYCLES(31), .TIMEOUT_CYCLES(1023)) u_bm_31 (.clk(clk), .rst_n_sync(rst_n), .cmd(bm_cmd), .cmd_valid(bm_valid), .wr_data(bm_wr_data), .nack_after(1'b0), .cmd_ready(bm_ready_31), .rd_data(), .error(), .error_code(bm_ec_31), .scl(bm_scl_31), .sda(bm_sda_31));
+    i2c_master #(.SCL_LOW_CYCLES(32), .SCL_HIGH_CYCLES(32), .TIMEOUT_CYCLES(1024)) u_bm_32 (.clk(clk), .rst_n_sync(rst_n), .cmd(bm_cmd), .cmd_valid(bm_valid), .wr_data(bm_wr_data), .nack_after(1'b0), .cmd_ready(bm_ready_32), .rd_data(), .error(), .error_code(bm_ec_32), .scl(bm_scl_32), .sda(bm_sda_32));
+
     // 仿真时钟：10 ns 周期
     initial clk = 1'b0;
     always #5 clk = ~clk;
@@ -375,6 +403,7 @@ module tb_i2c_master;
     reg [7:0] rd;
     reg [1:0] ec2;
     reg [7:0] rd2;
+    integer   bm_wcnt;
 
     initial begin
         checks       = 0;
@@ -400,6 +429,9 @@ module tb_i2c_master;
         cmd2         = 3'd0;
         wr_data2     = 8'h00;
         nack_after2  = 1'b0;
+        bm_cmd       = 3'd0;
+        bm_valid     = 1'b0;
+        bm_wr_data   = 8'h00;
         cmd_valid2   = 1'b0;
         clk          = 1'b0;
         rst_n        = 1'b0;
@@ -615,6 +647,109 @@ module tb_i2c_master;
         check_eq(ec, 2'd3, "T11 WRITE after reset -> error_code=3 (transaction state cleared)");
         check_true((scl === 1'b1) && (sda === 1'b1),
                    "T11 bus still released after aborted command");
+
+        //---------------------------------------------------------------------
+        // T12: 边界矩阵测试（7, 8, 15, 16, 31, 32 时钟周期参数）
+        // 验证 2 的幂次相邻值与位宽边界参数下的 I2C 控制器行为
+        //---------------------------------------------------------------------
+        $display("--- T12: Boundary matrix instances check ---");
+        check_true(bm_ready_7  === 1'b1, "T12 bm_7 ready");
+        check_true(bm_ready_8  === 1'b1, "T12 bm_8 ready");
+        check_true(bm_ready_15 === 1'b1, "T12 bm_15 ready");
+        check_true(bm_ready_16 === 1'b1, "T12 bm_16 ready");
+        check_true(bm_ready_31 === 1'b1, "T12 bm_31 ready");
+        check_true(bm_ready_32 === 1'b1, "T12 bm_32 ready");
+
+        // 步骤 1: 正常 START -> STOP 流程
+        @(negedge clk);
+        bm_cmd   = CMD_START;
+        bm_valid = 1'b1;
+        @(negedge clk);
+        bm_valid = 1'b0;
+        @(negedge clk);
+
+        bm_wcnt = 0;
+        while (!(bm_ready_7 && bm_ready_8 && bm_ready_15 && bm_ready_16 && bm_ready_31 && bm_ready_32) && bm_wcnt < 5000) begin
+            @(negedge clk);
+            bm_wcnt = bm_wcnt + 1;
+        end
+        check_true(bm_wcnt < 5000, "T12 START completed within timeout");
+        check_eq(bm_ec_7,  2'd0, "T12 bm_7 START error_code=0");
+        check_eq(bm_ec_8,  2'd0, "T12 bm_8 START error_code=0");
+        check_eq(bm_ec_15, 2'd0, "T12 bm_15 START error_code=0");
+        check_eq(bm_ec_16, 2'd0, "T12 bm_16 START error_code=0");
+        check_eq(bm_ec_31, 2'd0, "T12 bm_31 START error_code=0");
+        check_eq(bm_ec_32, 2'd0, "T12 bm_32 START error_code=0");
+
+        @(negedge clk);
+        bm_cmd   = CMD_STOP;
+        bm_valid = 1'b1;
+        @(negedge clk);
+        bm_valid = 1'b0;
+        @(negedge clk);
+
+        bm_wcnt = 0;
+        while (!(bm_ready_7 && bm_ready_8 && bm_ready_15 && bm_ready_16 && bm_ready_31 && bm_ready_32) && bm_wcnt < 5000) begin
+            @(negedge clk);
+            bm_wcnt = bm_wcnt + 1;
+        end
+        check_true(bm_wcnt < 5000, "T12 STOP completed within timeout");
+        check_eq(bm_ec_7,  2'd0, "T12 bm_7 STOP error_code=0");
+        check_eq(bm_ec_8,  2'd0, "T12 bm_8 STOP error_code=0");
+        check_eq(bm_ec_15, 2'd0, "T12 bm_15 STOP error_code=0");
+        check_eq(bm_ec_16, 2'd0, "T12 bm_16 STOP error_code=0");
+        check_eq(bm_ec_31, 2'd0, "T12 bm_31 STOP error_code=0");
+        check_eq(bm_ec_32, 2'd0, "T12 bm_32 STOP error_code=0");
+        check_true((bm_scl_7 === 1'b1)  && (bm_sda_7 === 1'b1),  "T12 bm_7 bus released after STOP");
+        check_true((bm_scl_8 === 1'b1)  && (bm_sda_8 === 1'b1),  "T12 bm_8 bus released after STOP");
+        check_true((bm_scl_15 === 1'b1) && (bm_sda_15 === 1'b1), "T12 bm_15 bus released after STOP");
+        check_true((bm_scl_16 === 1'b1) && (bm_sda_16 === 1'b1), "T12 bm_16 bus released after STOP");
+        check_true((bm_scl_31 === 1'b1) && (bm_sda_31 === 1'b1), "T12 bm_31 bus released after STOP");
+        check_true((bm_scl_32 === 1'b1) && (bm_sda_32 === 1'b1), "T12 bm_32 bus released after STOP");
+
+        // 步骤 2: START -> WRITE (无从机拉低产生 NACK) -> 自动补发 STOP 与释放总线
+        @(negedge clk);
+        bm_cmd   = CMD_START;
+        bm_valid = 1'b1;
+        @(negedge clk);
+        bm_valid = 1'b0;
+        @(negedge clk);
+
+        bm_wcnt = 0;
+        while (!(bm_ready_7 && bm_ready_8 && bm_ready_15 && bm_ready_16 && bm_ready_31 && bm_ready_32) && bm_wcnt < 5000) begin
+            @(negedge clk);
+            bm_wcnt = bm_wcnt + 1;
+        end
+        check_true(bm_wcnt < 5000, "T12 START 2 completed within timeout");
+
+        @(negedge clk);
+        bm_cmd     = CMD_WRITE;
+        bm_wr_data = 8'hA5;
+        bm_valid   = 1'b1;
+        @(negedge clk);
+        bm_valid   = 1'b0;
+        @(negedge clk);
+
+        bm_wcnt = 0;
+        while (!(bm_ready_7 && bm_ready_8 && bm_ready_15 && bm_ready_16 && bm_ready_31 && bm_ready_32) && bm_wcnt < 10000) begin
+            @(negedge clk);
+            bm_wcnt = bm_wcnt + 1;
+        end
+        check_true(bm_wcnt < 10000, "T12 WRITE NACK completed within timeout");
+        check_eq(bm_ec_7,  2'd1, "T12 bm_7 WRITE NACK error_code=1");
+        check_eq(bm_ec_8,  2'd1, "T12 bm_8 WRITE NACK error_code=1");
+        check_eq(bm_ec_15, 2'd1, "T12 bm_15 WRITE NACK error_code=1");
+        check_eq(bm_ec_16, 2'd1, "T12 bm_16 WRITE NACK error_code=1");
+        check_eq(bm_ec_31, 2'd1, "T12 bm_31 WRITE NACK error_code=1");
+        check_eq(bm_ec_32, 2'd1, "T12 bm_32 WRITE NACK error_code=1");
+
+        // 验证 NACK 自动补发 STOP 后总线被彻底释放（上拉为高）
+        check_true((bm_scl_7 === 1'b1)  && (bm_sda_7 === 1'b1),  "T12 bm_7 bus released after NACK auto-stop");
+        check_true((bm_scl_8 === 1'b1)  && (bm_sda_8 === 1'b1),  "T12 bm_8 bus released after NACK auto-stop");
+        check_true((bm_scl_15 === 1'b1) && (bm_sda_15 === 1'b1), "T12 bm_15 bus released after NACK auto-stop");
+        check_true((bm_scl_16 === 1'b1) && (bm_sda_16 === 1'b1), "T12 bm_16 bus released after NACK auto-stop");
+        check_true((bm_scl_31 === 1'b1) && (bm_sda_31 === 1'b1), "T12 bm_31 bus released after NACK auto-stop");
+        check_true((bm_scl_32 === 1'b1) && (bm_sda_32 === 1'b1), "T12 bm_32 bus released after NACK auto-stop");
 
         //---------------------------------------------------------------------
         // 汇总

@@ -288,9 +288,9 @@ P8 已有独立增益资源记录：run `20260917-000243-066eda17`，43 Slice、
 
 音量样点保持围绕 2048 缩放、level=0 输出 2048、level=7 为现有约 7/8 增益。原 shift/add 量化与理想乘除可能差 1 LSB；保持旧 RTL 的逐值语义，不擅自换成“更精确”的算法。
 
-不得为了“测满资源”新增 KEEP、假硬件消费者或猜测的压力门限；也不能用常量 volume 被综合裁剪后的结果声称动态音量已预留充分。若没有真实消费者规格，音量余量保持 ESTIMATED / NEEDS_INTEGRATION_MEASUREMENT。
+不得为了“测满资源”新增 KEEP、假硬件消费者或猜测的压力门限；也不能用常量 volume 被综合裁剪后的结果声称动态音量已预留充分。若没有真实消费者规格，音量余量保持 **ESTIMATED / 待真实集成测量**。
 
-本计划可交付“优化达到目标、音量预算待真实集成确认”，不能交付“完整压力音量已可用”。
+当前实测空闲 204 Slices（空闲率 28.9%）是确定的芯片物理空闲事实，但后续恢复压力数据链、增加多路映射控制逻辑以及跨层逻辑打包产生的未知开销，不能在缺少消费者的前提下宣布为已确认。本计划交付“资源优化超额达成目标、音量预算待真实集成测量确认”，不交付“完整压力音量已可用”。
 
 ## 10. O6：合入、回归与交付
 
@@ -303,18 +303,21 @@ P8 已有独立增益资源记录：run `20260917-000243-066eda17`，43 Slice、
 
 功能/面积通过不构成自动烧录授权。本轮不需要生成 bitstream 证明面积；未来确需 bitstream 时也必须先 check 再 build，仍不自动 program。
 
-### 10.1 最终统一验收报告（基于 commit a69d87e5）
+### 10.1 最终统一验收报告
 
-针对全部采纳的优化（O0 仿真网与基线、O1 Area/1 策略、O2a～O2d 计数器位宽收窄），在当前工作区提交 `a69d87e5` 下执行了最终统一回归验收：
+针对全部采纳的优化（O0 仿真网与基线、O1 Area/1 策略、O2a～O2d 计数器位宽收窄），执行了最终统一回归验收（覆盖 4 项审阅改进项）：
 
-- **全量 Verify 结果**：Run ID `verify-20260922-101116-6ec1bca8`（对应综合 Run ID `20260922-101117-56338d68`）
+- **全量 Verify 结果**：Run ID `verify-20260922-105043-dd1962b6`（对应综合 Run ID `20260922-105043-eb25ecd1`）
   - 配置与静态检查：PASS（Verilog-2001，单时钟域 12 MHz，无虚假约束）
   - 综合结果：PASS（0 错误，167 条窄口径人工审阅 warning 严格命中，0 未预期 warning，0 锁存器）
-  - 仿真回归：**37 项 enabled 仿真全部 PASS**（含 OLED 专项、I²C/ADS/MCP 通信、DDS 发声与滤波去抖）
+  - 仿真回归：**38 项 enabled 仿真全部 PASS**：
+    - 补齐 OLED 硬件延时分支测试（`oled_hw_delay`，`SIM_FAST_INIT=0`，严格验证 262,144 周期 = 21.845 ms $\ge 20$ ms 且计数饱和不回绕）；
+    - 补齐计数器位宽边界矩阵与行为测试（`i2c_master` 6 组边界实例覆盖 7/8/15/16/31/32 与超时看门狗；`ads1115_ctrl` wait_cnt 24,000 周期饱和监视；`sensor_code_filter` 12 组 $2^N$ 邻近阈值实例；`dds_sine_generator` 8 组分频边界实例与采样沿前后切音）；
+    - 强化集成顶层测试（`tb_finger_piano_stage2_oled_top`：DAC 逐样点评分覆盖静音中点 12'h800 与 C4 正弦波 [256, 3840]；ADC 三通道完整帧连续性与无误检查；在活跃 I²C 传输 ACK 槽精确注入 NACK，严格断言 `oled_error=1`、`init_done=0`、总线拉高释放，以及 ADC/DAC 在 OLED 故障期间持续无差错正常工作）。
   - 门禁判定：`IMPLEMENT_ALLOWED`（`expectImplementationBlocked=false`）
   - 总体判定：**PASS**
 
-- **全流程布局布线实现 (Implement)**：Run ID `20260922-101745-004b074b`
+- **全流程布局布线实现 (Implement)**：Run ID `20260922-105740-6421d710`
   - 目标器件：`xc3s50an-4-tqg144`
   - occupied Slices: **500 / 704 (71.0%)**（相对 O0 基线 702 净省 **202 Slices**，空闲 **204 Slices**，超额满足 $\ge 144$ 余量）
   - 4-input Logic LUTs: **806 / 1,408 (57.2%)**（相对 O0 基线 1,167 净省 **361 LUTs**）
@@ -330,7 +333,11 @@ P8 已有独立增益资源记录：run `20260917-000243-066eda17`，43 Slice、
     - Minimum Period: **13.442 ns**（对应最高频率 **74.394 MHz**）
     - 时序违例数：0 timing errors / 0 failing endpoints
   - 工具告警审计：
-    - MAP: 17 条 warnings（16 条 `PhysDesignRules:812` 为 ROM 端口高位常开未接；1 条 `PhysDesignRules:781` 为 G4 引脚 PULLUP 与 IBUF 组合特性，均属硬件预期）
+    - MAP: 17 条 warnings：
+      - 16 条 `PhysDesignRules:812`：对应两块 OLED BRAM ROM（bitmap 与 fixed）在 RAMB16BWE 原语上未连接的 DIA0～DIA7 dangling input 引脚，只读 ROM 配置下的正常硬件特征；
+      - 1 条 `Pack:266`：`WARNING:Pack:266 - The function generator u_piano/u_sys/GEN_DAC_ON.u_dac_pipeline/GEN_PIPE.u_dac/GEN_DAC.u_i2c/xact_and0000 failed to merge with F5 multiplexer u_piano/u_sys/GEN_DAC_ON.u_dac_pipeline/GEN_PIPE.u_dac/GEN_DAC.u_i2c/xact_not000154_f5. There is a conflict for the FXMUX. The design will exhibit suboptimal timing.`
+        - 技术影响：产生于 MCP4725 DAC I²C 控制器的状态组合逻辑，由于 FXMUX 资源竞争导致该逻辑门未能与 F5 MUX 合并进同一个切片；
+        - 时序依据：查阅 TRCE 布局布线后静态时序报告（`timing.twr`），12 MHz 约束周期 83.333 ns 下最差 Setup Slack 达 **+69.888 ns**（报告 Minimum Period 13.442 ns，Fmax **74.394 MHz**），0 timing errors。时序余量超过时钟周期的 83%，证明该 FXMUX 未合并对 12 MHz 系统的时序收敛与硬件可靠性无实质劣化影响。
     - PAR: 0 warnings, 0 errors
   - 硬件烧录：NOT_RUN（受控未请求，无自动烧录）
 
@@ -394,8 +401,8 @@ pwsh -NoProfile -File .\ise.ps1 build -Project finger_piano -Stage implement
 | O2d 传感器滤波计数器 | COMPLETED | Implement `20260922-000818-fcaf41fa` (500 Slices, -8 Slices), commit `a69d87e` |
 | O3 DDS BRAM | DEFERRED | 因 O2 已释放 204 Slices（目标 $\ge 144$ 已超额达成），按计划第 7.2 节保留第 3 块 BRAM |
 | O4 OLED 局部优化 | NOT_NEEDED | 资源指标已充分满足余量需求，无须改动稳定运行的 OLED 单流引擎 |
-| O5 音量预算 | AUDITED / HEADROOM_CONFIRMED | 当前空闲 204 Slices，远超 P8 standalone 增益参考预算（~43 Slices），已预留充足集成余量 |
-| O6 合入与最终验收 | COMPLETED | 统一验收 verify `verify-20260922-101116-6ec1bca8` (37/37 PASS), implement `20260922-101745-004b074b` (500 Slices, +69.888ns Slack), 保持主工程 0-diff |
+| O5 音量预算 | ESTIMATED / 待真实集成测量 | 当前测得物理空闲 204 Slices（空闲率 28.9%），满足 $\ge 144$ 物理余量指标；但真实压力链恢复、压力-音量映射及跨层打包开销仍待后续接入真实消费者后实测确认 |
+| O6 合入与最终验收 | COMPLETED | 统一验收 verify `verify-20260922-105043-dd1962b6`（38/38 PASS），implement `20260922-105740-6421d710`（500 Slices, +69.888ns Slack, Fmax 74.394 MHz），保持主工程 0-diff |
 
 ## 13. 参考资料
 

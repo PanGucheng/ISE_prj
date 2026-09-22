@@ -626,6 +626,18 @@
       "timeoutSeconds": 600,
       "passPattern": "TB_FINGER_PIANO_STAGE2_OLED_TOP: PASS",
       "failPattern": "TB_FINGER_PIANO_STAGE2_OLED_TOP: FAIL"
+    },
+    {
+      "name": "oled_hw_delay",
+      "top": "tb_oled_hw_delay",
+      "sources": [
+        "sim/models/ramb16_s9_model.v",
+        "sim/tb_oled_hw_delay.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_OLED_HW_DELAY: PASS",
+      "failPattern": "TB_OLED_HW_DELAY: FAIL"
     }
   ],
   "verification": {

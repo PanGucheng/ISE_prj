@@ -73,6 +73,28 @@ module tb_ads1115_ctrl;
         .error_code       (err_code)
     );
 
+    // 连续监控 wait_cnt 在 wait_active 期间单调递增并饱和，绝不发生回绕
+    reg [16:0] prev_wcnt = 0;
+    integer wait_wrap_errors = 0;
+    always @(posedge clk) begin
+        if (rst_n && u_dut.GEN_ADC.wait_active) begin
+            if (u_dut.GEN_ADC.wait_timeout) begin
+                // 超时后锁定在 24000 饱和值，绝不递增也不回绕
+                if (u_dut.GEN_ADC.wait_cnt !== 24000) begin
+                    wait_wrap_errors <= wait_wrap_errors + 1;
+                end
+            end else begin
+                // 未超时期间单调递增
+                if (u_dut.GEN_ADC.wait_cnt < prev_wcnt && prev_wcnt < 24000) begin
+                    wait_wrap_errors <= wait_wrap_errors + 1;
+                end
+            end
+            prev_wcnt <= u_dut.GEN_ADC.wait_cnt;
+        end else begin
+            prev_wcnt <= 0;
+        end
+    end
+
     ads1115_ctrl #(
         .ENABLE(1'b0)
     ) u_dut_off (
@@ -292,12 +314,16 @@ module tb_ads1115_ctrl;
         check_eq32(err_code, 3'd0, "T5 error_code cleared by next good frame");
 
         //---------------------------------------------------------------------
-        // 转换永不完成 -> OS 等待超时 -> 4,恢复
+        // 转换永不完成 -> OS 等待超时 -> 4，验证计数器饱和防回绕与恢复
         //---------------------------------------------------------------------
-        $display("T6: conversion never done -> wait timeout error_code 4");
+        $display("T6: conversion never done -> wait timeout error_code 4 & saturation check");
         conv_never_done = 1'b1;
         wait_error(ERROR_GUARD + 40000, ecode);
         check_eq32(ecode, 3'd4, "T6 OS wait timeout mapped to error_code 4");
+
+        // 验证在超时发生期间 wait_cnt 饱和防回绕监视结果
+        check_eq32(wait_wrap_errors, 0, "T6 wait_cnt saturation verified without wrap-around");
+
         conv_never_done = 1'b0;
         wait_valid(FRAME_GUARD);
         check_eq32(err_code, 3'd0, "T6 error_code cleared by next good frame");

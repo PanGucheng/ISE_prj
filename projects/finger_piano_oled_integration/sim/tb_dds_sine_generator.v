@@ -58,6 +58,24 @@ module tb_dds_sine_generator;
     );
 
     //-------------------------------------------------------------------------
+    // 边界矩阵测试实例：覆盖 2 的幂次相邻值与位宽边界参数
+    // SAMPLE_DIV = 7, 8, 15, 16, 31, 32, 63, 64
+    //-------------------------------------------------------------------------
+    wire bm_v7,  bm_v8,  bm_v15, bm_v16;
+    wire bm_v31, bm_v32, bm_v63, bm_v64;
+    wire [11:0] bm_d7,  bm_d8,  bm_d15, bm_d16;
+    wire [11:0] bm_d31, bm_d32, bm_d63, bm_d64;
+
+    dds_sine_generator #(.SYS_CLK_HZ(7000),  .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_7  (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d7),  .dac_code_valid(bm_v7));
+    dds_sine_generator #(.SYS_CLK_HZ(8000),  .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_8  (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d8),  .dac_code_valid(bm_v8));
+    dds_sine_generator #(.SYS_CLK_HZ(15000), .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_15 (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d15), .dac_code_valid(bm_v15));
+    dds_sine_generator #(.SYS_CLK_HZ(16000), .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_16 (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d16), .dac_code_valid(bm_v16));
+    dds_sine_generator #(.SYS_CLK_HZ(31000), .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_31 (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d31), .dac_code_valid(bm_v31));
+    dds_sine_generator #(.SYS_CLK_HZ(32000), .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_32 (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d32), .dac_code_valid(bm_v32));
+    dds_sine_generator #(.SYS_CLK_HZ(63000), .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_63 (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d63), .dac_code_valid(bm_v63));
+    dds_sine_generator #(.SYS_CLK_HZ(64000), .SAMPLE_RATE_HZ(1000), .ENABLE(TB_ENABLE)) u_bm_dds_64 (.clk(clk), .rst_n_sync(rst_n), .note_code(note_code), .dac_code(bm_d64), .dac_code_valid(bm_v64));
+
+    //-------------------------------------------------------------------------
     // 全局范围/X 监视(§34):任何使能采样期间不得越界或为 X
     //-------------------------------------------------------------------------
     integer range_bad;
@@ -240,6 +258,68 @@ module tb_dds_sine_generator;
     endtask
 
     //-------------------------------------------------------------------------
+    // 边界矩阵周期检查任务：测量连续 3 个周期的间隔
+    //-------------------------------------------------------------------------
+    task check_bm_interval;
+        input integer exp_div;
+        input integer inst_id;
+        integer c, count;
+        reg v;
+        begin
+            // 等待第一个 valid
+            c = 0;
+            v = 1'b0;
+            while (!v && c < 500) begin
+                @(posedge clk);
+                case (inst_id)
+                    7:  v = bm_v7;
+                    8:  v = bm_v8;
+                    15: v = bm_v15;
+                    16: v = bm_v16;
+                    31: v = bm_v31;
+                    32: v = bm_v32;
+                    63: v = bm_v63;
+                    64: v = bm_v64;
+                    default: v = 1'b0;
+                endcase
+                c = c + 1;
+            end
+            // 连续测量 3 个周期
+            count = 0;
+            while (count < 3) begin
+                c = 0;
+                @(posedge clk);
+                v = 1'b0;
+                while (!v && c < exp_div * 3) begin
+                    case (inst_id)
+                        7:  v = bm_v7;
+                        8:  v = bm_v8;
+                        15: v = bm_v15;
+                        16: v = bm_v16;
+                        31: v = bm_v31;
+                        32: v = bm_v32;
+                        63: v = bm_v63;
+                        64: v = bm_v64;
+                        default: v = 1'b0;
+                    endcase
+                    if (!v) begin
+                        @(posedge clk);
+                        c = c + 1;
+                    end
+                end
+                checks = checks + 1;
+                if (c + 1 !== exp_div) begin
+                    errors = errors + 1;
+                    $display("FAIL: BM inst %0d interval: got %0d expected %0d", inst_id, c + 1, exp_div);
+                end else begin
+                    $display("  ok: BM inst %0d interval == %0d clk", inst_id, exp_div);
+                end
+                count = count + 1;
+            end
+        end
+    endtask
+
+    //-------------------------------------------------------------------------
     // 主流程
     //-------------------------------------------------------------------------
     initial clk = 1'b0;
@@ -344,6 +424,51 @@ module tb_dds_sine_generator;
         end
 
         //---------------------------------------------------------------------
+        // T4: 相邻采样沿前后切音测试 (计划 §6.3 覆盖要求)
+        // 覆盖:
+        //   1) 采样沿后 1 拍切音
+        //   2) 采样沿同拍切音
+        //   3) 采样沿前 1 拍切音
+        // 断言: 节拍严格不受影响，切音后首个有效样点均为 0x800 中点
+        //---------------------------------------------------------------------
+        $display("T4: note transition around sample edge (1-after, on-edge, 1-before)");
+        // 1) 采样沿后 1 拍切音
+        @(posedge clk);
+        while (dac_code_valid !== 1'b1) @(posedge clk);
+        @(negedge clk);
+        note_code = 3'd2;   // D4
+        tb_exp_note = 3'd2;
+        @(posedge clk);
+        while (dac_code_valid !== 1'b1) @(posedge clk);
+        check_eq12(dac_code, 12'h800, "T4 1-after transition: first sample == 0x800");
+
+        // 2) 采样沿同拍切音
+        @(posedge clk);
+        while (dac_code_valid !== 1'b1) @(posedge clk);
+        note_code = 3'd3;   // E4
+        tb_exp_note = 3'd3;
+        @(posedge clk);
+        while (dac_code_valid !== 1'b1) @(posedge clk);
+        check_eq12(dac_code, 12'h800, "T4 on-edge transition: first sample == 0x800");
+
+        // 3) 采样沿前 1 拍切音
+        // 从当前 valid 起等待 (SAMPLE_DIV - 2) 拍，到达下一个 valid 前 1 拍
+        repeat (SAMPLE_DIV - 2) @(posedge clk);
+        note_code = 3'd4;   // F4
+        tb_exp_note = 3'd4;
+        @(posedge clk);
+        while (dac_code_valid !== 1'b1) @(posedge clk);
+        check_eq12(dac_code, 12'h800, "T4 1-before transition: first sample == 0x800");
+
+        checks = checks + 1;
+        if (bad_interval != 0) begin
+            errors = errors + 1;
+            $display("FAIL: T4 sample cadence disturbed by edge transitions");
+        end else begin
+            $display("  ok: T4 cadence untouched across all edge transitions");
+        end
+
+        //---------------------------------------------------------------------
         // T5(P3 Commit D):七音全部实测(仅快速模式;§30/§31/§32/§33)
         //---------------------------------------------------------------------
         if (TB_SYS_CLK_HZ == 1000000) begin : SEVEN_NOTES
@@ -360,6 +485,22 @@ module tb_dds_sine_generator;
             note_code = 3'd0;
             collect_valids(5, s_first, s_last);
             check_eq12(s_first, 12'h800, "T5 back to mute sample == 0x800");
+        end
+
+        //---------------------------------------------------------------------
+        // T6: 边界矩阵测试 (7, 8, 15, 16, 31, 32, 63, 64 周期参数)
+        // 验证 2 的幂次相邻值与位宽边界参数下的采样分频精确性
+        //---------------------------------------------------------------------
+        if (TB_SYS_CLK_HZ == 1000000) begin : BM_CHECK
+            $display("T6: boundary matrix interval checks (7, 8, 15, 16, 31, 32, 63, 64)");
+            check_bm_interval(7,  7);
+            check_bm_interval(8,  8);
+            check_bm_interval(15, 15);
+            check_bm_interval(16, 16);
+            check_bm_interval(31, 31);
+            check_bm_interval(32, 32);
+            check_bm_interval(63, 63);
+            check_bm_interval(64, 64);
         end
 
         //---------------------------------------------------------------------
