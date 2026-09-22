@@ -360,80 +360,124 @@ module tb_finger_piano_stage2_oled_top;
         // 5. 错误隔离测试：在真实 OLED I2C 事务中注入 NACK
         $display("[TB] Testing OLED error isolation with REAL NACK injection during active transaction...");
         
-        // 触发一次新的音符切换 (切到 E4 / 3'b011)，使 OLED 控制器启动新的刷新事务
-        sensor_async = 3'b011;
-        repeat (STABLE_CYC + 200) @(posedge clk);
+        fork
+            begin : RX_STAGE5
+                integer rx_len;
+                integer li;
 
-        // 等待 OLED 控制器离开 IDLE 并产生 SCL 活跃时钟 (有界循环)
-        begin : WAIT_OLED_BUSY
-            integer w_cnt;
-            w_cnt = 0;
-            while (oled_scl !== 1'b0 && w_cnt < 200000) begin
-                @(posedge clk);
-                w_cnt = w_cnt + 1;
-            end
-            if (oled_scl === 1'b0) begin
-                $display("[TB] OLED I2C bus active transmission detected (SCL low). Injecting NACK now...");
-            end else begin
-                $display("[TB] ERROR: Timeout waiting for OLED I2C transaction to start!");
-                errors = errors + 1;
-            end
-        end
-
-        // 注入 NACK，并精确统计 SCL 边沿与等待 oled_error (有界循环)
-        oled_inject_nack = 1'b1;
-        nack_scl_edges   = 0;
-        begin : WAIT_NACK_ERR
-            integer n_cnt;
-            reg last_scl;
-            n_cnt = 0;
-            last_scl = oled_scl;
-            while (u_top.u_oled_ctrl.oled_error !== 1'b1 && n_cnt < 200000) begin
-                @(posedge clk);
-                if (last_scl === 1'b1 && oled_scl === 1'b0) begin
-                    nack_scl_edges = nack_scl_edges + 1;
+                // 5.1 接收音符切换产生的 NOTE=3
+                recv_line(rx_len);
+                $write("[TB] Received UART message (%0d chars): \"", rx_len);
+                for (li = 0; li < rx_len; li = li + 1) begin
+                    if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
                 end
-                last_scl = oled_scl;
-                n_cnt = n_cnt + 1;
+                $display("\"");
+                if (rx_len !== 8 || line_buf[0] !== "N" || line_buf[5] !== "3") begin
+                    $display("[TB] ERROR: Expected NOTE=3\\r\\n, got rx_len=%0d", rx_len);
+                    errors = errors + 1;
+                end else begin
+                    $display("[TB] NOTE=3\\r\\n verified over UART (P110)!");
+                end
+
+                // 5.2 接收 NACK 故障停机报文 OLED NACK
+                recv_line(rx_len);
+                $write("[TB] Received UART message (%0d chars): \"", rx_len);
+                for (li = 0; li < rx_len; li = li + 1) begin
+                    if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
+                end
+                $display("\"");
+                if (rx_len !== 11 || line_buf[0] !== "O" || line_buf[5] !== "N" || line_buf[8] !== "K") begin
+                    $display("[TB] ERROR: Expected OLED NACK\\r\\n, got rx_len=%0d", rx_len);
+                    errors = errors + 1;
+                end else begin
+                    $display("[TB] OLED NACK\\r\\n verified over UART (P110)!");
+                end
             end
-            oled_inject_nack = 1'b0;
 
-            if (u_top.u_oled_ctrl.oled_error === 1'b1) begin
-                $display("[TB] oled_error asserted as expected! SCL falling edges during injection=%0d", nack_scl_edges);
-            end else begin
-                $display("[TB] ERROR: Timeout waiting for oled_error upon NACK! edges=%0d, seq_state=%0d",
-                         nack_scl_edges, u_top.u_oled_ctrl.seq_state);
-                errors = errors + 1;
+            begin : STIM_STAGE5
+                // 触发一次新的音符切换 (切到 E4 / 3'b011)，使 OLED 控制器启动新的刷新事务
+                sensor_async = 3'b011;
+                repeat (STABLE_CYC + 200) @(posedge clk);
+
+                // 等待 OLED 控制器离开 IDLE 并产生 SCL 活跃时钟 (有界循环)
+                begin : WAIT_OLED_BUSY
+                    integer w_cnt;
+                    w_cnt = 0;
+                    while (oled_scl !== 1'b0 && w_cnt < 200000) begin
+                        @(posedge clk);
+                        w_cnt = w_cnt + 1;
+                    end
+                    if (oled_scl === 1'b0) begin
+                        $display("[TB] OLED I2C bus active transmission detected (SCL low). Injecting NACK now...");
+                    end else begin
+                        $display("[TB] ERROR: Timeout waiting for OLED I2C transaction to start!");
+                        errors = errors + 1;
+                    end
+                end
+
+                // 注入 NACK，并精确统计 SCL 边沿与等待 oled_error (有界循环)
+                oled_inject_nack = 1'b1;
+                nack_scl_edges   = 0;
+                begin : WAIT_NACK_ERR
+                    integer n_cnt;
+                    reg last_scl;
+                    n_cnt = 0;
+                    last_scl = oled_scl;
+                    while (u_top.u_oled_ctrl.oled_error !== 1'b1 && n_cnt < 200000) begin
+                        @(posedge clk);
+                        if (last_scl === 1'b1 && oled_scl === 1'b0) begin
+                            nack_scl_edges = nack_scl_edges + 1;
+                        end
+                        last_scl = oled_scl;
+                        n_cnt = n_cnt + 1;
+                    end
+                    oled_inject_nack = 1'b0;
+
+                    if (u_top.u_oled_ctrl.oled_error === 1'b1) begin
+                        $display("[TB] oled_error asserted as expected! SCL falling edges during injection=%0d", nack_scl_edges);
+                    end else begin
+                        $display("[TB] ERROR: Timeout waiting for oled_error upon NACK! edges=%0d, seq_state=%0d",
+                                 nack_scl_edges, u_top.u_oled_ctrl.seq_state);
+                        errors = errors + 1;
+                    end
+                end
+
+                // 严格断言故障注入生效且硬件保护动作完备
+                if (nack_scl_edges == 0) begin
+                    $display("[TB] ERROR: NACK injection occurred while SCL had 0 edges (no actual transaction)!");
+                    errors = errors + 1;
+                end else begin
+                    $display("[TB] NACK injected during active transaction confirmed (SCL edges=%0d).", nack_scl_edges);
+                end
+
+                if (u_top.u_oled_ctrl.oled_error !== 1'b1) begin
+                    $display("[TB] ERROR: u_oled_ctrl.oled_error is not 1!");
+                    errors = errors + 1;
+                end
+
+                if (dbg_unused !== 1'b1) begin
+                    $display("[TB] ERROR: dbg_unused (P113, oled_error) is not 1 during OLED error!");
+                    errors = errors + 1;
+                end else begin
+                    $display("[TB] dbg_unused (P113, oled_error) == 1 during OLED error verified.");
+                end
+
+                if (u_top.u_oled_ctrl.init_done !== 1'b0) begin
+                    $display("[TB] ERROR: u_oled_ctrl.init_done is not cleared to 0!");
+                    errors = errors + 1;
+                end
+
+                // 等待 STOP 完成，检查总线释放回高阻 (外部上拉为 1'b1)
+                repeat (100) @(posedge clk);
+                if (oled_scl !== 1'b1 || oled_sda !== 1'b1) begin
+                    $display("[TB] ERROR: OLED I2C bus not cleanly released after error: SCL=%b, SDA=%b",
+                             oled_scl, oled_sda);
+                    errors = errors + 1;
+                end else begin
+                    $display("[TB] OLED I2C bus cleanly released to high-Z after error.");
+                end
             end
-        end
-
-        // 严格断言故障注入生效且硬件保护动作完备
-        if (nack_scl_edges == 0) begin
-            $display("[TB] ERROR: NACK injection occurred while SCL had 0 edges (no actual transaction)!");
-            errors = errors + 1;
-        end else begin
-            $display("[TB] NACK injected during active transaction confirmed (SCL edges=%0d).", nack_scl_edges);
-        end
-
-        if (u_top.u_oled_ctrl.oled_error !== 1'b1) begin
-            $display("[TB] ERROR: u_oled_ctrl.oled_error is not 1!");
-            errors = errors + 1;
-        end
-
-        if (u_top.u_oled_ctrl.init_done !== 1'b0) begin
-            $display("[TB] ERROR: u_oled_ctrl.init_done is not cleared to 0!");
-            errors = errors + 1;
-        end
-
-        // 等待 STOP 完成，检查总线释放回高阻 (外部上拉为 1'b1)
-        repeat (100) @(posedge clk);
-        if (oled_scl !== 1'b1 || oled_sda !== 1'b1) begin
-            $display("[TB] ERROR: OLED I2C bus not cleanly released after error: SCL=%b, SDA=%b",
-                     oled_scl, oled_sda);
-            errors = errors + 1;
-        end else begin
-            $display("[TB] OLED I2C bus cleanly released to high-Z after error.");
-        end
+        join
 
         // 6. 确认在 OLED 严重停机故障期间，ADC 和 DAC 持续完全不受干扰地正常运行
         $display("[TB] Verifying ADC and DAC continuous operation during OLED error state...");
@@ -484,40 +528,64 @@ module tb_finger_piano_stage2_oled_top;
         rst_n = 1'b1;
         repeat (100) @(posedge clk);
 
-        // 8. 验证 ADS1115 地址 NACK 时 UART 串口输出 "ADC ERROR CODE=1\r\n"
-        $display("[TB] Testing ADC address NACK -> UART error reporting...");
+        // 8. 验证串口多通道诊断输出：READY, OLED OK, ADC ERR=1
+        $display("[TB] Testing UART diagnostics: READY, OLED OK, and ADC ERR=1...");
         begin : TEST_ADC_UART
             integer rx_len;
             integer li;
+
+            // 8.1 接收复位后启动标语 READY
+            recv_line(rx_len);
+            $write("[TB] Received UART message (%0d chars): \"", rx_len);
+            for (li = 0; li < rx_len; li = li + 1) begin
+                if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
+            end
+            $display("\"");
+            if (rx_len !== 7 || line_buf[0] !== "R" || line_buf[4] !== "Y") begin
+                $display("[TB] ERROR: Expected READY\\r\\n, got rx_len=%0d", rx_len);
+                errors = errors + 1;
+            end else begin
+                $display("[TB] READY\\r\\n verified over UART (P110)!");
+            end
+
+            // 8.2 接收复位后恢复当前按键音符报文 NOTE=3
+            recv_line(rx_len);
+            $write("[TB] Received UART message (%0d chars): \"", rx_len);
+            for (li = 0; li < rx_len; li = li + 1) begin
+                if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
+            end
+            $display("\"");
+            if (rx_len !== 8 || line_buf[0] !== "N" || line_buf[5] !== "3") begin
+                $display("[TB] ERROR: Expected NOTE=3\\r\\n, got rx_len=%0d", rx_len);
+                errors = errors + 1;
+            end else begin
+                $display("[TB] NOTE=3\\r\\n verified over UART (P110)!");
+            end
+
+            // 8.3 注入 ADC NACK 并接收 ADC ERR=1
             adc_nack_addr = 1'b1;
-            // 等待并接收 UART 行
             recv_line(rx_len);
             adc_nack_addr = 1'b0;
             $write("[TB] Received UART message (%0d chars): \"", rx_len);
             for (li = 0; li < rx_len; li = li + 1) begin
-                if (line_buf[li] >= 32 && line_buf[li] <= 126)
-                    $write("%c", line_buf[li]);
+                if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
             end
             $display("\"");
-            if (rx_len !== 18) begin
-                $display("[TB] ERROR: Expected line length 18, got %0d", rx_len);
-                errors = errors + 1;
-            end else if (line_buf[0] !== "A" || line_buf[1] !== "D" || line_buf[2] !== "C" ||
-                         line_buf[14] !== "=" || line_buf[15] !== "1" ||
-                         line_buf[16] !== 8'h0D || line_buf[17] !== 8'h0A) begin
-                $display("[TB] ERROR: UART message content mismatch!");
+            if (rx_len !== 11 || line_buf[0] !== "A" || line_buf[1] !== "D" || line_buf[2] !== "C" ||
+                line_buf[7] !== "=" || line_buf[8] !== "1") begin
+                $display("[TB] ERROR: Expected ADC ERR=1\\r\\n, got rx_len=%0d", rx_len);
                 errors = errors + 1;
             end else begin
-                $display("[TB] ADC ERROR CODE=1\\r\\n verified over UART (P110)!");
+                $display("[TB] ADC ERR=1\\r\\n verified over UART (P110)!");
             end
         end
 
         // 9. 检查 dbg_unused 与 dbg_heartbeat 信号
         if (dbg_unused !== 1'b0) begin
-            $display("[TB] ERROR: dbg_unused (P113) is not 0!");
+            $display("[TB] ERROR: dbg_unused (P113, oled_error) is not 0!");
             errors = errors + 1;
         end else begin
-            $display("[TB] dbg_unused (P113) == 0 verified.");
+            $display("[TB] dbg_unused (P113, oled_error) == 0 verified.");
         end
 
         // 结果判定

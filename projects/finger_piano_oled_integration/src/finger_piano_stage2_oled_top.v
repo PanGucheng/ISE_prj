@@ -93,8 +93,8 @@ module finger_piano_stage2_oled_top #(
         .i2c_stop_req       (i2c_stop_req),
         .i2c_byte_done      (i2c_byte_done),
         .i2c_ack_error      (i2c_ack_error),
-        .init_done          (),
-        .oled_error         ()
+        .init_done          (oled_init_done),
+        .oled_error         (oled_error)
     );
 
     oled_i2c_write #(
@@ -114,9 +114,9 @@ module finger_piano_stage2_oled_top #(
     );
 
     //-------------------------------------------------------------------------
-    // 4. 心跳方波 (P111) 与安全接地 (P113)
+    // 4. 心跳方波 (P111) 与 OLED 错误指示 (P113)
     //-------------------------------------------------------------------------
-    assign dbg_unused = 1'b0;
+    assign dbg_unused = oled_error;
 
     reg [22:0] heartbeat_cnt;
     always @(posedge clk or negedge rst_n_sync) begin
@@ -132,56 +132,191 @@ module finger_piano_stage2_oled_top #(
     end
 
     //-------------------------------------------------------------------------
-    // 5. UART 错误状态捕获与报文发送状态机 (P110)
+    // 5. UART 全系统多通道诊断日志状态机 (P110, 115200 8N1)
     //-------------------------------------------------------------------------
-    reg        err_pending;
-    reg [2:0]  latched_ecode;
-    reg        err_cleared;
+    localparam [2:0] MSG_NONE      = 3'd0,
+                     MSG_READY     = 3'd1,
+                     MSG_OLED_OK   = 3'd2,
+                     MSG_OLED_NACK = 3'd3,
+                     MSG_ADC_ERR   = 3'd4,
+                     MSG_NOTE      = 3'd5;
 
+    reg [7:0] boot_timer;
+    reg       boot_pending;
+    reg       oled_ok_pending;
+    reg       oled_err_pending;
+    reg       adc_err_pending;
+    reg [2:0] latched_ecode;
+    reg       note_pending;
+    reg [2:0] latched_note;
+    reg [2:0] note_prev;
+
+    reg oled_init_done_d;
+    reg oled_error_d;
+    reg adc_error_d;
+
+    // 状态机声明与寄存器定义
+    localparam [1:0] ST_IDLE = 2'd0,
+                     ST_SEND = 2'd1,
+                     ST_WAIT = 2'd2;
+
+    reg [1:0] tx_fsm;
+    reg [2:0] send_msg_type;
+    reg [3:0] send_msg_len;
+    reg [3:0] char_idx;
+    reg [2:0] send_ecode;
+    reg [2:0] send_note;
+
+    reg [7:0] uart_tx_byte;
+    reg       uart_tx_valid;
+    wire      uart_tx_ready;
+
+    // 事件捕获与边沿检测
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            err_pending   <= 1'b0;
-            latched_ecode <= 3'd0;
-        end else if (piano_adc_error) begin
-            err_pending   <= 1'b1;
-            latched_ecode <= piano_adc_error_code;
-        end else if (err_cleared) begin
-            err_pending   <= 1'b0;
+            boot_timer       <= 8'd0;
+            boot_pending     <= 1'b0;
+            oled_ok_pending  <= 1'b0;
+            oled_err_pending <= 1'b0;
+            adc_err_pending  <= 1'b0;
+            latched_ecode    <= 3'd0;
+            note_pending     <= 1'b0;
+            latched_note     <= 3'd0;
+            note_prev        <= 3'd0;
+            oled_init_done_d <= 1'b0;
+            oled_error_d     <= 1'b0;
+            adc_error_d      <= 1'b0;
+        end else begin
+            oled_init_done_d <= oled_init_done;
+            oled_error_d     <= oled_error;
+            adc_error_d      <= piano_adc_error;
+
+            // 开机上电延迟 200 个时钟周期后发送 READY (确保 TX 引脚处于稳定空闲态)
+            if (boot_timer < 8'd200) begin
+                boot_timer <= boot_timer + 8'd1;
+                if (boot_timer == 8'd199) begin
+                    boot_pending <= 1'b1;
+                end
+            end
+
+            // OLED OK: 上升沿触发
+            if (oled_init_done && !oled_init_done_d) begin
+                oled_ok_pending <= 1'b1;
+            end
+
+            // OLED NACK: 上升沿触发
+            if (oled_error && !oled_error_d) begin
+                oled_err_pending <= 1'b1;
+            end
+
+            // ADC 错误: 上升沿触发
+            if (piano_adc_error && !adc_error_d) begin
+                adc_err_pending <= 1'b1;
+                latched_ecode   <= piano_adc_error_code;
+            end
+
+            // 音符改变: 非 0 且变化
+            if (piano_note_debug != 3'd0 && piano_note_debug != note_prev) begin
+                note_pending <= 1'b1;
+                latched_note <= piano_note_debug;
+                note_prev    <= piano_note_debug;
+            end else if (piano_note_debug == 3'd0) begin
+                note_prev <= 3'd0;
+            end
+
+            // 发送握手清除
+            if (tx_fsm == ST_SEND && char_idx == 4'd0) begin
+                case (send_msg_type)
+                    MSG_READY:     boot_pending     <= 1'b0;
+                    MSG_OLED_OK:   oled_ok_pending  <= 1'b0;
+                    MSG_OLED_NACK: oled_err_pending <= 1'b0;
+                    MSG_ADC_ERR:   adc_err_pending  <= 1'b0;
+                    MSG_NOTE:      note_pending     <= 1'b0;
+                    default: ;
+                endcase
+            end
         end
     end
 
-    localparam [1:0] ST_IDLE = 2'd0;
-    localparam [1:0] ST_SEND = 2'd1;
-    localparam [1:0] ST_WAIT = 2'd2;
-
-    reg [1:0]  tx_fsm;
-    reg [4:0]  char_idx;
-    reg [2:0]  send_ecode;
-    reg [7:0]  uart_tx_byte;
-    reg        uart_tx_valid;
-    wire       uart_tx_ready;
-
     reg [7:0] cur_char;
     always @(*) begin
-        case (char_idx)
-            5'd0:  cur_char = "A";
-            5'd1:  cur_char = "D";
-            5'd2:  cur_char = "C";
-            5'd3:  cur_char = " ";
-            5'd4:  cur_char = "E";
-            5'd5:  cur_char = "R";
-            5'd6:  cur_char = "R";
-            5'd7:  cur_char = "O";
-            5'd8:  cur_char = "R";
-            5'd9:  cur_char = " ";
-            5'd10: cur_char = "C";
-            5'd11: cur_char = "O";
-            5'd12: cur_char = "D";
-            5'd13: cur_char = "E";
-            5'd14: cur_char = "=";
-            5'd15: cur_char = 8'h30 + {5'd0, send_ecode};
-            5'd16: cur_char = 8'h0D; // \r
-            5'd17: cur_char = 8'h0A; // \n
+        case (send_msg_type)
+            MSG_READY: begin
+                case (char_idx)
+                    4'd0:    cur_char = "R";
+                    4'd1:    cur_char = "E";
+                    4'd2:    cur_char = "A";
+                    4'd3:    cur_char = "D";
+                    4'd4:    cur_char = "Y";
+                    4'd5:    cur_char = 8'h0D; // \r
+                    4'd6:    cur_char = 8'h0A; // \n
+                    default: cur_char = " ";
+                endcase
+            end
+
+            MSG_OLED_OK: begin
+                case (char_idx)
+                    4'd0:    cur_char = "O";
+                    4'd1:    cur_char = "L";
+                    4'd2:    cur_char = "E";
+                    4'd3:    cur_char = "D";
+                    4'd4:    cur_char = " ";
+                    4'd5:    cur_char = "O";
+                    4'd6:    cur_char = "K";
+                    4'd7:    cur_char = 8'h0D;
+                    4'd8:    cur_char = 8'h0A;
+                    default: cur_char = " ";
+                endcase
+            end
+
+            MSG_OLED_NACK: begin
+                case (char_idx)
+                    4'd0:    cur_char = "O";
+                    4'd1:    cur_char = "L";
+                    4'd2:    cur_char = "E";
+                    4'd3:    cur_char = "D";
+                    4'd4:    cur_char = " ";
+                    4'd5:    cur_char = "N";
+                    4'd6:    cur_char = "A";
+                    4'd7:    cur_char = "C";
+                    4'd8:    cur_char = "K";
+                    4'd9:    cur_char = 8'h0D;
+                    4'd10:   cur_char = 8'h0A;
+                    default: cur_char = " ";
+                endcase
+            end
+
+            MSG_ADC_ERR: begin
+                case (char_idx)
+                    4'd0:    cur_char = "A";
+                    4'd1:    cur_char = "D";
+                    4'd2:    cur_char = "C";
+                    4'd3:    cur_char = " ";
+                    4'd4:    cur_char = "E";
+                    4'd5:    cur_char = "R";
+                    4'd6:    cur_char = "R";
+                    4'd7:    cur_char = "=";
+                    4'd8:    cur_char = 8'h30 + {5'd0, send_ecode};
+                    4'd9:    cur_char = 8'h0D;
+                    4'd10:   cur_char = 8'h0A;
+                    default: cur_char = " ";
+                endcase
+            end
+
+            MSG_NOTE: begin
+                case (char_idx)
+                    4'd0:    cur_char = "N";
+                    4'd1:    cur_char = "O";
+                    4'd2:    cur_char = "T";
+                    4'd3:    cur_char = "E";
+                    4'd4:    cur_char = "=";
+                    4'd5:    cur_char = 8'h30 + {5'd0, send_note};
+                    4'd6:    cur_char = 8'h0D;
+                    4'd7:    cur_char = 8'h0A;
+                    default: cur_char = " ";
+                endcase
+            end
+
             default: cur_char = " ";
         endcase
     end
@@ -189,22 +324,41 @@ module finger_piano_stage2_oled_top #(
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
             tx_fsm        <= ST_IDLE;
-            char_idx      <= 5'd0;
+            send_msg_type <= MSG_NONE;
+            send_msg_len  <= 4'd0;
+            char_idx      <= 4'd0;
             send_ecode    <= 3'd0;
+            send_note     <= 3'd0;
             uart_tx_byte  <= 8'h00;
             uart_tx_valid <= 1'b0;
-            err_cleared   <= 1'b0;
         end else begin
-            err_cleared   <= 1'b0;
             uart_tx_valid <= 1'b0;
 
             case (tx_fsm)
                 ST_IDLE: begin
-                    char_idx <= 5'd0;
-                    if (err_pending) begin
-                        send_ecode  <= latched_ecode;
-                        err_cleared <= 1'b1;
-                        tx_fsm      <= ST_SEND;
+                    char_idx <= 4'd0;
+                    if (boot_pending) begin
+                        send_msg_type <= MSG_READY;
+                        send_msg_len  <= 4'd6;
+                        tx_fsm        <= ST_SEND;
+                    end else if (oled_err_pending) begin
+                        send_msg_type <= MSG_OLED_NACK;
+                        send_msg_len  <= 4'd10;
+                        tx_fsm        <= ST_SEND;
+                    end else if (oled_ok_pending) begin
+                        send_msg_type <= MSG_OLED_OK;
+                        send_msg_len  <= 4'd8;
+                        tx_fsm        <= ST_SEND;
+                    end else if (adc_err_pending) begin
+                        send_msg_type <= MSG_ADC_ERR;
+                        send_msg_len  <= 4'd10;
+                        send_ecode    <= latched_ecode;
+                        tx_fsm        <= ST_SEND;
+                    end else if (note_pending) begin
+                        send_msg_type <= MSG_NOTE;
+                        send_msg_len  <= 4'd7;
+                        send_note     <= latched_note;
+                        tx_fsm        <= ST_SEND;
                     end
                 end
 
@@ -219,10 +373,10 @@ module finger_piano_stage2_oled_top #(
                 ST_WAIT: begin
                     uart_tx_valid <= 1'b0;
                     if (uart_tx_ready && !uart_tx_valid) begin
-                        if (char_idx == 5'd17) begin
+                        if (char_idx == send_msg_len) begin
                             tx_fsm <= ST_IDLE;
                         end else begin
-                            char_idx <= char_idx + 5'd1;
+                            char_idx <= char_idx + 4'd1;
                             tx_fsm   <= ST_SEND;
                         end
                     end

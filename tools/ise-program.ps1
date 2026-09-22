@@ -1272,9 +1272,25 @@ function Invoke-Program {
     $donePin = $(if ($statusBits.ContainsKey('DONEIN input from Done Pin')) { $statusBits['DONEIN input from Done Pin'] } else { $null })
     $crcError = $(if ($statusBits.ContainsKey('CRC error')) { $statusBits['CRC error'] } else { $null })
 
+    # iMPACT 14.7 can print success even after CRC errors or an all-ones status
+    # read (measured 2026-09-22). Negative evidence must override those markers.
+    # These tests classify the transcript only; they never retry a hardware write.
+    $configurationFailures = [Collections.Generic.List[string]]::new()
+    $allOnesStatus = [bool]($programText -match '(?im)Status register values:\s*\r?\n\s*INFO:iMPACT\s*-\s*1111\s+1111\s+1111\s+1111\s*$')
+    if ($allOnesStatus) { $configurationFailures.Add('status register read back as 0xFFFF; pin and status values are not trustworthy') }
+    if ($crcError -eq 1 -or $programText -match '(?i)CRC Error bit is NOT\s+0') { $configurationFailures.Add('CRC error reported') }
+    if ($statusBits.ContainsKey('SYNC word not found') -and $statusBits['SYNC word not found'] -eq 1) { $configurationFailures.Add('SYNC word not found') }
+    if ($Mode -eq 'Jtag' -and $null -ne $donePin -and $donePin -eq 0) { $configurationFailures.Add('DONEIN is 0 after FPGA configuration') }
+    if ($programText -match '(?i)idcode read from the device does not match') { $configurationFailures.Add('device IDCODE mismatch during programming') }
+    if ($programText -match '(?i)Configuration data download to FPGA was not successful') { $configurationFailures.Add('FPGA configuration download failed') }
+    if ($configurationFailures.Count -gt 0) {
+        if ($statuses.programmingCompleted -notin @('TIMEOUT', 'PROGRAM_STATE_UNKNOWN')) { $statuses.programmingCompleted = 'FAIL' }
+        $programErrors += ('CONFIGURATION FAILED: ' + ($configurationFailures -join '; ') + '. No automatic write retry.')
+    }
+
     $inStepVerifyPass = [bool]($programText -match '(?i)verif(y|ication)\s+completed\s+successfully')
     $inStepVerifyFail = [bool]($programText -match '(?i)(verify failed|verification failed|verification terminated)')
-    if ($inStepVerifyFail) { $statuses.programmingVerified = 'FAIL' }
+    if ($inStepVerifyFail -or $configurationFailures.Count -gt 0) { $statuses.programmingVerified = 'FAIL' }
     elseif ($inStepVerifyPass) { $statuses.programmingVerified = 'VERIFIED' }
     elseif ($statuses.programmingCompleted -eq 'PASS' -and $donePin -eq 1 -and $crcError -eq 0) { $statuses.programmingVerified = 'CONFIG_STATUS_OK' }
     elseif ($statuses.programmingCompleted -eq 'PASS') { $statuses.programmingVerified = 'NOT_APPLICABLE' }
@@ -1302,6 +1318,8 @@ function Invoke-Program {
         donePin    = $donePin
         crcError   = $crcError
         statusBits = $statusBits
+        allOnesReadback = $allOnesStatus
+        failures   = @($configurationFailures.ToArray())
     }
     Write-Json (Join-Path $run.RunDir 'run.json') $meta
 
@@ -1346,8 +1364,9 @@ function Invoke-Program {
         $summary.Add('  fabric (`program -onlyFpga`), so the internal ISF was not written. No separate')
         $summary.Add('  verify step is run because an FPGA readback verify needs a BitGen mask file')
         $summary.Add('  (.msk) and a standalone `verify` on this device reports "Verify failed on')
-        $summary.Add('  page 0" even after a write iMPACT itself verified. The DONE pin and CRC')
-        $summary.Add('  status above are the evidence that the configuration was accepted.')
+        $summary.Add('  page 0" even after a write iMPACT itself verified. Configuration status is')
+        $summary.Add('  accepted only when the evidence supports it; CRC/status failures override')
+        $summary.Add('  iMPACT success messages. An all-ones readback is not reliable pin evidence.')
     } else {
         $summary.Add('')
         $summary.Add('This was a NON-VOLATILE write to the Spartan-3AN internal In-System Flash.')
@@ -1382,4 +1401,3 @@ function Invoke-Program {
     }
     return [pscustomobject]@{ RunId = $run.RunId; RunDir = $run.RunDir; Statuses = $statuses; Mode = $Mode }
 }
-

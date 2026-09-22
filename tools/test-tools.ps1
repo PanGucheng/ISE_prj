@@ -217,6 +217,20 @@ function New-FakeProgramLog {
                 "'1': Verifying device...Verify failed on page 0.`n" +
                 "'1': Verification Terminated...done.`n")
         }
+        { $_ -in @('crcstatus', 'syncstatus', 'donelowstatus', 'allonesstatus', 'crcwarning', 'idcodestatus') } {
+            $badStatus = switch ($script:ProgProgram) {
+                'crcstatus' { "CRC error :`r`n    1`r`nDONEIN input from Done Pin : 1`r`n" }
+                'syncstatus' { "CRC error : 0`nSYNC word not found : 1`nDONEIN input from Done Pin : 1`n" }
+                'donelowstatus' { "CRC error : 0`nDONEIN input from Done Pin : 0`n" }
+                'allonesstatus' { "INFO:iMPACT:2219 - Status register values:`nINFO:iMPACT - 1111 1111 1111 1111 `n" }
+                'crcwarning' { "WARNING:iMPACT:2217 - Error shows in the status register, CRC Error bit is NOT`r`n   0.`r`n" }
+                'idcodestatus' { "INFO:iMPACT:583 - '1': The idcode read from the device does not match the idcode`n   in the bsdl File.`n" }
+            }
+            return ("INFO:iMPACT - Digilent Plugin: Serial Number: 210241672559`n" +
+                "'1': Programming device...`n" + $badStatus +
+                "INFO:iMPACT:579 - '1': Completed downloading bit file to device.`n" +
+                "'1': Programming completed successfully.`n")
+        }
         'status' {
             # Real -onlyFpga shape: FPGA configured, status register reports the MODE
             # pin straps and the DONE pin.
@@ -990,6 +1004,17 @@ Assert ($statusJson.configurationStatus.modePins -eq '011') "MODE pin strap not 
 Assert ($statusJson.configurationStatus.donePin -eq 1) 'DONE pin not read back'
 Assert ($statusJson.configurationStatus.crcError -eq 0) 'CRC error bit not read back'
 Assert ((Get-TextSafe "$($statusRun.RunDir)/summary.txt") -match 'MODE pins M\[2:0\]\s+= 011') 'the MODE strap must be printed in the summary'
+foreach ($badCase in @('crcstatus', 'syncstatus', 'donelowstatus', 'allonesstatus', 'crcwarning', 'idcodestatus')) {
+    $script:ProgProgram = $badCase
+    $script:ImpactSteps.Clear()
+    Expect-Failure { Invoke-Program -ProjectName 'fixture' -Mode Jtag -BitFile $bitPath -ConfirmHardwareWrite } 'result FAIL'
+    $badDir = Get-LatestProgrammerRun 'fixture' 'program-'
+    $badJson = Get-Content "$badDir/run.json" -Raw | ConvertFrom-Json
+    Assert ($badJson.programmingCompleted -eq 'FAIL' -and $badJson.programmingVerified -eq 'FAIL') "$badCase must override success markers"
+    Assert ((Get-TextSafe "$badDir/summary.txt") -match 'CONFIGURATION FAILED') "$badCase must explain the failed configuration"
+    Assert ($badJson.programAttempts -eq 1) "$badCase must not retry a write"
+    Assert (@($script:ImpactSteps | Where-Object { $_ -eq 'hardware_transaction' }).Count -eq 1) "$badCase must run only one transaction"
+}
 $script:ProgProgram = 'ok'
 Write-Host 'PASS: verification evidence is taken from the program transcript and reported honestly.'
 
@@ -1189,6 +1214,5 @@ Write-Host 'PASS: GUI project helpers parse device facts, bridge encodings and e
 Write-Host ''
 Write-Host 'PASS: all toolchain tests finished (sim, verify, report, static checks, compatibility, probe/program).'
 Write-Host "Test evidence retained: $root"
-
 
 

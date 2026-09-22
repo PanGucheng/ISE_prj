@@ -668,7 +668,7 @@
       "clk_2m",
       "audio_out"
     ],
-    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (updated 2026-09-22 with P110 UART error reporter, 100kHz ADC, top=finger_piano_stage2_oled_top). Consuming adc_error_code via UART eliminated 7 trimmed flip-flops in ads1115_ctrl (Xst:2677 73->66), and added 2 constant-folded ASCII MSB 0 warnings (Xst:1710=2 for uart_tx_byte_7 and tx_shift_7). Baseline: 162 total warnings fully audited. Any other warning, new path, or changed per-entry count fails verify.",
+    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (updated 2026-09-22 with P110 UART multi-channel diagnosis, 100kHz ADC, top=finger_piano_stage2_oled_top). Routing oled_error to P113 dbg_unused and UART FSM eliminated its trim warning (1->0). UART FSM send_msg_type one-hot bit 0 (MSG_NONE) is trimmed by XST (Xst:2677=1) as transmissions only occur for active message types (1..5). Baseline: 162 total warnings fully audited. Any other warning, new path, or changed per-entry count fails verify.",
     "synthesisWarningAllowlist": [
       {
         "id": "Xst:2677",
@@ -747,7 +747,7 @@
       },
       {
         "id": "Xst:2677",
-        "pattern": "Node <u_oled_ctrl/oled_error>",
+        "pattern": "Node <send_msg_type_0>",
         "expected": 1
       }
     ]
