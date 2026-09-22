@@ -8,6 +8,7 @@
 - [ADC ERR=4 诊断与板测交接（历史调测档）](docs/adc_err4_debug_handoff.md)：两工程差异、错误码 4/5 分流设计、UART 采集工具说明与解决记录（第 7 节）。
 
 - [资源优化与音量余量详细计划](docs/resource_optimization_plan.md)：基线证据、O0～O6 阶段、计数器位宽、DDS BRAM、回归矩阵、预算、回退及交付标准。
+- [ADC 修复后的资源回收与测试任务](docs/resource_recovery_after_adc_fix.md)：DDS BRAM、UART 精简和 MAP 打包，702→643 Slice；定向仿真通过，完整 verify 与板测未执行，原 ≤560 Slice 预算尚未达成。
 - [主工程规则](../finger_piano/AGENTS.md)与[仓库规则](../../AGENTS.md)。
 - [全局文档入口](../../doc/README.md)。
 
@@ -20,6 +21,8 @@
 已有 `verify-20260921-220344-887dc140` 为 PASS，但 `simulations` 为空，仿真状态为 NOT_CONFIGURED。资源优化开始前必须按计划 O0 补齐集成回归。
 
 ## 本轮文档记录
+
+2026-09-22（资源回收）：DDS 全周期同步 BRAM、UART 计数与半字节选择精简、MAP `-c 80` 已实施。最终 bitstream 构建 `20260922-232340-ea4c5012`：643/704 Slice、1186 total LUT、587 FF、3/3 BRAM；已约束时序最差 slack +74.438 ns。5 个相关定向仿真、工具自测、静态检查和 XST 告警审阅通过；未运行全量 verify，未烧录。详细实验、bit 身份与后续测试任务见 [资源回收记录](docs/resource_recovery_after_adc_fix.md)。原 ≤560 Slice 预算仍未达成。
 
 2026-09-22：完成 ADC ERR=4 调测与板级真机闭环。查明根因为 XST 综合器对 `integer` 常量参数执行带参数边界的位切片异常（求值恒为 0 导致超时恒有效）；修复为固定 16 位计数器标量比较；按方案 B 接入三通道实时串口上报并压紧资源（Slices 702/704，Slack +70.999 ns，构建 `20260922-202944-3b5f28a9`）；COM20 实际采集 10 秒 14 帧数据，错误率为 0，三通道真实物理采样电压闭环，详见 [ADC ERR=4 解决与验证报告](docs/adc_err4_resolution_report.md)。
 

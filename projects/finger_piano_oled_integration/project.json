@@ -53,6 +53,11 @@
       "library": "work"
     },
     {
+      "path": "src/audio/sine_rom_12bit_sync.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/audio/dds_sine_generator.v",
       "language": "verilog",
       "library": "work"
@@ -155,7 +160,33 @@
   "constraintsReviewed": true,
   "optimization": "Area",
   "optimizationLevel": 1,
+  "mapPackFactor": 80,
   "simulations": [
+    {
+      "name": "uart_reporter_equivalence",
+      "top": "tb_uart_reporter_equivalence",
+      "sources": [
+        "sim/models/ramb16_s9_model.v",
+        "sim/models/finger_piano_stage2_oled_top_reference.v",
+        "sim/tb_uart_reporter_equivalence.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_UART_REPORTER_EQUIVALENCE: PASS",
+      "failPattern": "TB_UART_REPORTER_EQUIVALENCE: FAIL"
+    },
+    {
+      "name": "dds_bram_equivalence",
+      "top": "tb_dds_bram_equivalence",
+      "sources": [
+        "sim/models/dds_sine_generator_reference.v",
+        "sim/tb_dds_bram_equivalence.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_DDS_BRAM_EQUIVALENCE: PASS",
+      "failPattern": "TB_DDS_BRAM_EQUIVALENCE: FAIL"
+    },
     {
       "name": "note_encoder",
       "top": "tb_note_encoder",
@@ -698,7 +729,7 @@
       "clk_2m",
       "audio_out"
     ],
-    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (updated 2026-09-22 with P110 UART multi-channel diagnosis, 100kHz ADC, top=finger_piano_stage2_oled_top). Routing oled_error to P113 dbg_unused and UART FSM eliminated its trim warning (1->0). UART FSM send_msg_type one-hot bit 0 (MSG_NONE) is trimmed by XST (Xst:2677=1) as transmissions only occur for active message types (1..5). Baseline: 162 total warnings fully audited. Any other warning, new path, or changed per-entry count fails verify.",
+    "synthesisWarningAllowlistNote": "Audited against 20260922-231545-52f2a396 synthesis.srp: 90 warnings. Live ADC data/UART now consumes ADC read data, channel registers, sample-valid and error codes; previous 8+66 ADC trim allowances narrowed to exactly i2c/error (1) and r_busy (1). Pressure capture remains without a hardware consumer (49), DAC diagnostics remain unconsumed (18); remaining allowances describe OS poll unused bits, constant command/phase/ASCII bits and MSG_NONE. No blanket suppression; every id/pattern/count is enforced.",
     "synthesisWarningAllowlist": [
       {
         "id": "Xst:2677",
@@ -712,13 +743,13 @@
       },
       {
         "id": "Xst:2677",
-        "pattern": "Node <(u_piano/)?u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.u_i2c/",
-        "expected": 8
+        "pattern": "Node <u_piano/u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.u_i2c/error>",
+        "expected": 1
       },
       {
         "id": "Xst:2677",
-        "pattern": "Node <(u_piano/)?u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.(r_busy|r_error|r_errcode_\\d|r_sample_valid|err_code_q_\\d|raw_hi_\\d|raw_lo_\\d|ch[012]_q_\\d+)>",
-        "expected": 66
+        "pattern": "Node <u_piano/u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.r_busy>",
+        "expected": 1
       },
       {
         "id": "Xst:2677",

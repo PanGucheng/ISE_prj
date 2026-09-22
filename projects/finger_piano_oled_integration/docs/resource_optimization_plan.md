@@ -2,6 +2,8 @@
 
 日期：2026-09-22。状态：**COMPLETED（O0～O2d 已完整实施并闭环验收，资源指标超额达成）**。
 
+> 上述结项状态只适用于当时的 500 Slice 功能配置。ADC 实时上报接入后曾回升至 702 Slice；本轮重启 O3 并精简 UART、调整 MAP 打包后为 643 Slice，尚未达到当前功能配置下的原预算。最新证据及板测交接见 [ADC 修复后的资源回收](resource_recovery_after_adc_fix.md)。下文历史数据保留用于追溯。
+
 执行工程：`projects/finger_piano_oled_integration`。
 兼容性基线：`projects/finger_piano`（保持 100% 零改动）。
 独立 OLED 测试参考：`projects/finger_piano_oled_test`。

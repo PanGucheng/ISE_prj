@@ -1,3 +1,4 @@
+// Frozen behavioral reference from commit 5447e81; do not optimize with DUT.
 //=============================================================================
 // dds_sine_generator.v
 // DDS 正弦样点发生器(P3 计划 Commit C/D)—— standalone,不接顶层。
@@ -6,7 +7,7 @@
 //   note_code[2:0] -> phase increment(组合 case)
 //   -> 24-bit 相位累加器(仅 sample_tick 时前进,24 bit 自然溢出取模,
 //      禁止 % 运算)
-//   -> phase_acc[23:16] -> synchronous BRAM prefetch -> dac_code_r
+//   -> phase_acc[23:16] -> sine_lut_12bit -> dac_code_r(寄存后输出)
 //
 // 采样节拍(P3 计划 §9/§10/§23):
 //   SAMPLE_DIV = SYS_CLK_HZ / SAMPLE_RATE_HZ(12 MHz / 8 kHz = 1500 精确
@@ -31,7 +32,7 @@
 
 `include "finger_piano_cfg.vh"
 
-module dds_sine_generator #(
+module dds_sine_generator_reference #(
     parameter integer SYS_CLK_HZ     = `SYS_CLK_HZ,
     parameter integer SAMPLE_RATE_HZ = `CFG_DAC_SAMPLE_RATE,
     parameter integer ENABLE         = `CFG_ENABLE_DDS
@@ -106,14 +107,8 @@ module dds_sine_generator #(
     wire        sample_tick = (sample_cnt == (SAMPLE_DIV - 1));
 
     wire [11:0] lut_code;
-    // SAMPLE_DIV >= 2: one intervening clock fetches the advanced phase.
-    // A note change fetches zero immediately, so even a sample on the next
-    // clock sees sine(0), not the previous note. A coincident sample/change
-    // still takes the existing explicit midpoint branch below.
-    wire [7:0] prefetch_phase = (note_code != note_q) ? 8'd0 : phase_acc[23:16];
-    sine_rom_12bit_sync u_lut (
-        .clk        (clk),
-        .phase_addr (prefetch_phase),
+    sine_lut_12bit u_lut (
+        .phase_addr (phase_acc[23:16]),
         .sine_code  (lut_code)
     );
 
