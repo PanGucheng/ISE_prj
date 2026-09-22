@@ -133,6 +133,11 @@
       "library": "work"
     },
     {
+      "path": "src/uart_tx.v",
+      "language": "verilog",
+      "library": "work"
+    },
+    {
       "path": "src/finger_piano_stage2_oled_top.v",
       "language": "verilog",
       "library": "work"
@@ -638,6 +643,17 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_OLED_HW_DELAY: PASS",
       "failPattern": "TB_OLED_HW_DELAY: FAIL"
+    },
+    {
+      "name": "uart_tx_unit",
+      "top": "tb_uart_tx",
+      "sources": [
+        "sim/tb_uart_tx.v"
+      ],
+      "generics": {},
+      "timeoutSeconds": 120,
+      "passPattern": "TB_UART_TX: PASS",
+      "failPattern": "TB_UART_TX: FAIL"
     }
   ],
   "verification": {
@@ -652,7 +668,7 @@
       "clk_2m",
       "audio_out"
     ],
-    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (2026-09-16, top=finger_piano_stage2_top). The 12-pin top has no consumer for the P6A status/debug/pressure outputs (sensor_code_stable, pressure_ch0/1/2, pressure_valid, adc_error/dac_error/dac_overrun, DDS/MCP debug ports), so XST legitimately trims that hierarchy. Baseline: Xst:2677=155, Xst:646=2, Xst:1710=4, Xst:1895=5, total 166. Any other warning, new path, or changed per-entry count fails verify.",
+    "synthesisWarningAllowlistNote": "Audited Stage-2 synthesis trims (updated 2026-09-22 with P110 UART error reporter, 100kHz ADC, top=finger_piano_stage2_oled_top). Consuming adc_error_code via UART eliminated 7 trimmed flip-flops in ads1115_ctrl (Xst:2677 73->66), and added 2 constant-folded ASCII MSB 0 warnings (Xst:1710=2 for uart_tx_byte_7 and tx_shift_7). Baseline: 162 total warnings fully audited. Any other warning, new path, or changed per-entry count fails verify.",
     "synthesisWarningAllowlist": [
       {
         "id": "Xst:2677",
@@ -672,7 +688,7 @@
       {
         "id": "Xst:2677",
         "pattern": "Node <(u_piano/)?u_sys/GEN_ADC_ON\\.u_ads1115/GEN_ADC\\.(r_busy|r_error|r_errcode_\\d|r_sample_valid|err_code_q_\\d|raw_hi_\\d|raw_lo_\\d|ch[012]_q_\\d+)>",
-        "expected": 73
+        "expected": 66
       },
       {
         "id": "Xst:2677",
@@ -688,6 +704,11 @@
         "id": "Xst:646",
         "pattern": "Signal <GEN_ADC\\.poll_lo>",
         "expected": 1
+      },
+      {
+        "id": "Xst:1710",
+        "pattern": "FF/Latch <(uart_tx_byte_7|u_uart_tx/tx_shift_7)>",
+        "expected": 2
       },
       {
         "id": "Xst:1710",

@@ -63,6 +63,7 @@ module finger_piano_system #(
     output wire        pressure_valid,
 
     output wire        adc_error,
+    output wire [2:0]  adc_error_code,
     output wire        dac_error,
     output wire        dac_overrun
 );
@@ -89,6 +90,9 @@ module finger_piano_system #(
     wire [15:0] adc_ch1_raw;
     wire [15:0] adc_ch2_raw;
     wire        adc_sample_valid;
+    wire [2:0]  adc_err_code_w;
+
+    assign adc_error_code = (ENABLE_ADC != 0) ? adc_err_code_w : 3'd0;
 
     generate
         if (ENABLE_ADC == 0) begin : GEN_ADC_OFF
@@ -111,6 +115,8 @@ module finger_piano_system #(
                 .error_code       ()
             );
 
+            assign adc_err_code_w = 3'd0;
+
         end else begin : GEN_ADC_ON
 
             ads1115_ctrl #(
@@ -126,7 +132,7 @@ module finger_piano_system #(
                 .adc_sample_valid (adc_sample_valid),
                 .adc_busy         (),
                 .adc_error        (adc_error),
-                .error_code       ()
+                .error_code       (adc_err_code_w)
             );
 
         end

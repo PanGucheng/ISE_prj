@@ -43,7 +43,10 @@ module tb_finger_piano_stage2_oled_top;
     wire       adc_scl, adc_sda;
     wire       dac_scl, dac_sda;
     wire       oled_scl, oled_sda;
-    wire [2:0] note_debug;
+    wire       uart_tx;
+    wire       dbg_heartbeat;
+    wire       dbg_unused;
+    wire [2:0] note_debug = u_top.u_piano.note_debug;
 
     // 逻辑开漏上拉
     pullup pu_ascl (adc_scl);
@@ -59,17 +62,76 @@ module tb_finger_piano_stage2_oled_top;
     finger_piano_stage2_oled_top #(
         .SIM_FAST_INIT (TB_FAST_INIT)
     ) u_top (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .sensor_async (sensor_async),
-        .adc_i2c_scl  (adc_scl),
-        .adc_i2c_sda  (adc_sda),
-        .dac_i2c_scl  (dac_scl),
-        .dac_i2c_sda  (dac_sda),
-        .note_debug   (note_debug),
-        .oled_i2c_scl (oled_scl),
-        .oled_i2c_sda (oled_sda)
+        .clk           (clk),
+        .rst_n         (rst_n),
+        .sensor_async  (sensor_async),
+        .adc_i2c_scl   (adc_scl),
+        .adc_i2c_sda   (adc_sda),
+        .dac_i2c_scl   (dac_scl),
+        .dac_i2c_sda   (dac_sda),
+        .oled_i2c_scl  (oled_scl),
+        .oled_i2c_sda  (oled_sda),
+        .uart_tx       (uart_tx),
+        .dbg_heartbeat (dbg_heartbeat),
+        .dbg_unused    (dbg_unused)
     );
+
+    //-------------------------------------------------------------------------
+    // UART 接收解析任务 (115200 baud @ 12 MHz = 104 拍/bit)
+    //-------------------------------------------------------------------------
+    task recv_byte;
+        output [7:0] data;
+        output       ok;
+        integer bi;
+        integer timeout;
+        begin
+            ok = 1;
+            timeout = 0;
+            while (uart_tx !== 1'b0 && timeout < 400000) begin
+                @(posedge clk);
+                timeout = timeout + 1;
+            end
+            if (timeout >= 400000) begin
+                ok = 0;
+            end else begin
+                repeat (52) @(posedge clk); // 半个 bit 到 start bit 中心
+                if (uart_tx !== 1'b0) ok = 0;
+                for (bi = 0; bi < 8; bi = bi + 1) begin
+                    repeat (104) @(posedge clk);
+                    data[bi] = uart_tx;
+                end
+                repeat (104) @(posedge clk); // stop bit
+                if (uart_tx !== 1'b1) ok = 0;
+                repeat (52) @(posedge clk);  // 越过 stop bit
+            end
+        end
+    endtask
+
+    reg [7:0] line_buf [0:63];
+    task recv_line;
+        output integer len;
+        reg [7:0] b;
+        reg       bok;
+        integer   done;
+        begin
+            len = 0;
+            done = 0;
+            while (!done && len < 64) begin
+                recv_byte(b, bok);
+                if (bok) begin
+                    line_buf[len] = b;
+                    len = len + 1;
+                    if (b == 8'h0A) begin // '\n'
+                        done = 1;
+                    end
+                end else begin
+                    $display("[TB] ERROR: Timeout or framing error while receiving UART line");
+                    errors = errors + 1;
+                    done = 1;
+                end
+            end
+        end
+    endtask
 
     //-------------------------------------------------------------------------
     // 从机模型
@@ -421,6 +483,42 @@ module tb_finger_piano_stage2_oled_top;
         repeat (50) @(posedge clk);
         rst_n = 1'b1;
         repeat (100) @(posedge clk);
+
+        // 8. 验证 ADS1115 地址 NACK 时 UART 串口输出 "ADC ERROR CODE=1\r\n"
+        $display("[TB] Testing ADC address NACK -> UART error reporting...");
+        begin : TEST_ADC_UART
+            integer rx_len;
+            integer li;
+            adc_nack_addr = 1'b1;
+            // 等待并接收 UART 行
+            recv_line(rx_len);
+            adc_nack_addr = 1'b0;
+            $write("[TB] Received UART message (%0d chars): \"", rx_len);
+            for (li = 0; li < rx_len; li = li + 1) begin
+                if (line_buf[li] >= 32 && line_buf[li] <= 126)
+                    $write("%c", line_buf[li]);
+            end
+            $display("\"");
+            if (rx_len !== 18) begin
+                $display("[TB] ERROR: Expected line length 18, got %0d", rx_len);
+                errors = errors + 1;
+            end else if (line_buf[0] !== "A" || line_buf[1] !== "D" || line_buf[2] !== "C" ||
+                         line_buf[14] !== "=" || line_buf[15] !== "1" ||
+                         line_buf[16] !== 8'h0D || line_buf[17] !== 8'h0A) begin
+                $display("[TB] ERROR: UART message content mismatch!");
+                errors = errors + 1;
+            end else begin
+                $display("[TB] ADC ERROR CODE=1\\r\\n verified over UART (P110)!");
+            end
+        end
+
+        // 9. 检查 dbg_unused 与 dbg_heartbeat 信号
+        if (dbg_unused !== 1'b0) begin
+            $display("[TB] ERROR: dbg_unused (P113) is not 0!");
+            errors = errors + 1;
+        end else begin
+            $display("[TB] dbg_unused (P113) == 0 verified.");
+        end
 
         // 结果判定
         if (errors == 0) begin

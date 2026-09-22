@@ -13,9 +13,9 @@
 #   adc_i2c_sda       P32     3    IO_L12N_3           I/O
 #   dac_i2c_scl       P102    1    IO_L10P_1           I/O
 #   dac_i2c_sda       P103    1    IO_L11P_1           I/O
-#   note_debug[0]     P110    0    IO_L01P_0           I/O
-#   note_debug[1]     P111    0    IO_L01N_0           I/O
-#   note_debug[2]     P113    0    IO_L02N_0           I/O
+#   uart_tx           P110    0    IO_L01P_0           I/O (115200 8N1 TX)
+#   dbg_heartbeat     P111    0    IO_L01N_0           I/O (~1 Hz 方波心跳)
+#   dbg_unused        P113    0    IO_L02N_0           I/O (固定 1'b0 接地)
 #   oled_i2c_scl      P104    1    IO_L10N_1           I/O (SSD1306)
 #   oled_i2c_sda      P105    1    IO_L11N_1           I/O (SSD1306)
 #
@@ -52,11 +52,11 @@ NET "dac_i2c_scl" LOC = P102 | IOSTANDARD = LVCMOS33;
 NET "dac_i2c_sda" LOC = P103 | IOSTANDARD = LVCMOS33;
 
 #-----------------------------------------------------------------------------
-# NOTE DEBUG: 同步/滤波/解码之后的当前音符编码
+# DEBUG / UART OUTPUTS (排针 P110/P111/P113)
 #-----------------------------------------------------------------------------
-NET "note_debug<0>" LOC = P110 | IOSTANDARD = LVCMOS33;
-NET "note_debug<1>" LOC = P111 | IOSTANDARD = LVCMOS33;
-NET "note_debug<2>" LOC = P113 | IOSTANDARD = LVCMOS33;
+NET "uart_tx"       LOC = P110 | IOSTANDARD = LVCMOS33;
+NET "dbg_heartbeat" LOC = P111 | IOSTANDARD = LVCMOS33;
+NET "dbg_unused"    LOC = P113 | IOSTANDARD = LVCMOS33;
 
 #-----------------------------------------------------------------------------
 # SSD1306 INDEPENDENT I2C BUS (开漏, 外部 4.7 kΩ 上拉到 3.3 V)

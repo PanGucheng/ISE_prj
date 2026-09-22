@@ -381,9 +381,9 @@ module tb_finger_piano_system;
             found  = 0;
             start_k = -1;
             k0     = 0;
-            // 上限 200:窗口起点可能因 stimulus 等待(注入生效需数帧)而
-            // 落在音符开始后百余个样点处
-            while ((k0 <= 200) && (found == 0)) begin
+            // 上限 2000:窗口起点可能因 stimulus 等待(注入生效需数帧，特别在 100 kHz 下)而
+            // 落在音符开始后数百个样点处
+            while ((k0 <= 2000) && (found == 0)) begin
                 phase = (k0 * inc) % 16777216;
                 ok_cnt = 0;
                 j      = w0;
