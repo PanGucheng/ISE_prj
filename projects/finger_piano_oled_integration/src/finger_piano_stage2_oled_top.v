@@ -41,21 +41,29 @@ module finger_piano_stage2_oled_top #(
     //-------------------------------------------------------------------------
     // 1. 实例化基线物理顶层
     //-------------------------------------------------------------------------
-    wire [2:0] piano_note_debug;
-    wire       piano_adc_error;
-    wire [2:0] piano_adc_error_code;
+    wire [2:0]  piano_note_debug;
+    wire        piano_adc_error;
+    wire [2:0]  piano_adc_error_code;
+    wire        piano_adc_sample_valid;
+    wire [15:0] piano_adc_ch0_raw;
+    wire [15:0] piano_adc_ch1_raw;
+    wire [15:0] piano_adc_ch2_raw;
 
     finger_piano_stage2_top u_piano (
-        .clk            (clk),
-        .rst_n          (rst_n),
-        .sensor_async   (sensor_async),
-        .adc_i2c_scl    (adc_i2c_scl),
-        .adc_i2c_sda    (adc_i2c_sda),
-        .dac_i2c_scl    (dac_i2c_scl),
-        .dac_i2c_sda    (dac_i2c_sda),
-        .note_debug     (piano_note_debug),
-        .adc_error      (piano_adc_error),
-        .adc_error_code (piano_adc_error_code)
+        .clk              (clk),
+        .rst_n            (rst_n),
+        .sensor_async     (sensor_async),
+        .adc_i2c_scl      (adc_i2c_scl),
+        .adc_i2c_sda      (adc_i2c_sda),
+        .dac_i2c_scl      (dac_i2c_scl),
+        .dac_i2c_sda      (dac_i2c_sda),
+        .note_debug       (piano_note_debug),
+        .adc_error        (piano_adc_error),
+        .adc_error_code   (piano_adc_error_code),
+        .adc_sample_valid (piano_adc_sample_valid),
+        .adc_ch0_raw      (piano_adc_ch0_raw),
+        .adc_ch1_raw      (piano_adc_ch1_raw),
+        .adc_ch2_raw      (piano_adc_ch2_raw)
     );
 
     //-------------------------------------------------------------------------
@@ -123,11 +131,9 @@ module finger_piano_stage2_oled_top #(
         if (!rst_n_sync) begin
             heartbeat_cnt <= 23'd0;
             dbg_heartbeat <= 1'b0;
-        end else if (heartbeat_cnt == 23'd5999999) begin
-            heartbeat_cnt <= 23'd0;
-            dbg_heartbeat <= ~dbg_heartbeat;
         end else begin
             heartbeat_cnt <= heartbeat_cnt + 23'd1;
+            dbg_heartbeat <= heartbeat_cnt[22];
         end
     end
 
@@ -139,17 +145,21 @@ module finger_piano_stage2_oled_top #(
                      MSG_OLED_OK   = 3'd2,
                      MSG_OLED_NACK = 3'd3,
                      MSG_ADC_ERR   = 3'd4,
-                     MSG_NOTE      = 3'd5;
+                     MSG_NOTE      = 3'd5,
+                     MSG_ADC_OK    = 3'd6;
 
-    reg [7:0] boot_timer;
-    reg       boot_pending;
-    reg       oled_ok_pending;
-    reg       oled_err_pending;
-    reg       adc_err_pending;
-    reg [2:0] latched_ecode;
-    reg       note_pending;
-    reg [2:0] latched_note;
-    reg [2:0] note_prev;
+    reg [7:0]  boot_timer;
+    reg        boot_pending;
+    reg        oled_ok_pending;
+    reg        oled_err_pending;
+    reg        adc_err_pending;
+    reg [2:0]  latched_ecode;
+    reg        note_pending;
+    reg [2:0]  latched_note;
+    reg [2:0]  note_prev;
+
+    reg        adc_has_sampled;
+    reg        adc_ok_pending;
 
     reg oled_init_done_d;
     reg oled_error_d;
@@ -160,16 +170,19 @@ module finger_piano_stage2_oled_top #(
                      ST_SEND = 2'd1,
                      ST_WAIT = 2'd2;
 
-    reg [1:0] tx_fsm;
-    reg [2:0] send_msg_type;
-    reg [3:0] send_msg_len;
-    reg [3:0] char_idx;
-    reg [2:0] send_ecode;
-    reg [2:0] send_note;
+    reg [1:0]  tx_fsm;
+    reg [2:0]  send_msg_type;
+    reg [4:0]  send_msg_len;
+    reg [4:0]  char_idx;
+    reg [1:0]  ch_idx;
+    reg [3:0]  step_idx;
+    reg [15:0] hex_sr;
+    reg [2:0]  send_ecode;
+    reg [2:0]  send_note;
 
-    reg [7:0] uart_tx_byte;
-    reg       uart_tx_valid;
-    wire      uart_tx_ready;
+    reg [7:0]  uart_tx_byte;
+    reg        uart_tx_valid;
+    wire       uart_tx_ready;
 
     // 事件捕获与边沿检测
     always @(posedge clk or negedge rst_n_sync) begin
@@ -186,6 +199,8 @@ module finger_piano_stage2_oled_top #(
             oled_init_done_d <= 1'b0;
             oled_error_d     <= 1'b0;
             adc_error_d      <= 1'b0;
+            adc_has_sampled  <= 1'b0;
+            adc_ok_pending   <= 1'b0;
         end else begin
             oled_init_done_d <= oled_init_done;
             oled_error_d     <= oled_error;
@@ -224,109 +239,129 @@ module finger_piano_stage2_oled_top #(
                 note_prev <= 3'd0;
             end
 
+            // ADC 数据就绪标志
+            if (piano_adc_sample_valid) begin
+                adc_has_sampled <= 1'b1;
+            end
+
+            if (heartbeat_cnt == 23'd0 && adc_has_sampled) begin
+                adc_ok_pending <= 1'b1;
+            end
+
             // 发送握手清除
-            if (tx_fsm == ST_SEND && char_idx == 4'd0) begin
+            if (tx_fsm == ST_SEND && ((send_msg_type == MSG_ADC_OK) ? (ch_idx == 2'd3 && step_idx == 4'd0) : (char_idx == 5'd0))) begin
                 case (send_msg_type)
                     MSG_READY:     boot_pending     <= 1'b0;
                     MSG_OLED_OK:   oled_ok_pending  <= 1'b0;
                     MSG_OLED_NACK: oled_err_pending <= 1'b0;
                     MSG_ADC_ERR:   adc_err_pending  <= 1'b0;
                     MSG_NOTE:      note_pending     <= 1'b0;
+                    MSG_ADC_OK:    adc_ok_pending   <= 1'b0;
                     default: ;
                 endcase
             end
         end
     end
 
+    function [7:0] hex2char;
+        input [3:0] nibble;
+        begin
+            hex2char = {4'd0, nibble} + ((nibble < 4'd10) ? 8'h30 : 8'h37);
+        end
+    endfunction
+
     reg [7:0] cur_char;
     always @(*) begin
-        case (send_msg_type)
-            MSG_READY: begin
-                case (char_idx)
-                    4'd0:    cur_char = "R";
-                    4'd1:    cur_char = "E";
-                    4'd2:    cur_char = "A";
-                    4'd3:    cur_char = "D";
-                    4'd4:    cur_char = "Y";
-                    4'd5:    cur_char = 8'h0D; // \r
-                    4'd6:    cur_char = 8'h0A; // \n
-                    default: cur_char = " ";
-                endcase
-            end
-
-            MSG_OLED_OK: begin
-                case (char_idx)
-                    4'd0:    cur_char = "O";
-                    4'd1:    cur_char = "L";
-                    4'd2:    cur_char = "E";
-                    4'd3:    cur_char = "D";
-                    4'd4:    cur_char = " ";
-                    4'd5:    cur_char = "O";
-                    4'd6:    cur_char = "K";
-                    4'd7:    cur_char = 8'h0D;
-                    4'd8:    cur_char = 8'h0A;
-                    default: cur_char = " ";
-                endcase
-            end
-
-            MSG_OLED_NACK: begin
-                case (char_idx)
-                    4'd0:    cur_char = "O";
-                    4'd1:    cur_char = "L";
-                    4'd2:    cur_char = "E";
-                    4'd3:    cur_char = "D";
-                    4'd4:    cur_char = " ";
-                    4'd5:    cur_char = "N";
-                    4'd6:    cur_char = "A";
-                    4'd7:    cur_char = "C";
-                    4'd8:    cur_char = "K";
-                    4'd9:    cur_char = 8'h0D;
-                    4'd10:   cur_char = 8'h0A;
-                    default: cur_char = " ";
-                endcase
-            end
-
-            MSG_ADC_ERR: begin
-                case (char_idx)
+        if (send_msg_type == MSG_ADC_OK) begin
+            if (ch_idx == 2'd3) begin
+                case (step_idx)
                     4'd0:    cur_char = "A";
                     4'd1:    cur_char = "D";
                     4'd2:    cur_char = "C";
                     4'd3:    cur_char = " ";
-                    4'd4:    cur_char = "E";
-                    4'd5:    cur_char = "R";
-                    4'd6:    cur_char = "R";
-                    4'd7:    cur_char = "=";
-                    4'd8:    cur_char = 8'h30 + {5'd0, send_ecode};
-                    4'd9:    cur_char = 8'h0D;
-                    4'd10:   cur_char = 8'h0A;
+                    4'd4:    cur_char = "O";
+                    4'd5:    cur_char = "K";
+                    default: cur_char = " ";
+                endcase
+            end else begin
+                case (step_idx)
+                    4'd0:    cur_char = "C";
+                    4'd1:    cur_char = "H";
+                    4'd2:    cur_char = 8'h30 + {6'd0, ch_idx};
+                    4'd3:    cur_char = "=";
+                    4'd4:    cur_char = "0";
+                    4'd5:    cur_char = "x";
+                    4'd6, 4'd7, 4'd8, 4'd9: cur_char = hex2char(hex_sr[15:12]);
+                    4'd10:   cur_char = (ch_idx == 2'd2) ? 8'h0D : " ";
+                    4'd11:   cur_char = 8'h0A;
                     default: cur_char = " ";
                 endcase
             end
-
-            MSG_NOTE: begin
-                case (char_idx)
-                    4'd0:    cur_char = "N";
-                    4'd1:    cur_char = "O";
-                    4'd2:    cur_char = "T";
-                    4'd3:    cur_char = "E";
-                    4'd4:    cur_char = "=";
-                    4'd5:    cur_char = 8'h30 + {5'd0, send_note};
-                    4'd6:    cur_char = 8'h0D;
-                    4'd7:    cur_char = 8'h0A;
-                    default: cur_char = " ";
-                endcase
-            end
-
-            default: cur_char = " ";
-        endcase
+        end else if (char_idx == send_msg_len) begin
+            cur_char = 8'h0A;
+        end else if (char_idx == send_msg_len - 5'd1) begin
+            cur_char = 8'h0D;
+        end else begin
+            case (send_msg_type)
+                MSG_READY: begin
+                    case (char_idx)
+                        5'd0:    cur_char = "R";
+                        5'd1:    cur_char = "E";
+                        5'd2:    cur_char = "A";
+                        5'd3:    cur_char = "D";
+                        default: cur_char = "Y";
+                    endcase
+                end
+                MSG_OLED_OK, MSG_OLED_NACK: begin
+                    case (char_idx)
+                        5'd0:    cur_char = "O";
+                        5'd1:    cur_char = "L";
+                        5'd2:    cur_char = "E";
+                        5'd3:    cur_char = "D";
+                        5'd4:    cur_char = " ";
+                        5'd5:    cur_char = (send_msg_type == MSG_OLED_OK) ? "O" : "N";
+                        5'd6:    cur_char = (send_msg_type == MSG_OLED_OK) ? "K" : "A";
+                        5'd7:    cur_char = "C";
+                        default: cur_char = "K";
+                    endcase
+                end
+                MSG_ADC_ERR: begin
+                    case (char_idx)
+                        5'd0:    cur_char = "A";
+                        5'd1:    cur_char = "D";
+                        5'd2:    cur_char = "C";
+                        5'd3:    cur_char = " ";
+                        5'd4:    cur_char = "E";
+                        5'd5:    cur_char = "R";
+                        5'd6:    cur_char = "R";
+                        5'd7:    cur_char = "=";
+                        default: cur_char = 8'h30 + {5'd0, send_ecode};
+                    endcase
+                end
+                MSG_NOTE: begin
+                    case (char_idx)
+                        5'd0:    cur_char = "N";
+                        5'd1:    cur_char = "O";
+                        5'd2:    cur_char = "T";
+                        5'd3:    cur_char = "E";
+                        5'd4:    cur_char = "=";
+                        default: cur_char = 8'h30 + {5'd0, send_note};
+                    endcase
+                end
+                default: cur_char = " ";
+            endcase
+        end
     end
 
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
             tx_fsm        <= ST_IDLE;
             send_msg_type <= MSG_NONE;
-            send_msg_len  <= 4'd0;
-            char_idx      <= 4'd0;
+            send_msg_len  <= 5'd0;
+            char_idx      <= 5'd0;
+            ch_idx        <= 2'd0;
+            step_idx      <= 4'd0;
+            hex_sr        <= 16'd0;
             send_ecode    <= 3'd0;
             send_note     <= 3'd0;
             uart_tx_byte  <= 8'h00;
@@ -336,28 +371,34 @@ module finger_piano_stage2_oled_top #(
 
             case (tx_fsm)
                 ST_IDLE: begin
-                    char_idx <= 4'd0;
+                    char_idx <= 5'd0;
                     if (boot_pending) begin
                         send_msg_type <= MSG_READY;
-                        send_msg_len  <= 4'd6;
+                        send_msg_len  <= 5'd6;
                         tx_fsm        <= ST_SEND;
                     end else if (oled_err_pending) begin
                         send_msg_type <= MSG_OLED_NACK;
-                        send_msg_len  <= 4'd10;
+                        send_msg_len  <= 5'd10;
                         tx_fsm        <= ST_SEND;
                     end else if (oled_ok_pending) begin
                         send_msg_type <= MSG_OLED_OK;
-                        send_msg_len  <= 4'd8;
+                        send_msg_len  <= 5'd8;
                         tx_fsm        <= ST_SEND;
                     end else if (adc_err_pending) begin
                         send_msg_type <= MSG_ADC_ERR;
-                        send_msg_len  <= 4'd10;
+                        send_msg_len  <= 5'd10;
                         send_ecode    <= latched_ecode;
                         tx_fsm        <= ST_SEND;
                     end else if (note_pending) begin
                         send_msg_type <= MSG_NOTE;
-                        send_msg_len  <= 4'd7;
+                        send_msg_len  <= 5'd7;
                         send_note     <= latched_note;
+                        tx_fsm        <= ST_SEND;
+                    end else if (adc_ok_pending) begin
+                        send_msg_type <= MSG_ADC_OK;
+                        ch_idx        <= 2'd3;
+                        step_idx      <= 4'd0;
+                        hex_sr        <= 16'd0;
                         tx_fsm        <= ST_SEND;
                     end
                 end
@@ -373,11 +414,41 @@ module finger_piano_stage2_oled_top #(
                 ST_WAIT: begin
                     uart_tx_valid <= 1'b0;
                     if (uart_tx_ready && !uart_tx_valid) begin
-                        if (char_idx == send_msg_len) begin
-                            tx_fsm <= ST_IDLE;
+                        if (send_msg_type == MSG_ADC_OK) begin
+                            if (ch_idx == 2'd3) begin
+                                if (step_idx == 4'd6) begin
+                                    ch_idx   <= 2'd0;
+                                    step_idx <= 4'd0;
+                                    hex_sr   <= piano_adc_ch0_raw;
+                                    tx_fsm   <= ST_SEND;
+                                end else begin
+                                    step_idx <= step_idx + 4'd1;
+                                    tx_fsm   <= ST_SEND;
+                                end
+                            end else begin
+                                if (step_idx >= 4'd6 && step_idx <= 4'd9) begin
+                                    hex_sr <= {hex_sr[11:0], 4'b0};
+                                end
+
+                                if (ch_idx == 2'd2 && step_idx == 4'd11) begin
+                                    tx_fsm <= ST_IDLE;
+                                end else if (ch_idx < 2'd2 && step_idx == 4'd10) begin
+                                    ch_idx   <= ch_idx + 2'd1;
+                                    step_idx <= 4'd0;
+                                    hex_sr   <= (ch_idx == 2'd0) ? piano_adc_ch1_raw : piano_adc_ch2_raw;
+                                    tx_fsm   <= ST_SEND;
+                                end else begin
+                                    step_idx <= step_idx + 4'd1;
+                                    tx_fsm   <= ST_SEND;
+                                end
+                            end
                         end else begin
-                            char_idx <= char_idx + 4'd1;
-                            tx_fsm   <= ST_SEND;
+                            if (char_idx == send_msg_len) begin
+                                tx_fsm <= ST_IDLE;
+                            end else begin
+                                char_idx <= char_idx + 5'd1;
+                                tx_fsm   <= ST_SEND;
+                            end
                         end
                     end
                 end

@@ -48,9 +48,13 @@ module finger_piano_stage2_top (
     inout  wire       dac_i2c_scl,   // MCP4725 独立 I2C 总线
     inout  wire       dac_i2c_sda,
 
-    output wire [2:0] note_debug,    // 当前音符编码,0=无音符
-    output wire       adc_error,     // ADS1115 错误脉冲
-    output wire [2:0] adc_error_code // ADS1115 错误码
+    output wire [2:0]  note_debug,        // 当前音符编码,0=无音符
+    output wire        adc_error,         // ADS1115 错误脉冲
+    output wire [2:0]  adc_error_code,    // ADS1115 错误码
+    output wire        adc_sample_valid,  // 三通道转换完成脉冲
+    output wire [15:0] adc_ch0_raw,      // 通道 0 原始转换值
+    output wire [15:0] adc_ch1_raw,      // 通道 1 原始转换值
+    output wire [15:0] adc_ch2_raw       // 通道 2 原始转换值
 );
 
     //-------------------------------------------------------------------------
@@ -91,6 +95,10 @@ module finger_piano_stage2_top (
         .pressure_valid    (),
         .adc_error         (adc_error),
         .adc_error_code    (adc_error_code),
+        .adc_sample_valid  (adc_sample_valid),
+        .adc_ch0_raw       (adc_ch0_raw),
+        .adc_ch1_raw       (adc_ch1_raw),
+        .adc_ch2_raw       (adc_ch2_raw),
         .dac_error         (),
         .dac_overrun       ()
     );

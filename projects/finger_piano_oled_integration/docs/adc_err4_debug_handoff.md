@@ -113,3 +113,19 @@ pwsh -NoProfile -File .\tools\test-capture-adc-uart.ps1
 8. **回传材料。** 每个版本的 Git diff/commit、verify/单测/构建编号、bit SHA、program 日志、UART 三件套、按压时间、关键波形及最短结论。只有形成可复现的失败→修复→恢复正常采样证据后，才建议最终完整回归与正式合入。
 
 更详细的硬件 trace 会增加寄存器和恢复原本被裁剪的位，从而改变面积及布局。记录这种观察效应，不把加 trace 后偶然正常直接当作根因修复。
+
+## 7. 根因确认与闭环验证（2026-09-22 解决）
+
+1. **确切根因**：
+   在 `ads1115_ctrl.v` 中，优化项 O2b 引入了 `OS_WAIT_CYCLES[WAIT_BITS-1:0]`。在 ISE 14.7 XST 综合器中，对 `integer` 常量参数执行带参数边界的位切片计算异常，结果恒为 0，导致 `wait_timeout` 在 cycle 0 恒为 1'b1。首次读取 OS 位为 0 时未经等待立即误报超时退出（ERR=4）。
+2. **修复措施**：
+   移除参数切片，固定 `wait_cnt` 为 16-bit 寄存器，采用常量直接比较 `(wait_cnt >= OS_WAIT_CYCLES)`。
+3. **成功可观测性（Option B 闭环）**：
+   将三通道原始数据与 sample_valid 经 `finger_piano_stage2_top` 接入顶层，以紧凑状态机每 500 ms 串口上报 `ADC OK CH0=0xXXXX CH1=0xXXXX CH2=0xXXXX\r\n`。
+4. **资源与实现**：
+   消除顶层冗余寄存器并精简状态机，占用 702/704 Slices (99%)，时序 Slack +70.999 ns。构建编号：`20260922-202944-3b5f28a9` (Bit SHA-256: `9AFD94BA...`)。
+5. **板级真机证据**：
+   COM20 采集证据 `artifacts/uart-20260922-203101-live_adc_ok-9347e4bf`：
+   `ADC ERR=4` 降至 0 次（0.0 错误/秒）；
+   收到 14 帧实时三通道转换数据（CH0~2.86V, CH1~2.87V, CH2~3.40V），噪声微波动符合真实物理采样，确认根因彻底消除。
+

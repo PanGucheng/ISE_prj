@@ -54,7 +54,7 @@ function Save-Line([string]$Line, [bool]$Complete) {
     $code = $null
     $values = $null
     if (-not $Complete) { $kind = 'partial' }
-    elseif ($Line -match '^ADC (?:ERR=|ERROR CODE=)([0-9]+)$') {
+    elseif ($Line -match '^ADC (?:ERR=|ERROR CODE=)([0-9]+)(?:.*)$') {
         $kind = 'adcErrors'
         $code = [int]$Matches[1]
         $key = [string]$code

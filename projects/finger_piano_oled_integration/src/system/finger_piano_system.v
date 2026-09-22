@@ -64,6 +64,10 @@ module finger_piano_system #(
 
     output wire        adc_error,
     output wire [2:0]  adc_error_code,
+    output wire        adc_sample_valid,
+    output wire [15:0] adc_ch0_raw,
+    output wire [15:0] adc_ch1_raw,
+    output wire [15:0] adc_ch2_raw,
     output wire        dac_error,
     output wire        dac_overrun
 );
@@ -86,13 +90,9 @@ module finger_piano_system #(
     //-------------------------------------------------------------------------
     // ADC / 压力链(P1 controller -> P5 processor;两模块间纯 wire 直连)
     //-------------------------------------------------------------------------
-    wire [15:0] adc_ch0_raw;
-    wire [15:0] adc_ch1_raw;
-    wire [15:0] adc_ch2_raw;
-    wire        adc_sample_valid;
     wire [2:0]  adc_err_code_w;
 
-    assign adc_error_code = (ENABLE_ADC != 0) ? adc_err_code_w : 3'd0;
+    assign adc_error_code  = (ENABLE_ADC != 0) ? adc_err_code_w : 3'd0;
 
     generate
         if (ENABLE_ADC == 0) begin : GEN_ADC_OFF

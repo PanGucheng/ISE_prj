@@ -89,21 +89,6 @@ module ads1115_ctrl #(
     localparam integer OS_WAIT_CYCLES =
         ((SYS_CLK_HZ / 500) < 1000) ? 1000 : (SYS_CLK_HZ / 500);
 
-    // 计算表示非负整数所需的最小位宽(纯 Verilog-2001 常量函数)
-    function integer calc_bits;
-        input integer v;
-        integer bits;
-        begin
-            bits = 0;
-            while (v > 0) begin
-                bits = bits + 1;
-                v = v >> 1;
-            end
-            calc_bits = (bits < 1) ? 1 : bits;
-        end
-    endfunction
-
-    localparam integer WAIT_BITS = calc_bits(OS_WAIT_CYCLES) + 1;
 
     //-------------------------------------------------------------------------
     // 配置字(手册位域拼接;PGA/DR 参数取低 3 位,避免对 integer 参数做位选择)
@@ -188,8 +173,8 @@ module ads1115_ctrl #(
     reg [7:0]  raw_lo;
     reg        os_ready_flag;   // S_W_CHK 的判定结果,供 S_W_STOP 使用
     reg        wait_active;     // 转换等待计时中
-    reg [WAIT_BITS-1:0] wait_cnt;
-    wire       wait_timeout = (wait_cnt >= OS_WAIT_CYCLES[WAIT_BITS-1:0]);
+    reg [15:0] wait_cnt;
+    wire       wait_timeout = (wait_cnt >= OS_WAIT_CYCLES);
     reg [2:0]  err_code_q;      // 粘滞错误码
 
     reg        r_sample_valid;
@@ -319,7 +304,7 @@ module ads1115_ctrl #(
             raw_lo        <= 8'h00;
             os_ready_flag <= 1'b0;
             wait_active   <= 1'b0;
-            wait_cnt      <= {WAIT_BITS{1'b0}};
+            wait_cnt      <= 16'd0;
             err_code_q    <= 3'd0;
             r_sample_valid<= 1'b0;
             r_busy        <= 1'b0;
@@ -331,7 +316,7 @@ module ads1115_ctrl #(
 
             if (wait_active) begin
                 if (!wait_timeout) begin
-                    wait_cnt <= wait_cnt + 1'b1;
+                    wait_cnt <= wait_cnt + 16'd1;
                 end
             end
 
@@ -353,7 +338,7 @@ module ads1115_ctrl #(
                 os_ready_flag <= (poll_hi[7] == 1'b1);
                 if (poll_hi[7] == 1'b1) begin
                     state <= S_W_STOP;              // 转换完成:收尾轮询事务
-                end else if (wait_timeout) begin
+                end else if (wait_cnt >= OS_WAIT_CYCLES) begin
                     err_code_q <= 3'd4;             // 转换等待超时
                     state      <= S_ERR_STOP;
                 end else begin
@@ -413,7 +398,7 @@ module ads1115_ctrl #(
                         end else begin
                             case (state)
                                 S_C_LO: begin       // 配置写入完成:开始等转换
-                                    wait_cnt    <= {WAIT_BITS{1'b0}};
+                                    wait_cnt    <= 16'd0;
                                     wait_active <= 1'b1;
                                 end
                                 S_W_MSB: poll_hi <= m_rdata;
