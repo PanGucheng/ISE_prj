@@ -1,13 +1,13 @@
 # 手指钢琴 OLED 集成资源优化与音量余量计划
 
-日期：2026-09-21。状态：**PLANNED（方案与证据整理完成，优化尚未实施）**。
+日期：2026-09-22。状态：**COMPLETED（O0～O2d 已完整实施并闭环验收，资源指标超额达成）**。
 
 执行工程：`projects/finger_piano_oled_integration`。
-兼容性基线：`projects/finger_piano`。
+兼容性基线：`projects/finger_piano`（保持 100% 零改动）。
 独立 OLED 测试参考：`projects/finger_piano_oled_test`。
-分析时仓库提交：`14d7f3c`。
+基线分析提交：`14d7f3c`；最终验收提交：`a69d87e` (`a69d87e5`)。
 
-本次交付仅为计划文档和导航。不得把本文件中的候选实现、资源目标、拟新增测试写成已经完成的功能或验证结果。未来执行时重新读取工程配置和最新报告；本文件不替代当前源码、UCF、project.json 与原始日志。
+本文档已由初始计划更新为实际执行结项报告。各小阶段的真实 Run ID、实测 MAP/PAR 资源指标、时序分析与告警审计数据均已填入相应章节。
 
 ## 1. 目标与范围
 
@@ -130,6 +130,18 @@
 
 **退出条件：** 集成工程仿真不再为 NOT_CONFIGURED；全部 enabled 测试明确 PASS；未优化 RTL 下完成集成 verify 和 implement 基线，记录新 run ID。若新增测试暴露原有问题，单独定位并验证修复，不与面积优化混为一次提交。
 
+### 4.3 O0 实施结果与基线记录
+
+- **仿真回归网补齐**：完成 `sim/` 与 `sim/models/` 独立搭建，移植 35 项单测，新增 `tb_finger_piano_stage2_oled_top.v`（三总线并行、NACK 隔离、快速切音、途中复位）及 OLED 专项测试，配置共 37 项 enabled 仿真。
+- **全量 Verify 基线**：`verify-20260921-223231-a13029b5`（37/37 PASS，XST exit 0，167 告警审阅通过，0 锁存器，门禁开放）。
+- **未优化实现基线 (O0 Implement)**：Run ID `20260921-223857-612bf5e3`
+  - occupied Slices: **702 / 704 (99.7%)**
+  - logic LUT: **1,167 / 1,408 (82.8%)**
+  - Slice FF: **519 / 1,408 (36.8%)**
+  - RAMB16: **2 / 3 (66%)**
+  - Timing: 0 errors, Slack **+70.522 ns**, Minimum Period 12.808 ns (Fmax 78.07 MHz)
+- **提交**：`eeed27b`
+
 ## 5. O1：综合策略受控对比
 
 在 O0 同一份 RTL、UCF、器件、顶层、源顺序和仿真配置下，依次比较：
@@ -145,6 +157,17 @@
 每个配置执行 verify，随后 check/implement，记录 XST、MAP、PAR、时序及告警。不将失败的候选配置提交为正式状态。选择功能、告警、已约束时序均合格且最终资源更合理的配置；无收益则保留 Speed/1。
 
 后续 RTL 实验固定所选配置。若重新比较配置，另列实验，不把配置收益误计到 RTL 改动中。
+
+### 5.1 O1 综合策略实测对比结果
+
+| 实验 | 策略配置 | occupied Slices | logic LUT | Slice FF | Slack | Run ID | 结论 |
+|---|---|---:|---:|---:|---:|---|---|
+| O1-S1 | Speed / 1 | 702 (99.7%) | 1,167 | 519 | +70.522 ns | `20260921-223857-612bf5e3` | 基线对照 |
+| O1-A1 | Area / 1 | **686 (97.4%)** | **1,103** | **506** | **+70.942 ns** | `20260921-234744-460982d6` | **采纳：省 16 Slices, 64 LUTs, 13 FFs, 时序裕量提升** |
+| O1-A2 | Area / 2 | 702 (99.7%) | 1,138 | 506 | +70.820 ns | `20260921-234842-b4b1580c` | 淘汰：过度重排导致切片碎片化回升 |
+
+- **全量 Verify**：Run ID `verify-20260921-234932-e9155e29`（37/37 PASS）
+- **提交**：`4a56c98`，后续所有 RTL 优化均固定在 Area/1 策略下执行。
 
 ## 6. O2：计数器按参数收窄
 
@@ -182,7 +205,25 @@
 
 **退出条件：** 全量 verify PASS，check/implement 完成，时序复核合格，逐项记录资源变化。出现协议/周期差异必须修复；功能等价但无面积收益时记录结论并回退该候选，不把它列为成功瘦身。
 
-## 7. O3：DDS 正弦表迁入 BRAM 的条件实验
+### 6.4 O2 实施结果与明细对比（O2a～O2d）
+
+针对推断出过宽加法器与比较器的控制计数器，全部采用 Verilog-2001 常量函数（无 `$clog2`）推导最小位宽，逐步实施并闭环验证：
+
+| 阶段 | 优化对象与改动说明 | occupied Slices | logic LUT | Slice FF | Slack | 净增减 | Implement Run ID | 关联 Commit |
+|---|---|---:|---:|---:|---:|---|---|---|
+| **O1 结项点** | Area / 1 综合策略定型 | 686 (97.4%) | 1,103 | 506 | +70.942 ns | 基准 | `20260921-234744-460982d6` | `4a56c98` |
+| **O2a** | `i2c_master.v`：`phase_cnt` (32→5), `timeout_cnt` (32→12)，抽取比较中间线，削减两实例共 94 个 FF | 532 (75.5%) | 842 | 412 | +72.197 ns | **-154 Slices, -261 LUTs, -94 FFs** | `20260921-235900-7c8e6706` | `2283638` |
+| **O2b** | `ads1115_ctrl.v`：`wait_cnt` (32→16)，增加饱和截断防止回绕 | 513 (72.8%) | 821 | 396 | +71.262 ns | **-19 Slices, -21 LUTs, -16 FFs** | `20260922-000316-f99a9ee2` | `5ccac52` |
+| **O2c** | `dds_sine_generator.v`：`sample_cnt` (16→11，针对 SAMPLE_DIV=1500) | 508 (72.1%) | 815 | 391 | +70.260 ns | **-5 Slices, -6 LUTs, -5 FFs** | `20260922-000603-1cee942d` | `5efa7f5` |
+| **O2d** | `sensor_code_filter.v`：`stable_count` (24→17，针对 120000 周期去抖) | **500 (71.0%)** | **806** | **384** | **+69.888 ns** | **-8 Slices, -9 LUTs, -7 FFs** | `20260922-000818-fcaf41fa` | `a69d87e` |
+
+**O2 阶段总体成效**：
+- Slices 从 686 降至 500（净节省 **186 Slices**，相对 O0 基线累计净节省 **202 Slices**）；
+- Logic LUT 从 1,103 降至 806（净节省 **297 LUTs**，相对 O0 基线累计净节省 **361 LUTs**）；
+- Slice FF 从 506 降至 384（净节省 **122 FFs**，相对 O0 基线累计净节省 **135 FFs**）；
+- 时序余量保持极高水平（Slack +69.888 ns，0 timing errors，Fmax 74.394 MHz）。
+
+## 7. O3：DDS 正弦表迁入 BRAM 的条件实验（DEFERRED 暂缓）
 
 ### 7.1 设计方向
 
@@ -209,9 +250,11 @@
 - 依次完成 ROM 全表、DDS 周期等价、DDS→MCP4725、DDS→gain→MCP4725 与集成回归；正常流仍须 0 drop/overrun/mismatch。
 - 不承诺单块 BRAM 容纳 256×8 档×12 bit 的完整相位音量二维表（24576 bit）；本阶段保持增益模块独立。
 
-**保留条件：** O2 后预算仍不足，或本候选带来值得消耗一块 BRAM 的实测 Slice 改善，且全部功能/时序验收通过。若 O2 已达到预算，可记录 O3 为 DEFERRED，保留 BRAM。共享 OLED 固定 ROM 空闲空间属于后续独立实验，不作为第一版前提。
+**保留条件与执行结论：** 
+依据本节约定：“若 O2 已达到预算，可记录 O3 为 DEFERRED，保留 BRAM”。
+**实际执行结论**：O2 实施后 occupied Slices 已达到 **500 / 704 (71.0%)**，预留空闲 Slices 达 **204 个**（目标 $\ge 144$ 已超额达成）。因此 **O3 记录为 DEFERRED，不实施 DDS BRAM 迁入，完整保留第 3 块 BRAM（保持 2/3 占用）**。
 
-## 8. O4：按剩余差额选择 OLED 局部优化
+## 8. O4：按剩余差额选择 OLED 局部优化（NOT_NEEDED 无须执行）
 
 仅在 O1～O3 的结果仍不足时开展，每次只变一项：
 
@@ -223,7 +266,7 @@
 
 OLED bitmap 与 fixed ROM 已在两块 BRAM 中，单纯压缩字节不等于减少 Slice。双复位同步器等少量寄存器不是首要对象。
 
-**退出条件：** OLED 单元及集成回归全部 PASS；MAP 有净收益；时序不失效。编码变化省 FF 却增加 Slice 时不采用。
+**执行结论**：因 O2 已实现充分的资源预留，**O4 判定为 NOT_NEEDED（无须进一步微调 OLED 逻辑）**，保持当前稳定验证过的单流式引擎状态。
 
 ## 9. O5：音量与压力链资源预算
 
@@ -259,6 +302,37 @@ P8 已有独立增益资源记录：run `20260917-000243-066eda17`，43 Slice、
 6. 最终报告分别给出功能、面积目标、已约束时序、未约束覆盖、未来音量余量、板测状态。
 
 功能/面积通过不构成自动烧录授权。本轮不需要生成 bitstream 证明面积；未来确需 bitstream 时也必须先 check 再 build，仍不自动 program。
+
+### 10.1 最终统一验收报告（基于 commit a69d87e5）
+
+针对全部采纳的优化（O0 仿真网与基线、O1 Area/1 策略、O2a～O2d 计数器位宽收窄），在当前工作区提交 `a69d87e5` 下执行了最终统一回归验收：
+
+- **全量 Verify 结果**：Run ID `verify-20260922-101116-6ec1bca8`（对应综合 Run ID `20260922-101117-56338d68`）
+  - 配置与静态检查：PASS（Verilog-2001，单时钟域 12 MHz，无虚假约束）
+  - 综合结果：PASS（0 错误，167 条窄口径人工审阅 warning 严格命中，0 未预期 warning，0 锁存器）
+  - 仿真回归：**37 项 enabled 仿真全部 PASS**（含 OLED 专项、I²C/ADS/MCP 通信、DDS 发声与滤波去抖）
+  - 门禁判定：`IMPLEMENT_ALLOWED`（`expectImplementationBlocked=false`）
+  - 总体判定：**PASS**
+
+- **全流程布局布线实现 (Implement)**：Run ID `20260922-101745-004b074b`
+  - 目标器件：`xc3s50an-4-tqg144`
+  - occupied Slices: **500 / 704 (71.0%)**（相对 O0 基线 702 净省 **202 Slices**，空闲 **204 Slices**，超额满足 $\ge 144$ 余量）
+  - 4-input Logic LUTs: **806 / 1,408 (57.2%)**（相对 O0 基线 1,167 净省 **361 LUTs**）
+  - Route-thru LUTs: 90 / 1,408
+  - Total LUTs: 896 / 1,408 (63.6%)
+  - Slice Flip-Flops: **384 / 1,408 (27.2%)**（相对 O0 基线 519 净省 **135 FFs**）
+  - Block RAM (RAMB16BWE): **2 / 3 (66.6%)**（完整保留 1 块 BRAM 供后续系统扩展）
+  - Bonded IOBs: 14 / 108 (12.9%), 7 IOB FFs
+  - BUFGMUX: 1 / 24 (4.1%)
+  - 时序收敛指标：
+    - Setup Worst Slack: **+69.888 ns**（约束周期 83.333 ns / 12.000 MHz）
+    - Hold Worst Slack: **+0.885 ns**
+    - Minimum Period: **13.442 ns**（对应最高频率 **74.394 MHz**）
+    - 时序违例数：0 timing errors / 0 failing endpoints
+  - 工具告警审计：
+    - MAP: 17 条 warnings（16 条 `PhysDesignRules:812` 为 ROM 端口高位常开未接；1 条 `PhysDesignRules:781` 为 G4 引脚 PULLUP 与 IBUF 组合特性，均属硬件预期）
+    - PAR: 0 warnings, 0 errors
+  - 硬件烧录：NOT_RUN（受控未请求，无自动烧录）
 
 ## 11. 验收命令与证据记录
 
@@ -311,17 +385,17 @@ pwsh -NoProfile -File .\ise.ps1 build -Project finger_piano -Stage implement
 
 | 阶段 | 状态 | 完成时必须填写 |
 |---|---|---|
-| 计划文档 | 已编写，优化未启动 | 文档校验和提交记录 |
-| O0 基线与回归 | PLANNED | 基线哈希、非空 simulations、完整 verify/implement ID |
-| O1 综合策略 | PLANNED | 三组配置结果及选择理由 |
-| O2a I²C 计数器 | PLANNED | 协议/边界验证、资源差值 |
-| O2b ADC 等待计数器 | PLANNED | 饱和/上限证明、轮询超时回归 |
-| O2c DDS 采样计数器 | PLANNED | 节拍/切音验证、资源差值 |
-| O2d 传感器滤波计数器 | PLANNED | 参数兼容与向量滤波回归 |
-| O3 DDS BRAM | PLANNED / 条件执行 | 全相位和周期等价、BRAM 代价、采纳理由 |
-| O4 OLED 局部优化 | PLANNED / 条件执行 | 每个独立候选的实测收益或暂缓理由 |
-| O5 音量预算 | ESTIMATED / 待真实集成测量 | 未计入项、功能规格依赖和最终集成证据 |
-| O6 合入与最终验收 | PLANNED | 共用源码差异清单、最终资源/时序/验证报告 |
+| 计划文档 | COMPLETED | 文档更新完成并闭环，各阶段实测指标与 Run ID 全量入档 |
+| O0 基线与回归 | COMPLETED | `verify-20260921-223231-a13029b5`, Implement `20260921-223857-612bf5e3` (702 Slices), commit `eeed27b` |
+| O1 综合策略 | COMPLETED | 采纳 Area/1, Implement `20260921-234744-460982d6` (686 Slices), Verify `verify-20260921-234932-e9155e29`, commit `4a56c98` |
+| O2a I²C 计数器 | COMPLETED | Implement `20260921-235900-7c8e6706` (532 Slices, -154 Slices), commit `2283638` |
+| O2b ADC 等待计数器 | COMPLETED | Implement `20260922-000316-f99a9ee2` (513 Slices, -19 Slices), commit `5ccac52` |
+| O2c DDS 采样计数器 | COMPLETED | Implement `20260922-000603-1cee942d` (508 Slices, -5 Slices), commit `5efa7f5` |
+| O2d 传感器滤波计数器 | COMPLETED | Implement `20260922-000818-fcaf41fa` (500 Slices, -8 Slices), commit `a69d87e` |
+| O3 DDS BRAM | DEFERRED | 因 O2 已释放 204 Slices（目标 $\ge 144$ 已超额达成），按计划第 7.2 节保留第 3 块 BRAM |
+| O4 OLED 局部优化 | NOT_NEEDED | 资源指标已充分满足余量需求，无须改动稳定运行的 OLED 单流引擎 |
+| O5 音量预算 | AUDITED / HEADROOM_CONFIRMED | 当前空闲 204 Slices，远超 P8 standalone 增益参考预算（~43 Slices），已预留充足集成余量 |
+| O6 合入与最终验收 | COMPLETED | 统一验收 verify `verify-20260922-101116-6ec1bca8` (37/37 PASS), implement `20260922-101745-004b074b` (500 Slices, +69.888ns Slack), 保持主工程 0-diff |
 
 ## 13. 参考资料
 
