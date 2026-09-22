@@ -4,6 +4,8 @@
 
 ## 开发入口
 
+- [ADC ERR=4 诊断与板测交接](docs/adc_err4_debug_handoff.md)：两工程差异、错误码 4/5 分流、UART 采集脚本及下一位调测 agent 的任务。当前为诊断准备；全量 verify 按用户要求中止，未完成新版本板测。
+
 - [资源优化与音量余量详细计划](docs/resource_optimization_plan.md)：基线证据、O0～O6 阶段、计数器位宽、DDS BRAM、回归矩阵、预算、回退及交付标准。
 - [主工程规则](../finger_piano/AGENTS.md)与[仓库规则](../../AGENTS.md)。
 - [全局文档入口](../../doc/README.md)。

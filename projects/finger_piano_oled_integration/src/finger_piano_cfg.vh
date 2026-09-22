@@ -66,7 +66,7 @@
 // 12 MHz + 333333 走板上默认设计目标 18+18=36 拍(actual 333333.333 Hz);
 // 其它速率由各 controller 内的强制公式换算(见 P1 计划"I2C 拍数算法")。
 // 400000 仅为可配置项,不是实物默认。
-// ADS1115 在实际排线/弱上拉硬件中运行于 100 kHz (120 周期/位) 可彻底避免上升沿地址 NACK。
+// Match the board-tested peripheral project for controlled A/B diagnosis.
 `define CFG_ADC_I2C_SPEED     100000
 `define CFG_DAC_I2C_SPEED     333333
 

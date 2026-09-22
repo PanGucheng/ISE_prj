@@ -654,6 +654,36 @@
       "timeoutSeconds": 120,
       "passPattern": "TB_UART_TX: PASS",
       "failPattern": "TB_UART_TX: FAIL"
+    },
+    {
+      "name": "ads1115_ctrl_real_100000",
+      "top": "tb_ads1115_ctrl",
+      "sources": [
+        "sim/tb_ads1115_ctrl.v",
+        "sim/models/ads1115_model.v"
+      ],
+      "generics": {
+        "TB_I2C_HZ": "100000",
+        "TB_CONV_CYCLES": "16000"
+      },
+      "timeoutSeconds": 240,
+      "passPattern": "TB_ADS1115_CTRL: PASS",
+      "failPattern": "TB_ADS1115_CTRL: FAIL"
+    },
+    {
+      "name": "ads1115_ctrl_real_333333",
+      "top": "tb_ads1115_ctrl",
+      "sources": [
+        "sim/tb_ads1115_ctrl.v",
+        "sim/models/ads1115_model.v"
+      ],
+      "generics": {
+        "TB_I2C_HZ": "333333",
+        "TB_CONV_CYCLES": "16000"
+      },
+      "timeoutSeconds": 240,
+      "passPattern": "TB_ADS1115_CTRL: PASS",
+      "failPattern": "TB_ADS1115_CTRL: FAIL"
     }
   ],
   "verification": {

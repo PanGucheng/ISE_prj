@@ -20,8 +20,12 @@
 //=============================================================================
 
 `timescale 1ns/1ps
+`include "finger_piano_cfg.vh"
 
 module tb_ads1115_ctrl;
+
+    parameter integer TB_I2C_HZ = `CFG_ADC_I2C_SPEED;
+    parameter integer TB_CONV_CYCLES = 2000;
 
     localparam integer FRAME_GUARD  = 200000;   // 等一帧的周期上限
     localparam integer ERROR_GUARD  = 200000;   // 等一个 error 的周期上限
@@ -58,7 +62,8 @@ module tb_ads1115_ctrl;
     pullup pu_sda2 (sda2);
 
     ads1115_ctrl #(
-        .ENABLE(1'b1)
+        .ENABLE(1'b1),
+        .I2C_HZ(TB_I2C_HZ)
     ) u_dut (
         .clk              (clk),
         .rst_n_sync       (rst_n),
@@ -113,7 +118,7 @@ module tb_ads1115_ctrl;
 
     ads1115_model #(
         .DEVICE_ADDR(7'h48),
-        .CONV_CYCLES(2000)
+        .CONV_CYCLES(TB_CONV_CYCLES)
     ) u_model (
         .clk             (clk),
         .rst             (~rst_n),   // 模型内部为高有效
@@ -349,6 +354,36 @@ module tb_ads1115_ctrl;
             check_true(err_code2     === 3'd0, "T7 err_code2 == 0");
             check_true((scl2 === 1'b1) && (sda2 === 1'b1),
                        "T7 bus 2 pulled high (released)");
+        end
+
+        //---------------------------------------------------------------------
+        // T8: master 协议错误必须与 OS 等待超时区分；总线收尾后能恢复。
+        //---------------------------------------------------------------------
+        $display("T8: inject master protocol error -> error_code 5, then recover");
+        begin : T8_PROTOCOL
+            integer guard;
+            guard = 0;
+            // 在地址命令完成、controller 尚未读取结果的半周期内注入。
+            @(negedge clk);
+            while (!(u_dut.GEN_ADC.state == 5'd2 && u_dut.GEN_ADC.issued &&
+                     u_dut.GEN_ADC.saw_busy && u_dut.GEN_ADC.m_ready) && guard < FRAME_GUARD) begin
+                @(negedge clk);
+                guard = guard + 1;
+            end
+            check_true(guard < FRAME_GUARD, "T8 reached command completion injection point");
+            if (guard < FRAME_GUARD) begin
+                force u_dut.GEN_ADC.m_ecode = 2'd3;
+                @(posedge clk);
+                #1;
+                release u_dut.GEN_ADC.m_ecode;
+                wait_error(ERROR_GUARD, ecode);
+                check_eq32(ecode, 3'd5, "T8 protocol error distinct from OS timeout 4");
+                wait_valid(FRAME_GUARD);
+                check_eq32(err_code, 3'd0, "T8 recovery clears protocol error");
+                check_eq32(ch0_raw, 16'h1234, "T8 recovered CH0");
+                check_eq32(ch1_raw, 16'h3456, "T8 recovered CH1");
+                check_eq32(ch2_raw, 16'h5678, "T8 recovered CH2");
+            end
         end
 
         //---------------------------------------------------------------------

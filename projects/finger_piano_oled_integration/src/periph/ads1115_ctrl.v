@@ -25,7 +25,7 @@
 //
 // 错误码(error_code,粘滞到下一次帧成功结束的 S_VALID 清零):
 //   0 = 无错误;1 = 地址字节 NACK;2 = pointer/数据字节 NACK;
-//   3 = I2C master 超时;4 = 其它(转换等待超时 / 协议异常)
+//   3 = I2C master 超时;4 = OS 转换等待超时;5 = master 协议/非预期错误
 // NACK 或超时发生时:master 已自动补 STOP / 释放总线,controller 再补发
 // 一次 STOP 保证事务关闭,然后 pulse adc_error 并重新开始扫描帧。
 //
@@ -281,17 +281,18 @@ module ads1115_ctrl #(
         endcase
     end
 
-    // 错误分类:地址字节 NACK -> 1;数据/pointer 字节 NACK -> 2;master 超时 -> 3;其它 -> 4
+    // 错误分类:地址 NACK=1,数据 NACK=2,master 超时=3。
+    // 4 仅用于 S_W_CHK 的 OS 等待超时；5 区分 master 协议/非预期错误。
     always @(*) begin
         case (state)
             S_C_AW, S_W_AW, S_W_RW, S_R_AW, S_R_RW:
                 st_errcls = (m_ecode == 2'd1) ? 3'd1 :
-                            ((m_ecode == 2'd2) ? 3'd3 : 3'd4);
+                            ((m_ecode == 2'd2) ? 3'd3 : 3'd5);
             S_C_PTR, S_C_HI, S_C_LO, S_W_PTR:
                 st_errcls = (m_ecode == 2'd1) ? 3'd2 :
-                            ((m_ecode == 2'd2) ? 3'd3 : 3'd4);
+                            ((m_ecode == 2'd2) ? 3'd3 : 3'd5);
             default:
-                st_errcls = (m_ecode == 2'd2) ? 3'd3 : 3'd4;
+                st_errcls = (m_ecode == 2'd2) ? 3'd3 : 3'd5;
         endcase
     end
 
