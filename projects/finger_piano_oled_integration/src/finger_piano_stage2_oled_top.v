@@ -80,7 +80,7 @@ module finger_piano_stage2_oled_top #(
     end
 
     //-------------------------------------------------------------------------
-    // 2. 压力门限判定与用户触摸检测
+    // 2. 压力门限判定
     //-------------------------------------------------------------------------
     // CH0/CH1: 未按 2.45V, 按下 0.2V~0.8V -> 阈值 8000 (触发电压 <= 1.50V)
     // CH2 (第三通道): 未按 2.40V, 按下 2.00V -> 阈值 2400 (触发电压 <= 2.20V，对称 0.2V 容限)
@@ -91,10 +91,6 @@ module finger_piano_stage2_oled_top #(
 
     wire [2:0] manual_sensor =
         (ADC_NOTE_TRIGGER != 0) ? adc_sensor_code : sensor_async;
-
-    wire user_touched = (piano_pressure_ch0 >= PRESSURE_THRESHOLD) ||
-                        (piano_pressure_ch1 >= PRESSURE_THRESHOLD) ||
-                        (piano_pressure_ch2 >= PRESSURE_THRESHOLD_CH2);
 
     wire oled_init_done;
     wire oled_error;
@@ -166,19 +162,14 @@ module finger_piano_stage2_oled_top #(
             intro_beat      <= 5'd0;
             last_intro_note <= 3'd1;
         end else if (intro_active) begin
-            if (user_touched) begin
-                // 用户任何时候按下按键，立即打断自动奏乐，无缝切入手动弹奏
-                intro_active <= 1'b0;
-            end else if (oled_init_done) begin
-                if (intro_melody != 3'd0) begin
-                    last_intro_note <= intro_melody;
-                end
-                if (intro_beat_tick) begin
-                    if (intro_beat == 5'd31) begin
-                        intro_active <= 1'b0; // 32 拍全部奏毕，自动交接给手动模式
-                    end else begin
-                        intro_beat <= intro_beat + 5'd1;
-                    end
+            if (intro_melody != 3'd0) begin
+                last_intro_note <= intro_melody;
+            end
+            if (intro_beat_tick) begin
+                if (intro_beat == 5'd31) begin
+                    intro_active <= 1'b0; // 32 拍全部奏毕，自动交接给手动模式
+                end else begin
+                    intro_beat <= intro_beat + 5'd1;
                 end
             end
         end
