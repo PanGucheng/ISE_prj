@@ -35,9 +35,9 @@ NET "rst_n" LOC = P3 | IOSTANDARD = LVCMOS33;
 #-----------------------------------------------------------------------------
 # 3-BIT SENSOR INPUT: LM393 比较器编码
 #-----------------------------------------------------------------------------
-NET "sensor_async<0>" LOC = P28 | IOSTANDARD = LVCMOS33;
-NET "sensor_async<1>" LOC = P29 | IOSTANDARD = LVCMOS33;
-NET "sensor_async<2>" LOC = P30 | IOSTANDARD = LVCMOS33;
+NET "sensor_async<0>" LOC = P28 | IOSTANDARD = LVCMOS33 | PULLDOWN;
+NET "sensor_async<1>" LOC = P29 | IOSTANDARD = LVCMOS33 | PULLDOWN;
+NET "sensor_async<2>" LOC = P30 | IOSTANDARD = LVCMOS33 | PULLDOWN;
 
 #-----------------------------------------------------------------------------
 # ADS1115 INDEPENDENT I2C BUS (开漏, 外部 4.7 kΩ 上拉到 3.3 V)

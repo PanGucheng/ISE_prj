@@ -101,8 +101,8 @@
 //   极性: CFG_PRESSURE_INVERT = 1 (反向压力: 电压随压力增大而降低, P = max(0, ZERO - positive))
 //-----------------------------------------------------------------------------
 `define CFG_PRESSURE_INVERT     1
-`define CFG_PRESSURE_CH0_ZERO   15'd19200
-`define CFG_PRESSURE_CH1_ZERO   15'd19200
-`define CFG_PRESSURE_CH2_ZERO   15'd19200
+`define CFG_PRESSURE_CH0_ZERO   15'd20000
+`define CFG_PRESSURE_CH1_ZERO   15'd20000
+`define CFG_PRESSURE_CH2_ZERO   15'd20000
 
 `endif // FINGER_PIANO_CFG_VH
