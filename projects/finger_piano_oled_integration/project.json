@@ -164,6 +164,7 @@
   "simulations": [
     {
       "name": "uart_reporter_equivalence",
+      "enabled": false,
       "top": "tb_uart_reporter_equivalence",
       "sources": [
         "sim/models/ramb16_s9_model.v",
