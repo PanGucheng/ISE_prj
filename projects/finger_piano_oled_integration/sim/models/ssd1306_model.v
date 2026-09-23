@@ -63,7 +63,7 @@ module ssd1306_model #(
     initial begin
         expected_init_cmd[0]  = 8'hAE; // Display OFF
         expected_init_cmd[1]  = 8'h20; // Set Memory Addressing Mode
-        expected_init_cmd[2]  = 8'h10; // Page Addressing Mode (0x10)
+        expected_init_cmd[2]  = 8'h02; // Page Addressing Mode (0x02)
         expected_init_cmd[3]  = 8'hB0; // Page Start Address 0
         expected_init_cmd[4]  = 8'hC8; // COM Output Scan Direction Remapped
         expected_init_cmd[5]  = 8'h00; // Column Start Low 0
@@ -79,13 +79,13 @@ module ssd1306_model #(
         expected_init_cmd[15] = 8'hD3; // Display Offset
         expected_init_cmd[16] = 8'h00; // Offset 0
         expected_init_cmd[17] = 8'hD5; // Display Clock Divide / Osc Freq
-        expected_init_cmd[18] = 8'hF0; // Max Freq
+        expected_init_cmd[18] = 8'h80; // Standard 0x80 ratio
         expected_init_cmd[19] = 8'hD9; // Pre-charge Period
-        expected_init_cmd[20] = 8'h22; // Phase 1 = 2, Phase 2 = 2
+        expected_init_cmd[20] = 8'hF1; // Phase 1 = 1, Phase 2 = 15
         expected_init_cmd[21] = 8'hDA; // COM Pins Config
         expected_init_cmd[22] = 8'h12; // Alternative COM pins
         expected_init_cmd[23] = 8'hDB; // VCOMH Deselect Level
-        expected_init_cmd[24] = 8'h20; // 0.77 x VCC
+        expected_init_cmd[24] = 8'h40; // 0.83 x VCC
         expected_init_cmd[25] = 8'h8D; // Charge Pump Setting
         expected_init_cmd[26] = 8'h14; // Enable Charge Pump
     end
@@ -224,11 +224,11 @@ module ssd1306_model #(
                                 // 2. 寻址模式与双字节命令解析
                                 if (has_cmd_arg) begin
                                     if (pending_cmd == 8'h20) begin
-                                        if (shift_reg == 8'h10) begin
+                                        if (shift_reg == 8'h02 || shift_reg[1:0] == 2'b10) begin
                                             memory_addressing_mode <= 2'b10;
                                         end else begin
                                             memory_addressing_mode <= shift_reg[1:0];
-                                            $display("[%t] [SSD1306_MODEL] ERROR: Memory addressing mode not 0x10 (Page Mode)! Got 0x%02X",
+                                            $display("[%t] [SSD1306_MODEL] ERROR: Memory addressing mode not 0x02 (Page Mode)! Got 0x%02X",
                                                      $time, shift_reg);
                                             mode_error <= 1'b1;
                                         end

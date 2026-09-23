@@ -137,7 +137,7 @@ module tb_oled_test_top;
         end
 
         if (model_mode_err || model_addr_mode !== 2'b10) begin
-            $display("ERROR: Memory addressing mode not set to Page Addressing Mode (0x10)!");
+            $display("ERROR: Memory addressing mode not set to Page Addressing Mode (0x02)!");
             $display("TB_OLED_TEST_TOP: FAIL");
             $finish;
         end
