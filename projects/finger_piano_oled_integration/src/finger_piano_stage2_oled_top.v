@@ -56,7 +56,32 @@ module finger_piano_stage2_oled_top #(
     wire [14:0] piano_pressure_ch2;
     wire        piano_pressure_valid;
 
-    // 压力门限判定:
+    //-------------------------------------------------------------------------
+    // 1. 独立复位同步器 (全工程异步拉低、同步释放) 与系统心跳分频器
+    //-------------------------------------------------------------------------
+    reg [1:0] rst_sync_ff;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            rst_sync_ff <= 2'b00;
+        else
+            rst_sync_ff <= {rst_sync_ff[0], 1'b1};
+    end
+    wire rst_n_sync = rst_sync_ff[1];
+
+    reg [22:0] heartbeat_cnt;
+    always @(posedge clk or negedge rst_n_sync) begin
+        if (!rst_n_sync) begin
+            heartbeat_cnt <= 23'd0;
+            dbg_heartbeat <= 1'b0;
+        end else begin
+            heartbeat_cnt <= heartbeat_cnt + 23'd1;
+            dbg_heartbeat <= heartbeat_cnt[22];
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // 2. 压力门限判定与用户触摸检测
+    //-------------------------------------------------------------------------
     // CH0/CH1: 未按 2.45V, 按下 0.2V~0.8V -> 阈值 8000 (触发电压 <= 1.50V)
     // CH2 (第三通道): 未按 2.40V, 按下 2.00V -> 阈值 2400 (触发电压 <= 2.20V，对称 0.2V 容限)
     wire [2:0] adc_sensor_code;
@@ -64,8 +89,103 @@ module finger_piano_stage2_oled_top #(
     assign adc_sensor_code[1] = (piano_pressure_ch1 >= PRESSURE_THRESHOLD);
     assign adc_sensor_code[2] = (piano_pressure_ch2 >= PRESSURE_THRESHOLD_CH2);
 
-    wire [2:0] active_sensor =
+    wire [2:0] manual_sensor =
         (ADC_NOTE_TRIGGER != 0) ? adc_sensor_code : sensor_async;
+
+    wire user_touched = (piano_pressure_ch0 >= PRESSURE_THRESHOLD) ||
+                        (piano_pressure_ch1 >= PRESSURE_THRESHOLD) ||
+                        (piano_pressure_ch2 >= PRESSURE_THRESHOLD_CH2);
+
+    wire oled_init_done;
+    wire oled_error;
+
+    //-------------------------------------------------------------------------
+    // 3. 上电自动奏乐状态机 (小星星: 32 拍，复用 heartbeat_cnt 零额外加法器)
+    //-------------------------------------------------------------------------
+    reg        intro_active;
+    reg [4:0]  intro_beat;
+    reg [2:0]  intro_melody;
+    reg [2:0]  last_intro_note;
+
+    always @(*) begin
+        case (intro_beat)
+            // 第一句: 一闪一闪亮晶晶 (1 1 5 5 6 6 5 -)
+            5'd0:  intro_melody = 3'd1; // 1 (DO)
+            5'd1:  intro_melody = 3'd1; // 1 (DO)
+            5'd2:  intro_melody = 3'd5; // 5 (SOL)
+            5'd3:  intro_melody = 3'd5; // 5 (SOL)
+            5'd4:  intro_melody = 3'd6; // 6 (LA)
+            5'd5:  intro_melody = 3'd6; // 6 (LA)
+            5'd6:  intro_melody = 3'd5; // 5 (SOL, 延音前半)
+            5'd7:  intro_melody = 3'd5; // 5 (SOL, 延音后半)
+
+            // 第二句: 满天都是小星星 (4 4 3 3 2 2 1 -)
+            5'd8:  intro_melody = 3'd4; // 4 (FA)
+            5'd9:  intro_melody = 3'd4; // 4 (FA)
+            5'd10: intro_melody = 3'd3; // 3 (MI)
+            5'd11: intro_melody = 3'd3; // 3 (MI)
+            5'd12: intro_melody = 3'd2; // 2 (RE)
+            5'd13: intro_melody = 3'd2; // 2 (RE)
+            5'd14: intro_melody = 3'd1; // 1 (DO, 延音前半)
+            5'd15: intro_melody = 3'd1; // 1 (DO, 延音后半)
+
+            // 第三句: 挂在天空放光明 (5 5 4 4 3 3 2 -)
+            5'd16: intro_melody = 3'd5; // 5 (SOL)
+            5'd17: intro_melody = 3'd5; // 5 (SOL)
+            5'd18: intro_melody = 3'd4; // 4 (FA)
+            5'd19: intro_melody = 3'd4; // 4 (FA)
+            5'd20: intro_melody = 3'd3; // 3 (MI)
+            5'd21: intro_melody = 3'd3; // 3 (MI)
+            5'd22: intro_melody = 3'd2; // 2 (RE, 延音前半)
+            5'd23: intro_melody = 3'd2; // 2 (RE, 延音后半)
+
+            // 第四句: 好像许多小眼睛 (5 5 4 4 3 3 2 -)
+            5'd24: intro_melody = 3'd5; // 5 (SOL)
+            5'd25: intro_melody = 3'd5; // 5 (SOL)
+            5'd26: intro_melody = 3'd4; // 4 (FA)
+            5'd27: intro_melody = 3'd4; // 4 (FA)
+            5'd28: intro_melody = 3'd3; // 3 (MI)
+            5'd29: intro_melody = 3'd3; // 3 (MI)
+            5'd30: intro_melody = 3'd2; // 2 (RE, 延音前半)
+            5'd31: intro_melody = 3'd2; // 2 (RE, 延音后半)
+            default: intro_melody = 3'd0;
+        endcase
+    end
+
+    // 0.35 秒/拍 (复用 heartbeat_cnt[21:0] == 0，32 拍总长约 11.2 秒)
+    // 短音发声 306 ms，休止 44 ms (断音清脆)；长音前半拍不休止持续发声
+    wire intro_is_long_hold = (intro_beat == 5'd6)  || (intro_beat == 5'd14) ||
+                              (intro_beat == 5'd22) || (intro_beat == 5'd30);
+    wire intro_gap          = !intro_is_long_hold && (&heartbeat_cnt[21:17]);
+    wire [2:0] intro_sound  = intro_gap ? 3'd0 : intro_melody;
+    wire intro_beat_tick    = (heartbeat_cnt[21:0] == 22'd0);
+
+    always @(posedge clk or negedge rst_n_sync) begin
+        if (!rst_n_sync) begin
+            intro_active    <= 1'b1;
+            intro_beat      <= 5'd0;
+            last_intro_note <= 3'd1;
+        end else if (intro_active) begin
+            if (user_touched) begin
+                // 用户任何时候按下按键，立即打断自动奏乐，无缝切入手动弹奏
+                intro_active <= 1'b0;
+            end else if (oled_init_done) begin
+                if (intro_melody != 3'd0) begin
+                    last_intro_note <= intro_melody;
+                end
+                if (intro_beat_tick) begin
+                    if (intro_beat == 5'd31) begin
+                        intro_active <= 1'b0; // 32 拍全部奏毕，自动交接给手动模式
+                    end else begin
+                        intro_beat <= intro_beat + 5'd1;
+                    end
+                end
+            end
+        end
+    end
+
+    wire [2:0] active_sensor  = intro_active ? intro_sound : manual_sensor;
+    wire [2:0] oled_disp_note = intro_active ? last_intro_note : piano_note_debug;
 
     finger_piano_stage2_top #(
         .PRESSURE_CH0_ZERO (15'd20000),
@@ -94,18 +214,6 @@ module finger_piano_stage2_oled_top #(
     );
 
     //-------------------------------------------------------------------------
-    // 2. 独立复位同步器 (换取基线顶层完全零侵入)
-    //-------------------------------------------------------------------------
-    reg [1:0] rst_sync_ff;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n)
-            rst_sync_ff <= 2'b00;
-        else
-            rst_sync_ff <= {rst_sync_ff[0], 1'b1};
-    end
-    wire rst_n_sync = rst_sync_ff[1];
-
-    //-------------------------------------------------------------------------
     // 3. SSD1306 OLED 主控制器与 I2C 发送器
     //-------------------------------------------------------------------------
     wire       i2c_start_req;
@@ -121,7 +229,7 @@ module finger_piano_stage2_oled_top #(
     ) u_oled_ctrl (
         .clk                (clk),
         .rst_n_sync         (rst_n_sync),
-        .note_code          (piano_note_debug),
+        .note_code          (oled_disp_note),
         .i2c_start_req      (i2c_start_req),
         .i2c_write_byte_req (i2c_write_byte_req),
         .i2c_byte_in        (i2c_byte_in),
@@ -152,17 +260,6 @@ module finger_piano_stage2_oled_top #(
     // 4. 心跳方波 (P111) 与 OLED 错误指示 (P113)
     //-------------------------------------------------------------------------
     assign dbg_unused = oled_error ^ (^sensor_async);
-
-    reg [22:0] heartbeat_cnt;
-    always @(posedge clk or negedge rst_n_sync) begin
-        if (!rst_n_sync) begin
-            heartbeat_cnt <= 23'd0;
-            dbg_heartbeat <= 1'b0;
-        end else begin
-            heartbeat_cnt <= heartbeat_cnt + 23'd1;
-            dbg_heartbeat <= heartbeat_cnt[22];
-        end
-    end
 
     //-------------------------------------------------------------------------
     // 5. UART 全系统多通道诊断日志状态机 (P110, 115200 8N1)
@@ -256,11 +353,11 @@ module finger_piano_stage2_oled_top #(
             end
 
             // 音符改变: 非 0 且变化
-            if (piano_note_debug != 3'd0 && piano_note_debug != note_prev) begin
+            if (oled_disp_note != 3'd0 && oled_disp_note != note_prev) begin
                 note_pending <= 1'b1;
-                latched_note <= piano_note_debug;
-                note_prev    <= piano_note_debug;
-            end else if (piano_note_debug == 3'd0) begin
+                latched_note <= oled_disp_note;
+                note_prev    <= oled_disp_note;
+            end else if (oled_disp_note == 3'd0) begin
                 note_prev <= 3'd0;
             end
 
@@ -291,7 +388,7 @@ module finger_piano_stage2_oled_top #(
     //-------------------------------------------------------------------------
     // 串口格式化与解码逻辑 (极简明了: [K0:OFF K1:OFF K2:OFF] NOTE: MUTE)
     //-------------------------------------------------------------------------
-    wire [2:0] cur_note_sel = (send_msg_type == MSG_NOTE) ? send_note : piano_note_debug;
+    wire [2:0] cur_note_sel = (send_msg_type == MSG_NOTE) ? send_note : oled_disp_note;
     reg  [7:0] note_char0, note_char1;
     always @(*) begin
         case (cur_note_sel)
