@@ -60,7 +60,8 @@ module tb_finger_piano_stage2_oled_top;
     // DUT: Stage-2 OLED 集成物理顶层
     //-------------------------------------------------------------------------
     finger_piano_stage2_oled_top #(
-        .SIM_FAST_INIT (TB_FAST_INIT)
+        .SIM_FAST_INIT    (TB_FAST_INIT),
+        .ADC_NOTE_TRIGGER (0)
     ) u_top (
         .clk           (clk),
         .rst_n         (rst_n),

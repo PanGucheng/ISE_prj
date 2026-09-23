@@ -41,7 +41,11 @@ module finger_piano_system #(
     parameter integer SENSOR_ACTIVE_HIGH   = 1,
     parameter integer SENSOR_FILTER_ENABLE = 1,
     parameter integer ENABLE_ADC           = 1,
-    parameter integer ENABLE_DAC           = 1
+    parameter integer ENABLE_DAC           = 1,
+    parameter [14:0]  PRESSURE_CH0_ZERO    = `CFG_PRESSURE_CH0_ZERO,
+    parameter [14:0]  PRESSURE_CH1_ZERO    = `CFG_PRESSURE_CH1_ZERO,
+    parameter [14:0]  PRESSURE_CH2_ZERO    = `CFG_PRESSURE_CH2_ZERO,
+    parameter integer PRESSURE_INVERT      = `CFG_PRESSURE_INVERT
 ) (
     input  wire        clk,
     input  wire        rst_n_sync,
@@ -138,7 +142,12 @@ module finger_piano_system #(
         end
     endgenerate
 
-    pressure_processor u_pressure (
+    pressure_processor #(
+        .CH0_ZERO (PRESSURE_CH0_ZERO),
+        .CH1_ZERO (PRESSURE_CH1_ZERO),
+        .CH2_ZERO (PRESSURE_CH2_ZERO),
+        .INVERT   (PRESSURE_INVERT)
+    ) u_pressure (
         .clk              (clk),
         .rst_n_sync       (rst_n_sync),
         .adc_ch0_raw      (adc_ch0_raw),

@@ -22,7 +22,8 @@
 //=============================================================================
 
 module pressure_channel_corrector #(
-    parameter [14:0] ZERO_OFFSET = 15'd0
+    parameter [14:0]  ZERO_OFFSET = 15'd0,
+    parameter integer INVERT      = 0
 ) (
     input  wire [15:0] raw_code,        // ADS1115 原始 16-bit two's complement
     output wire [14:0] corrected_code   // 非负校正压力幅值
@@ -32,7 +33,11 @@ module pressure_channel_corrector #(
     wire [14:0] positive = raw_code[15] ? 15'd0 : raw_code[14:0];
 
     // 零点校正 + 下溢饱和(比较后相减,不会绕回)
-    assign corrected_code =
-        (positive > ZERO_OFFSET) ? (positive - ZERO_OFFSET) : 15'd0;
+    // INVERT = 0: 正向压力 (电压随压力上升, P = max(0, positive - ZERO_OFFSET))
+    // INVERT = 1: 反向压力 (分压电路按压阻值降低导致电压下降, P = max(0, ZERO_OFFSET - positive))
+    wire [14:0] normal_corr = (positive > ZERO_OFFSET) ? (positive - ZERO_OFFSET) : 15'd0;
+    wire [14:0] invert_corr = (positive < ZERO_OFFSET) ? (ZERO_OFFSET - positive) : 15'd0;
+
+    assign corrected_code = (INVERT != 0) ? invert_corr : normal_corr;
 
 endmodule

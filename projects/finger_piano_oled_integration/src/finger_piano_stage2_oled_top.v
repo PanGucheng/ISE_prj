@@ -16,8 +16,10 @@
 `include "finger_piano_cfg.vh"
 
 module finger_piano_stage2_oled_top #(
-    parameter integer SIM_FAST_INIT  = 0,
-    parameter integer UART_BAUD_RATE = 115200
+    parameter integer SIM_FAST_INIT      = 0,
+    parameter integer UART_BAUD_RATE     = 115200,
+    parameter integer ADC_NOTE_TRIGGER   = 1,
+    parameter [14:0]  PRESSURE_THRESHOLD = 15'd8800
 ) (
     input  wire       clk,           // 唯一系统时钟 (12 MHz, P57)
     input  wire       rst_n,         // 外部异步低有效复位 (P3)
@@ -48,11 +50,24 @@ module finger_piano_stage2_oled_top #(
     wire [15:0] piano_adc_ch0_raw;
     wire [15:0] piano_adc_ch1_raw;
     wire [15:0] piano_adc_ch2_raw;
+    wire [14:0] piano_pressure_ch0;
+    wire [14:0] piano_pressure_ch1;
+    wire [14:0] piano_pressure_ch2;
+    wire        piano_pressure_valid;
+
+    // 压力门限判定 (未按 2.4V -> 压力 0, 按下 0.2V -> 压力 17600, 阈值 8800)
+    wire [2:0] adc_sensor_code;
+    assign adc_sensor_code[0] = (piano_pressure_ch0 >= PRESSURE_THRESHOLD);
+    assign adc_sensor_code[1] = (piano_pressure_ch1 >= PRESSURE_THRESHOLD);
+    assign adc_sensor_code[2] = (piano_pressure_ch2 >= PRESSURE_THRESHOLD);
+
+    wire [2:0] active_sensor =
+        (ADC_NOTE_TRIGGER != 0) ? (adc_sensor_code | sensor_async) : sensor_async;
 
     finger_piano_stage2_top u_piano (
         .clk              (clk),
         .rst_n            (rst_n),
-        .sensor_async     (sensor_async),
+        .sensor_async     (active_sensor),
         .adc_i2c_scl      (adc_i2c_scl),
         .adc_i2c_sda      (adc_i2c_sda),
         .dac_i2c_scl      (dac_i2c_scl),
@@ -63,7 +78,11 @@ module finger_piano_stage2_oled_top #(
         .adc_sample_valid (piano_adc_sample_valid),
         .adc_ch0_raw      (piano_adc_ch0_raw),
         .adc_ch1_raw      (piano_adc_ch1_raw),
-        .adc_ch2_raw      (piano_adc_ch2_raw)
+        .adc_ch2_raw      (piano_adc_ch2_raw),
+        .pressure_ch0     (piano_pressure_ch0),
+        .pressure_ch1     (piano_pressure_ch1),
+        .pressure_ch2     (piano_pressure_ch2),
+        .pressure_valid   (piano_pressure_valid)
     );
 
     //-------------------------------------------------------------------------

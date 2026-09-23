@@ -36,7 +36,12 @@
 
 `include "finger_piano_cfg.vh"
 
-module finger_piano_stage2_top (
+module finger_piano_stage2_top #(
+    parameter [14:0]  PRESSURE_CH0_ZERO  = `CFG_PRESSURE_CH0_ZERO,
+    parameter [14:0]  PRESSURE_CH1_ZERO  = `CFG_PRESSURE_CH1_ZERO,
+    parameter [14:0]  PRESSURE_CH2_ZERO  = `CFG_PRESSURE_CH2_ZERO,
+    parameter integer PRESSURE_INVERT    = `CFG_PRESSURE_INVERT
+) (
     input  wire       clk,           // 唯一系统时钟(12 MHz 有源晶振)
     input  wire       rst_n,         // 外部异步低有效复位
 
@@ -54,7 +59,11 @@ module finger_piano_stage2_top (
     output wire        adc_sample_valid,  // 三通道转换完成脉冲
     output wire [15:0] adc_ch0_raw,      // 通道 0 原始转换值
     output wire [15:0] adc_ch1_raw,      // 通道 1 原始转换值
-    output wire [15:0] adc_ch2_raw       // 通道 2 原始转换值
+    output wire [15:0] adc_ch2_raw,      // 通道 2 原始转换值
+    output wire [14:0] pressure_ch0,      // 通道 0 校正压力值 (P5)
+    output wire [14:0] pressure_ch1,      // 通道 1 校正压力值
+    output wire [14:0] pressure_ch2,      // 通道 2 校正压力值
+    output wire        pressure_valid     // 压力有效脉冲
 );
 
     //-------------------------------------------------------------------------
@@ -78,7 +87,11 @@ module finger_piano_stage2_top (
         .SENSOR_ACTIVE_HIGH   (1),
         .SENSOR_FILTER_ENABLE (1),
         .ENABLE_ADC           (1),
-        .ENABLE_DAC           (1)
+        .ENABLE_DAC           (1),
+        .PRESSURE_CH0_ZERO    (PRESSURE_CH0_ZERO),
+        .PRESSURE_CH1_ZERO    (PRESSURE_CH1_ZERO),
+        .PRESSURE_CH2_ZERO    (PRESSURE_CH2_ZERO),
+        .PRESSURE_INVERT      (PRESSURE_INVERT)
     ) u_sys (
         .clk               (clk),
         .rst_n_sync        (rst_n_sync),
@@ -89,10 +102,10 @@ module finger_piano_stage2_top (
         .dac_i2c_sda       (dac_i2c_sda),
         .sensor_code_stable(),
         .note_code         (note_code),
-        .pressure_ch0      (),
-        .pressure_ch1      (),
-        .pressure_ch2      (),
-        .pressure_valid    (),
+        .pressure_ch0      (pressure_ch0),
+        .pressure_ch1      (pressure_ch1),
+        .pressure_ch2      (pressure_ch2),
+        .pressure_valid    (pressure_valid),
         .adc_error         (adc_error),
         .adc_error_code    (adc_error_code),
         .adc_sample_valid  (adc_sample_valid),

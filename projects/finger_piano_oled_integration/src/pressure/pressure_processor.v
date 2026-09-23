@@ -29,9 +29,10 @@
 `include "finger_piano_cfg.vh"
 
 module pressure_processor #(
-    parameter [14:0] CH0_ZERO = `CFG_PRESSURE_CH0_ZERO,
-    parameter [14:0] CH1_ZERO = `CFG_PRESSURE_CH1_ZERO,
-    parameter [14:0] CH2_ZERO = `CFG_PRESSURE_CH2_ZERO
+    parameter [14:0]  CH0_ZERO = `CFG_PRESSURE_CH0_ZERO,
+    parameter [14:0]  CH1_ZERO = `CFG_PRESSURE_CH1_ZERO,
+    parameter [14:0]  CH2_ZERO = `CFG_PRESSURE_CH2_ZERO,
+    parameter integer INVERT   = 0
 ) (
     input  wire        clk,
     input  wire        rst_n_sync,
@@ -64,21 +65,24 @@ module pressure_processor #(
     );
 
     pressure_channel_corrector #(
-        .ZERO_OFFSET (CH0_ZERO)
+        .ZERO_OFFSET (CH0_ZERO),
+        .INVERT      (INVERT)
     ) u_corr0 (
         .raw_code       (frame_ch0_raw),
         .corrected_code (pressure_ch0)
     );
 
     pressure_channel_corrector #(
-        .ZERO_OFFSET (CH1_ZERO)
+        .ZERO_OFFSET (CH1_ZERO),
+        .INVERT      (INVERT)
     ) u_corr1 (
         .raw_code       (frame_ch1_raw),
         .corrected_code (pressure_ch1)
     );
 
     pressure_channel_corrector #(
-        .ZERO_OFFSET (CH2_ZERO)
+        .ZERO_OFFSET (CH2_ZERO),
+        .INVERT      (INVERT)
     ) u_corr2 (
         .raw_code       (frame_ch2_raw),
         .corrected_code (pressure_ch2)

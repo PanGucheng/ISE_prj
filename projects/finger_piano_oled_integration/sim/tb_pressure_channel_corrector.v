@@ -32,6 +32,13 @@ module tb_pressure_channel_corrector;
         .raw_code (raw100), .corrected_code (corr100)
     );
 
+    // 实例 3:ZERO_OFFSET = 19200, INVERT = 1 (反向压力校正)
+    reg  [15:0] raw_inv;
+    wire [14:0] corr_inv;
+    pressure_channel_corrector #(.ZERO_OFFSET(15'd19200), .INVERT(1)) u_cinv (
+        .raw_code (raw_inv), .corrected_code (corr_inv)
+    );
+
     task check_pair;
         input [15:0]     raw;
         input [14:0]     exp0;
@@ -56,11 +63,30 @@ module tb_pressure_channel_corrector;
         end
     endtask
 
+    task check_inv;
+        input [15:0]     raw;
+        input [14:0]     exp_inv;
+        input [8*40-1:0] note;
+        begin
+            raw_inv = raw;
+            #10;
+            checks = checks + 1;
+            if (corr_inv !== exp_inv) begin
+                errors = errors + 1;
+                $display("FAIL: inv raw=%0d (%0s): got %0d expected %0d",
+                         raw, note, corr_inv, exp_inv);
+            end else begin
+                $display("  ok: inv (%0s): raw=%0d -> pressure=%0d", note, raw, corr_inv);
+            end
+        end
+    endtask
+
     initial begin
         checks = 0;
         errors = 0;
-        raw0   = 16'h0000;
-        raw100 = 16'h0000;
+        raw0    = 16'h0000;
+        raw100  = 16'h0000;
+        raw_inv = 16'h0000;
 
         $display("TB_PRESSURE_CHANNEL_CORRECTOR: start");
 
@@ -97,6 +123,14 @@ module tb_pressure_channel_corrector;
         end else begin
             $display("  ok: negative code -100 clamped to 0 (no abs)");
         end
+
+        // 反向压力校正专项 (INVERT=1, ZERO_OFFSET=19200)
+        check_inv(16'd19200, 15'd0,     "idle 2.4V -> 0");
+        check_inv(16'd20000, 15'd0,     "idle noise >2.4V -> 0 clamp");
+        check_inv(16'd12800, 15'd6400,  "light press 1.6V -> 6400");
+        check_inv(16'd6400,  15'd12800, "heavy press 0.8V -> 12800");
+        check_inv(16'd0,     15'd19200, "0V -> max 19200");
+        check_inv(16'hFFFF,  15'd19200, "negative clamped -> 19200");
 
         if (errors == 0) begin
             $display("TB_PRESSURE_CHANNEL_CORRECTOR: PASS (checks=%0d, errors=0)", checks);

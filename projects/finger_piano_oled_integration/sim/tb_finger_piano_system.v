@@ -78,7 +78,11 @@ module tb_finger_piano_system;
         .SENSOR_ACTIVE_HIGH   (1),
         .SENSOR_FILTER_ENABLE (1),
         .ENABLE_ADC           (ADC_ON),
-        .ENABLE_DAC           (DAC_ON)
+        .ENABLE_DAC           (DAC_ON),
+        .PRESSURE_CH0_ZERO    (15'd0),
+        .PRESSURE_CH1_ZERO    (15'd0),
+        .PRESSURE_CH2_ZERO    (15'd0),
+        .PRESSURE_INVERT      (0)
     ) u_sys (
         .clk               (clk),
         .rst_n_sync        (rst_n),

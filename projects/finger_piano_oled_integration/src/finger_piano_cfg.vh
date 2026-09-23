@@ -93,15 +93,16 @@
 `define CFG_ADS1115_DR        3'b111
 
 //-----------------------------------------------------------------------------
-// P5 压力数据处理零点宏(三通道,默认全 0)。
+// P5 压力数据处理零点与极性宏 (三通道实测标定)。
 //
-// **UNMEASURED DEFAULT —— 不是 CALIBRATED!** 真实 FSR 的释放零点尚未实测,
-// 禁止凭感觉填写;实测方法与标定表格见 projects/finger_piano/
-// pressure_calibration.md(§32:候选方法 ZERO = released_max + margin,
-// margin 由实测噪声确定后再填)。
+// 硬件标定数据 (2026-09-23 用户实测):
+//   未按 (释放态): 电压约 2.4 V -> ADS1115 raw code = 2.4V / 0.125mV = 19200 (15'd19200)
+//   按下 (受力态): 电压约 0.2 V -> ADS1115 raw code = 0.2V / 0.125mV = 1600  (15'd1600)
+//   极性: CFG_PRESSURE_INVERT = 1 (反向压力: 电压随压力增大而降低, P = max(0, ZERO - positive))
 //-----------------------------------------------------------------------------
-`define CFG_PRESSURE_CH0_ZERO   15'd0
-`define CFG_PRESSURE_CH1_ZERO   15'd0
-`define CFG_PRESSURE_CH2_ZERO   15'd0
+`define CFG_PRESSURE_INVERT     1
+`define CFG_PRESSURE_CH0_ZERO   15'd19200
+`define CFG_PRESSURE_CH1_ZERO   15'd19200
+`define CFG_PRESSURE_CH2_ZERO   15'd19200
 
 `endif // FINGER_PIANO_CFG_VH

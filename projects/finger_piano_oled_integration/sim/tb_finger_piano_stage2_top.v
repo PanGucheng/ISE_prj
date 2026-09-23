@@ -52,7 +52,12 @@ module tb_finger_piano_stage2_top;
     //-------------------------------------------------------------------------
     // DUT:物理顶层(只有 12 个用户 I/O 的 wrapper)
     //-------------------------------------------------------------------------
-    finger_piano_stage2_top u_top (
+    finger_piano_stage2_top #(
+        .PRESSURE_CH0_ZERO (15'd0),
+        .PRESSURE_CH1_ZERO (15'd0),
+        .PRESSURE_CH2_ZERO (15'd0),
+        .PRESSURE_INVERT   (0)
+    ) u_top (
         .clk         (clk),
         .rst_n       (rst_n),
         .sensor_async(sensor_async),
