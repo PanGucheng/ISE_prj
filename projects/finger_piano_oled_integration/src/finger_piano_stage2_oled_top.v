@@ -1,24 +1,26 @@
 //=============================================================================
 // finger_piano_stage2_oled_top.v
-// Stage-2 OLED 集成物理顶层
+// Stage-2 OLED 集成物理顶层 (无休止循环播放《See You Again》完整 14 小节旋律)
 //
 // 架构：
 //   1. 实例化 finger_piano_stage2_top，保留全部已有系统功能（按键滤波解码、三通道 ADC、
 //      DDS 音频及 MCP4725 DAC 输出）；
 //   2. 采样 note_debug[2:0] 作为 note_code[2:0] 送入 OLED 控制器（SSD1306 显示）；
-//   3. 物理排针 P110/P111/P113 复用为调试与串口接口（与 periph_test 硬件引脚严格一致）：
-//      - P110: uart_tx (115200 baud, 8N1)，当 ADS1115 发生异常时打印 "ADC ERROR CODE=x\r\n"
-//      - P111: dbg_heartbeat (~1 Hz 方波心跳，证明 FPGA 配置及时钟正常)
-//      - P113: dbg_unused (固定 1'b0 安全接地)
-//   4. 物理引脚 P104 (SCL) 与 P105 (SDA) 驱动 SSD1306 OLED 独立总线。
+//   3. 物理排针 P110/P111/P113 调试接口：
+//      - P110: uart_tx (固定拉高 1'b1 空闲态，精简掉 UART 发送机以释放资源存放完整长曲谱)
+//      - P111: dbg_heartbeat (~1.4 Hz 方波心跳，证明 FPGA 配置及时钟正常)
+//      - P113: dbg_unused (异或汇聚硬件采集信号，防止底层 ADC/压力链被 XST 修剪)
+//   4. 物理引脚 P104 (SCL) 与 P105 (SDA) 驱动 SSD1306 OLED 独立总线；
+//   5. 内置《See You Again》完整 14 小节（224 拍，约 39.2 秒）旋律发生器，持续循环播放。
 //=============================================================================
 
 `include "finger_piano_cfg.vh"
 
 module finger_piano_stage2_oled_top #(
-    parameter integer SIM_FAST_INIT      = 0,
-    parameter integer UART_BAUD_RATE     = 115200,
-    parameter integer ADC_NOTE_TRIGGER   = 1,
+    parameter integer SIM_FAST_INIT          = 0,
+    parameter integer UART_BAUD_RATE         = 115200,
+    parameter integer ADC_NOTE_TRIGGER       = 1,
+    parameter integer AUTO_PLAY              = 1,
     parameter [14:0]  PRESSURE_THRESHOLD     = 15'd8000,
     parameter [14:0]  PRESSURE_THRESHOLD_CH2 = 15'd2400
 ) (
@@ -36,13 +38,13 @@ module finger_piano_stage2_oled_top #(
     output wire       oled_i2c_scl,  // SSD1306 独立 I2C (P104)
     inout  wire       oled_i2c_sda,  // (P105)
 
-    output wire       uart_tx,       // UART TX 115200 8N1 (P110)
-    output reg        dbg_heartbeat, // 约 1 Hz 心跳方波 (P111)
-    output wire       dbg_unused     // 固定 1'b0 (P113)
+    output wire       uart_tx,       // 固定 1'b1 空闲高电平 (P110)
+    output reg        dbg_heartbeat, // 约 1.4 Hz 心跳方波 (P111)
+    output wire       dbg_unused     // 汇聚未修剪信号 (P113)
 );
 
     //-------------------------------------------------------------------------
-    // 1. 实例化基线物理顶层
+    // 1. 基线物理顶层连接线
     //-------------------------------------------------------------------------
     wire [2:0]  piano_note_debug;
     wire        piano_adc_error;
@@ -57,7 +59,7 @@ module finger_piano_stage2_oled_top #(
     wire        piano_pressure_valid;
 
     //-------------------------------------------------------------------------
-    // 1. 独立复位同步器 (全工程异步拉低、同步释放) 与系统心跳分频器
+    // 2. 独立复位同步器与系统心跳分频器
     //-------------------------------------------------------------------------
     reg [1:0] rst_sync_ff;
     always @(posedge clk or negedge rst_n) begin
@@ -80,10 +82,8 @@ module finger_piano_stage2_oled_top #(
     end
 
     //-------------------------------------------------------------------------
-    // 2. 压力门限判定
+    // 3. 压力门限判定 (手动备用)
     //-------------------------------------------------------------------------
-    // CH0/CH1: 未按 2.45V, 按下 0.2V~0.8V -> 阈值 8000 (触发电压 <= 1.50V)
-    // CH2 (第三通道): 未按 2.40V, 按下 2.00V -> 阈值 2400 (触发电压 <= 2.20V，对称 0.2V 容限)
     wire [2:0] adc_sensor_code;
     assign adc_sensor_code[0] = (piano_pressure_ch0 >= PRESSURE_THRESHOLD);
     assign adc_sensor_code[1] = (piano_pressure_ch1 >= PRESSURE_THRESHOLD);
@@ -96,88 +96,277 @@ module finger_piano_stage2_oled_top #(
     wire oled_error;
 
     //-------------------------------------------------------------------------
-    // 3. 上电自动奏乐状态机 (小星星: 32 拍，复用 heartbeat_cnt 零额外加法器)
+    // 4. 《See You Again》完整 14 小节旋律发生器 (持续不间断循环播放)
     //-------------------------------------------------------------------------
-    reg        intro_active;
-    reg [4:0]  intro_beat;
-    reg [2:0]  intro_melody;
-    reg [2:0]  last_intro_note;
+    reg [7:0] song_step;
+    reg [3:0] song_rom_entry;
 
+    // 《See You Again》完整 14 小节旋律 ROM (224 步)
     always @(*) begin
-        case (intro_beat)
-            // 第一句: 一闪一闪亮晶晶 (1 1 5 5 6 6 5 -)
-            5'd0:  intro_melody = 3'd1; // 1 (DO)
-            5'd1:  intro_melody = 3'd1; // 1 (DO)
-            5'd2:  intro_melody = 3'd5; // 5 (SOL)
-            5'd3:  intro_melody = 3'd5; // 5 (SOL)
-            5'd4:  intro_melody = 3'd6; // 6 (LA)
-            5'd5:  intro_melody = 3'd6; // 6 (LA)
-            5'd6:  intro_melody = 3'd5; // 5 (SOL, 延音前半)
-            5'd7:  intro_melody = 3'd5; // 5 (SOL, 延音后半)
-
-            // 第二句: 满天都是小星星 (4 4 3 3 2 2 1 -)
-            5'd8:  intro_melody = 3'd4; // 4 (FA)
-            5'd9:  intro_melody = 3'd4; // 4 (FA)
-            5'd10: intro_melody = 3'd3; // 3 (MI)
-            5'd11: intro_melody = 3'd3; // 3 (MI)
-            5'd12: intro_melody = 3'd2; // 2 (RE)
-            5'd13: intro_melody = 3'd2; // 2 (RE)
-            5'd14: intro_melody = 3'd1; // 1 (DO, 延音前半)
-            5'd15: intro_melody = 3'd1; // 1 (DO, 延音后半)
-
-            // 第三句: 挂在天空放光明 (5 5 4 4 3 3 2 -)
-            5'd16: intro_melody = 3'd5; // 5 (SOL)
-            5'd17: intro_melody = 3'd5; // 5 (SOL)
-            5'd18: intro_melody = 3'd4; // 4 (FA)
-            5'd19: intro_melody = 3'd4; // 4 (FA)
-            5'd20: intro_melody = 3'd3; // 3 (MI)
-            5'd21: intro_melody = 3'd3; // 3 (MI)
-            5'd22: intro_melody = 3'd2; // 2 (RE, 延音前半)
-            5'd23: intro_melody = 3'd2; // 2 (RE, 延音后半)
-
-            // 第四句: 好像许多小眼睛 (5 5 4 4 3 3 2 -)
-            5'd24: intro_melody = 3'd5; // 5 (SOL)
-            5'd25: intro_melody = 3'd5; // 5 (SOL)
-            5'd26: intro_melody = 3'd4; // 4 (FA)
-            5'd27: intro_melody = 3'd4; // 4 (FA)
-            5'd28: intro_melody = 3'd3; // 3 (MI)
-            5'd29: intro_melody = 3'd3; // 3 (MI)
-            5'd30: intro_melody = 3'd2; // 2 (RE, 延音前半)
-            5'd31: intro_melody = 3'd2; // 2 (RE, 延音后半)
-            default: intro_melody = 3'd0;
+        case (song_step)
+            8'd0: song_rom_entry = 4'b0101; // --- 第 1 小节 ---
+            8'd1: song_rom_entry = 4'b1101;
+            8'd2: song_rom_entry = 4'b0010;
+            8'd3: song_rom_entry = 4'b1010;
+            8'd4: song_rom_entry = 4'b0001;
+            8'd5: song_rom_entry = 4'b1001;
+            8'd6: song_rom_entry = 4'b0011;
+            8'd7: song_rom_entry = 4'b1011;
+            8'd8: song_rom_entry = 4'b0000;
+            8'd9: song_rom_entry = 4'b0000;
+            8'd10: song_rom_entry = 4'b1001;
+            8'd11: song_rom_entry = 4'b1010;
+            8'd12: song_rom_entry = 4'b1011;
+            8'd13: song_rom_entry = 4'b1010;
+            8'd14: song_rom_entry = 4'b1001;
+            8'd15: song_rom_entry = 4'b1010;
+            8'd16: song_rom_entry = 4'b0101; // --- 第 2 小节 ---
+            8'd17: song_rom_entry = 4'b1101;
+            8'd18: song_rom_entry = 4'b0010;
+            8'd19: song_rom_entry = 4'b1010;
+            8'd20: song_rom_entry = 4'b0001;
+            8'd21: song_rom_entry = 4'b1001;
+            8'd22: song_rom_entry = 4'b0011;
+            8'd23: song_rom_entry = 4'b1011;
+            8'd24: song_rom_entry = 4'b0000;
+            8'd25: song_rom_entry = 4'b0000;
+            8'd26: song_rom_entry = 4'b1001;
+            8'd27: song_rom_entry = 4'b1010;
+            8'd28: song_rom_entry = 4'b1011;
+            8'd29: song_rom_entry = 4'b1010;
+            8'd30: song_rom_entry = 4'b1001;
+            8'd31: song_rom_entry = 4'b1010;
+            8'd32: song_rom_entry = 4'b0101; // --- 第 3 小节 ---
+            8'd33: song_rom_entry = 4'b1101;
+            8'd34: song_rom_entry = 4'b0010;
+            8'd35: song_rom_entry = 4'b1010;
+            8'd36: song_rom_entry = 4'b0001;
+            8'd37: song_rom_entry = 4'b1001;
+            8'd38: song_rom_entry = 4'b0011;
+            8'd39: song_rom_entry = 4'b1011;
+            8'd40: song_rom_entry = 4'b0000;
+            8'd41: song_rom_entry = 4'b0000;
+            8'd42: song_rom_entry = 4'b1001;
+            8'd43: song_rom_entry = 4'b1010;
+            8'd44: song_rom_entry = 4'b1011;
+            8'd45: song_rom_entry = 4'b1010;
+            8'd46: song_rom_entry = 4'b1001;
+            8'd47: song_rom_entry = 4'b1010;
+            8'd48: song_rom_entry = 4'b0101; // --- 第 4 小节 ---
+            8'd49: song_rom_entry = 4'b1101;
+            8'd50: song_rom_entry = 4'b0010;
+            8'd51: song_rom_entry = 4'b1010;
+            8'd52: song_rom_entry = 4'b0001;
+            8'd53: song_rom_entry = 4'b1001;
+            8'd54: song_rom_entry = 4'b0011;
+            8'd55: song_rom_entry = 4'b1011;
+            8'd56: song_rom_entry = 4'b0000;
+            8'd57: song_rom_entry = 4'b0000;
+            8'd58: song_rom_entry = 4'b0001;
+            8'd59: song_rom_entry = 4'b1001;
+            8'd60: song_rom_entry = 4'b0011;
+            8'd61: song_rom_entry = 4'b1011;
+            8'd62: song_rom_entry = 4'b0101;
+            8'd63: song_rom_entry = 4'b1101;
+            8'd64: song_rom_entry = 4'b0110; // --- 第 5 小节 ---
+            8'd65: song_rom_entry = 4'b0110;
+            8'd66: song_rom_entry = 4'b0110;
+            8'd67: song_rom_entry = 4'b0110;
+            8'd68: song_rom_entry = 4'b0110;
+            8'd69: song_rom_entry = 4'b1110;
+            8'd70: song_rom_entry = 4'b0101;
+            8'd71: song_rom_entry = 4'b1101;
+            8'd72: song_rom_entry = 4'b0000;
+            8'd73: song_rom_entry = 4'b0000;
+            8'd74: song_rom_entry = 4'b0000;
+            8'd75: song_rom_entry = 4'b0000;
+            8'd76: song_rom_entry = 4'b0000;
+            8'd77: song_rom_entry = 4'b0000;
+            8'd78: song_rom_entry = 4'b0000;
+            8'd79: song_rom_entry = 4'b1001;
+            8'd80: song_rom_entry = 4'b0010; // --- 第 6 小节 ---
+            8'd81: song_rom_entry = 4'b1010;
+            8'd82: song_rom_entry = 4'b0010;
+            8'd83: song_rom_entry = 4'b1010;
+            8'd84: song_rom_entry = 4'b0000;
+            8'd85: song_rom_entry = 4'b0000;
+            8'd86: song_rom_entry = 4'b1010;
+            8'd87: song_rom_entry = 4'b1011;
+            8'd88: song_rom_entry = 4'b0000;
+            8'd89: song_rom_entry = 4'b0000;
+            8'd90: song_rom_entry = 4'b0000;
+            8'd91: song_rom_entry = 4'b0000;
+            8'd92: song_rom_entry = 4'b0000;
+            8'd93: song_rom_entry = 4'b0000;
+            8'd94: song_rom_entry = 4'b1011;
+            8'd95: song_rom_entry = 4'b1101;
+            8'd96: song_rom_entry = 4'b0110; // --- 第 7 小节 ---
+            8'd97: song_rom_entry = 4'b1110;
+            8'd98: song_rom_entry = 4'b0111;
+            8'd99: song_rom_entry = 4'b1111;
+            8'd100: song_rom_entry = 4'b0110;
+            8'd101: song_rom_entry = 4'b1110;
+            8'd102: song_rom_entry = 4'b0101;
+            8'd103: song_rom_entry = 4'b1101;
+            8'd104: song_rom_entry = 4'b0011;
+            8'd105: song_rom_entry = 4'b1011;
+            8'd106: song_rom_entry = 4'b0010;
+            8'd107: song_rom_entry = 4'b1010;
+            8'd108: song_rom_entry = 4'b0001;
+            8'd109: song_rom_entry = 4'b0001;
+            8'd110: song_rom_entry = 4'b1001;
+            8'd111: song_rom_entry = 4'b1110;
+            8'd112: song_rom_entry = 4'b0010; // --- 第 8 小节 ---
+            8'd113: song_rom_entry = 4'b1010;
+            8'd114: song_rom_entry = 4'b0010;
+            8'd115: song_rom_entry = 4'b1010;
+            8'd116: song_rom_entry = 4'b0001;
+            8'd117: song_rom_entry = 4'b1001;
+            8'd118: song_rom_entry = 4'b0001;
+            8'd119: song_rom_entry = 4'b1001;
+            8'd120: song_rom_entry = 4'b0001;
+            8'd121: song_rom_entry = 4'b0001;
+            8'd122: song_rom_entry = 4'b0001;
+            8'd123: song_rom_entry = 4'b1001;
+            8'd124: song_rom_entry = 4'b0000;
+            8'd125: song_rom_entry = 4'b0000;
+            8'd126: song_rom_entry = 4'b1011;
+            8'd127: song_rom_entry = 4'b1101;
+            8'd128: song_rom_entry = 4'b0110; // --- 第 9 小节 ---
+            8'd129: song_rom_entry = 4'b0110;
+            8'd130: song_rom_entry = 4'b0110;
+            8'd131: song_rom_entry = 4'b1110;
+            8'd132: song_rom_entry = 4'b0000;
+            8'd133: song_rom_entry = 4'b0000;
+            8'd134: song_rom_entry = 4'b0101;
+            8'd135: song_rom_entry = 4'b0101;
+            8'd136: song_rom_entry = 4'b0101;
+            8'd137: song_rom_entry = 4'b0101;
+            8'd138: song_rom_entry = 4'b0101;
+            8'd139: song_rom_entry = 4'b1101;
+            8'd140: song_rom_entry = 4'b0000;
+            8'd141: song_rom_entry = 4'b0000;
+            8'd142: song_rom_entry = 4'b0000;
+            8'd143: song_rom_entry = 4'b1001;
+            8'd144: song_rom_entry = 4'b0010; // --- 第 10 小节 ---
+            8'd145: song_rom_entry = 4'b1010;
+            8'd146: song_rom_entry = 4'b0010;
+            8'd147: song_rom_entry = 4'b1010;
+            8'd148: song_rom_entry = 4'b0001;
+            8'd149: song_rom_entry = 4'b1001;
+            8'd150: song_rom_entry = 4'b1010;
+            8'd151: song_rom_entry = 4'b1011;
+            8'd152: song_rom_entry = 4'b0011;
+            8'd153: song_rom_entry = 4'b0011;
+            8'd154: song_rom_entry = 4'b0011;
+            8'd155: song_rom_entry = 4'b1011;
+            8'd156: song_rom_entry = 4'b0011;
+            8'd157: song_rom_entry = 4'b1011;
+            8'd158: song_rom_entry = 4'b0101;
+            8'd159: song_rom_entry = 4'b1101;
+            8'd160: song_rom_entry = 4'b0110; // --- 第 11 小节 ---
+            8'd161: song_rom_entry = 4'b1110;
+            8'd162: song_rom_entry = 4'b0001;
+            8'd163: song_rom_entry = 4'b1001;
+            8'd164: song_rom_entry = 4'b0010;
+            8'd165: song_rom_entry = 4'b1010;
+            8'd166: song_rom_entry = 4'b0011;
+            8'd167: song_rom_entry = 4'b1011;
+            8'd168: song_rom_entry = 4'b0010;
+            8'd169: song_rom_entry = 4'b1010;
+            8'd170: song_rom_entry = 4'b0001;
+            8'd171: song_rom_entry = 4'b1001;
+            8'd172: song_rom_entry = 4'b0110;
+            8'd173: song_rom_entry = 4'b1110;
+            8'd174: song_rom_entry = 4'b0110;
+            8'd175: song_rom_entry = 4'b1110;
+            8'd176: song_rom_entry = 4'b0010; // --- 第 12 小节 ---
+            8'd177: song_rom_entry = 4'b1010;
+            8'd178: song_rom_entry = 4'b0010;
+            8'd179: song_rom_entry = 4'b1010;
+            8'd180: song_rom_entry = 4'b0001;
+            8'd181: song_rom_entry = 4'b1001;
+            8'd182: song_rom_entry = 4'b0011;
+            8'd183: song_rom_entry = 4'b1011;
+            8'd184: song_rom_entry = 4'b0000;
+            8'd185: song_rom_entry = 4'b0000;
+            8'd186: song_rom_entry = 4'b0000;
+            8'd187: song_rom_entry = 4'b0000;
+            8'd188: song_rom_entry = 4'b0101;
+            8'd189: song_rom_entry = 4'b1101;
+            8'd190: song_rom_entry = 4'b0110;
+            8'd191: song_rom_entry = 4'b1110;
+            8'd192: song_rom_entry = 4'b0010; // --- 第 13 小节 ---
+            8'd193: song_rom_entry = 4'b1010;
+            8'd194: song_rom_entry = 4'b0010;
+            8'd195: song_rom_entry = 4'b1010;
+            8'd196: song_rom_entry = 4'b0001;
+            8'd197: song_rom_entry = 4'b1001;
+            8'd198: song_rom_entry = 4'b0001;
+            8'd199: song_rom_entry = 4'b1001;
+            8'd200: song_rom_entry = 4'b0001;
+            8'd201: song_rom_entry = 4'b0001;
+            8'd202: song_rom_entry = 4'b0001;
+            8'd203: song_rom_entry = 4'b0001;
+            8'd204: song_rom_entry = 4'b0001;
+            8'd205: song_rom_entry = 4'b0001;
+            8'd206: song_rom_entry = 4'b0001;
+            8'd207: song_rom_entry = 4'b1001;
+            8'd208: song_rom_entry = 4'b0001; // --- 第 14 小节 ---
+            8'd209: song_rom_entry = 4'b0001;
+            8'd210: song_rom_entry = 4'b0001;
+            8'd211: song_rom_entry = 4'b0001;
+            8'd212: song_rom_entry = 4'b0001;
+            8'd213: song_rom_entry = 4'b0001;
+            8'd214: song_rom_entry = 4'b0001;
+            8'd215: song_rom_entry = 4'b1001;
+            8'd216: song_rom_entry = 4'b0000;
+            8'd217: song_rom_entry = 4'b0000;
+            8'd218: song_rom_entry = 4'b0000;
+            8'd219: song_rom_entry = 4'b0000;
+            8'd220: song_rom_entry = 4'b0000;
+            8'd221: song_rom_entry = 4'b0000;
+            8'd222: song_rom_entry = 4'b0000;
+            8'd223: song_rom_entry = 4'b0000;
+            default: song_rom_entry = 4'b0000;
         endcase
     end
 
-    // 0.35 秒/拍 (复用 heartbeat_cnt[21:0] == 0，32 拍总长约 11.2 秒)
-    // 短音发声 306 ms，休止 44 ms (断音清脆)；长音前半拍不休止持续发声
-    wire intro_is_long_hold = (intro_beat == 5'd6)  || (intro_beat == 5'd14) ||
-                              (intro_beat == 5'd22) || (intro_beat == 5'd30);
-    wire intro_gap          = !intro_is_long_hold && (&heartbeat_cnt[21:17]);
-    wire [2:0] intro_sound  = intro_gap ? 3'd0 : intro_melody;
-    wire intro_beat_tick    = (heartbeat_cnt[21:0] == 22'd0);
+    wire       song_note_end = song_rom_entry[3];
+    wire [2:0] song_melody   = song_rom_entry[2:0];
+
+    // 0.1748 秒/拍 (复用 heartbeat_cnt[20:0] == 0，224 步循环总长约 39.2 秒)
+    // 吐音释音槽：音符最后一拍的最后 21.8 ms 进行静音释音，保证同音连续弹奏清晰清脆
+    wire song_tick   = (heartbeat_cnt[20:0] == 21'd0);
+    wire note_gap    = song_note_end && (heartbeat_cnt[20:18] == 3'b111);
+    wire [2:0] song_sound = note_gap ? 3'd0 : song_melody;
+
+    reg [2:0] last_song_note;
 
     always @(posedge clk or negedge rst_n_sync) begin
         if (!rst_n_sync) begin
-            intro_active    <= 1'b1;
-            intro_beat      <= 5'd0;
-            last_intro_note <= 3'd1;
-        end else if (intro_active) begin
-            if (intro_melody != 3'd0) begin
-                last_intro_note <= intro_melody;
+            song_step      <= 8'd0;
+            last_song_note <= 3'd1;
+        end else begin
+            if (song_melody != 3'd0) begin
+                last_song_note <= song_melody;
             end
-            if (intro_beat_tick) begin
-                if (intro_beat == 5'd31) begin
-                    intro_active <= 1'b0; // 32 拍全部奏毕，自动交接给手动模式
+            if (song_tick) begin
+                if (song_step == 8'd223) begin
+                    song_step <= 8'd0; // 224 步完整奏毕，循环回起点
                 end else begin
-                    intro_beat <= intro_beat + 5'd1;
+                    song_step <= song_step + 8'd1;
                 end
             end
         end
     end
 
-    wire [2:0] active_sensor  = intro_active ? intro_sound : manual_sensor;
-    wire [2:0] oled_disp_note = intro_active ? last_intro_note : piano_note_debug;
+    wire [2:0] active_sensor  = (AUTO_PLAY != 0 && song_sound != 3'd0) ? song_sound : manual_sensor;
+    wire [2:0] oled_disp_note = (AUTO_PLAY != 0) ? last_song_note : piano_note_debug;
 
+    //-------------------------------------------------------------------------
+    // 5. 实例化指尖琴核心系统
+    //-------------------------------------------------------------------------
     finger_piano_stage2_top #(
         .PRESSURE_CH0_ZERO (15'd20000),
         .PRESSURE_CH1_ZERO (15'd20000),
@@ -205,7 +394,7 @@ module finger_piano_stage2_oled_top #(
     );
 
     //-------------------------------------------------------------------------
-    // 3. SSD1306 OLED 主控制器与 I2C 发送器
+    // 6. SSD1306 OLED 主控制器与 I2C 发送器
     //-------------------------------------------------------------------------
     wire       i2c_start_req;
     wire       i2c_write_byte_req;
@@ -248,390 +437,10 @@ module finger_piano_stage2_oled_top #(
     );
 
     //-------------------------------------------------------------------------
-    // 4. 心跳方波 (P111) 与 OLED 错误指示 (P113)
+    // 7. 调试引脚与防修剪汇聚 (保持外部 UCF 管脚连接完整，防止无用修剪警告)
     //-------------------------------------------------------------------------
+    assign uart_tx = 1'b1;
+
     assign dbg_unused = oled_error ^ (^sensor_async);
-
-    //-------------------------------------------------------------------------
-    // 5. UART 全系统多通道诊断日志状态机 (P110, 115200 8N1)
-    //-------------------------------------------------------------------------
-    localparam [2:0] MSG_NONE      = 3'd0,
-                     MSG_READY     = 3'd1,
-                     MSG_OLED_OK   = 3'd2,
-                     MSG_OLED_NACK = 3'd3,
-                     MSG_ADC_ERR   = 3'd4,
-                     MSG_NOTE      = 3'd5,
-                     MSG_ADC_OK    = 3'd6;
-
-    reg [7:0]  boot_timer;
-    reg        boot_pending;
-    reg        oled_ok_pending;
-    reg        oled_err_pending;
-    reg        adc_err_pending;
-    reg [2:0]  latched_ecode;
-    reg        note_pending;
-    reg [2:0]  latched_note;
-    reg [2:0]  note_prev;
-
-    reg        adc_has_sampled;
-    reg        adc_ok_pending;
-
-    reg oled_init_done_d;
-    reg oled_error_d;
-    reg adc_error_d;
-
-    // 状态机声明与寄存器定义
-    localparam [1:0] ST_IDLE = 2'd0,
-                     ST_SEND = 2'd1,
-                     ST_WAIT = 2'd2;
-
-    reg [1:0]  tx_fsm;
-    reg [2:0]  send_msg_type;
-    reg [3:0]  send_msg_len;
-    reg [3:0]  char_idx;
-    reg [1:0]  ch_idx;
-    reg [2:0]  send_ecode;
-    reg [2:0]  send_note;
-
-    reg [7:0]  uart_tx_byte;
-    reg        uart_tx_valid;
-    wire       uart_tx_ready;
-
-    // 事件捕获与边沿检测
-    always @(posedge clk or negedge rst_n_sync) begin
-        if (!rst_n_sync) begin
-            boot_timer       <= 8'd0;
-            boot_pending     <= 1'b0;
-            oled_ok_pending  <= 1'b0;
-            oled_err_pending <= 1'b0;
-            adc_err_pending  <= 1'b0;
-            latched_ecode    <= 3'd0;
-            note_pending     <= 1'b0;
-            latched_note     <= 3'd0;
-            note_prev        <= 3'd0;
-            oled_init_done_d <= 1'b0;
-            oled_error_d     <= 1'b0;
-            adc_error_d      <= 1'b0;
-            adc_has_sampled  <= 1'b0;
-            adc_ok_pending   <= 1'b0;
-        end else begin
-            oled_init_done_d <= oled_init_done;
-            oled_error_d     <= oled_error;
-            adc_error_d      <= piano_adc_error;
-
-            // 开机上电延迟 200 个时钟周期后发送 READY (确保 TX 引脚处于稳定空闲态)
-            if (boot_timer < 8'd200) begin
-                boot_timer <= boot_timer + 8'd1;
-                if (boot_timer == 8'd199) begin
-                    boot_pending <= 1'b1;
-                end
-            end
-
-            // OLED OK: 上升沿触发
-            if (oled_init_done && !oled_init_done_d) begin
-                oled_ok_pending <= 1'b1;
-            end
-
-            // OLED NACK: 上升沿触发
-            if (oled_error && !oled_error_d) begin
-                oled_err_pending <= 1'b1;
-            end
-
-            // ADC 错误: 上升沿触发
-            if (piano_adc_error && !adc_error_d) begin
-                adc_err_pending <= 1'b1;
-                latched_ecode   <= piano_adc_error_code;
-            end
-
-            // 音符改变: 非 0 且变化
-            if (oled_disp_note != 3'd0 && oled_disp_note != note_prev) begin
-                note_pending <= 1'b1;
-                latched_note <= oled_disp_note;
-                note_prev    <= oled_disp_note;
-            end else if (oled_disp_note == 3'd0) begin
-                note_prev <= 3'd0;
-            end
-
-            // ADC 数据就绪标志
-            if (piano_adc_sample_valid) begin
-                adc_has_sampled <= 1'b1;
-            end
-
-            if (heartbeat_cnt == 23'd0 && adc_has_sampled) begin
-                adc_ok_pending <= 1'b1;
-            end
-
-            // 发送握手清除
-            if (tx_fsm == ST_SEND && ((send_msg_type == MSG_ADC_OK) ? (ch_idx == 2'd0 && char_idx == 4'd0) : (char_idx == 4'd0))) begin
-                case (send_msg_type)
-                    MSG_READY:     boot_pending     <= 1'b0;
-                    MSG_OLED_OK:   oled_ok_pending  <= 1'b0;
-                    MSG_OLED_NACK: oled_err_pending <= 1'b0;
-                    MSG_ADC_ERR:   adc_err_pending  <= 1'b0;
-                    MSG_NOTE:      note_pending     <= 1'b0;
-                    MSG_ADC_OK:    adc_ok_pending   <= 1'b0;
-                    default: ;
-                endcase
-            end
-        end
-    end
-
-    //-------------------------------------------------------------------------
-    // 串口格式化与解码逻辑 (极简明了: [K0:OFF K1:OFF K2:OFF] NOTE: MUTE)
-    //-------------------------------------------------------------------------
-    wire [2:0] cur_note_sel = (send_msg_type == MSG_NOTE) ? send_note : oled_disp_note;
-    reg  [7:0] note_char0, note_char1;
-    always @(*) begin
-        case (cur_note_sel)
-            3'd1: begin note_char0 = "D"; note_char1 = "O"; end
-            3'd2: begin note_char0 = "R"; note_char1 = "E"; end
-            3'd3: begin note_char0 = "M"; note_char1 = "I"; end
-            3'd4: begin note_char0 = "F"; note_char1 = "A"; end
-            3'd5: begin note_char0 = "S"; note_char1 = "O"; end
-            3'd6: begin note_char0 = "L"; note_char1 = "A"; end
-            3'd7: begin note_char0 = "S"; note_char1 = "I"; end
-            default: begin note_char0 = "M"; note_char1 = "U"; end
-        endcase
-    end
-    wire [7:0] note_char2 = (cur_note_sel == 3'd0) ? "T" : " ";
-    wire [7:0] note_char3 = (cur_note_sel == 3'd0) ? "E" : " ";
-
-    reg [7:0] cur_char;
-    always @(*) begin
-        if (send_msg_type == MSG_ADC_OK) begin
-            case (ch_idx)
-                2'd0: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "[";
-                        4'd1:    cur_char = "K";
-                        4'd2:    cur_char = "0";
-                        4'd3:    cur_char = ":";
-                        4'd4:    cur_char = "O";
-                        4'd5:    cur_char = adc_sensor_code[0] ? "N" : "F";
-                        4'd6:    cur_char = adc_sensor_code[0] ? " " : "F";
-                        default: cur_char = " ";
-                    endcase
-                end
-                2'd1: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "K";
-                        4'd1:    cur_char = "1";
-                        4'd2:    cur_char = ":";
-                        4'd3:    cur_char = "O";
-                        4'd4:    cur_char = adc_sensor_code[1] ? "N" : "F";
-                        4'd5:    cur_char = adc_sensor_code[1] ? " " : "F";
-                        default: cur_char = " ";
-                    endcase
-                end
-                2'd2: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "K";
-                        4'd1:    cur_char = "2";
-                        4'd2:    cur_char = ":";
-                        4'd3:    cur_char = "O";
-                        4'd4:    cur_char = adc_sensor_code[2] ? "N" : "F";
-                        4'd5:    cur_char = adc_sensor_code[2] ? " " : "F";
-                        4'd6:    cur_char = "]";
-                        default: cur_char = " ";
-                    endcase
-                end
-                default: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "N";
-                        4'd1:    cur_char = "O";
-                        4'd2:    cur_char = "T";
-                        4'd3:    cur_char = "E";
-                        4'd4:    cur_char = ":";
-                        4'd5:    cur_char = " ";
-                        4'd6:    cur_char = note_char0;
-                        4'd7:    cur_char = note_char1;
-                        4'd8:    cur_char = note_char2;
-                        4'd9:    cur_char = note_char3;
-                        4'd10:   cur_char = 8'h0D;
-                        default: cur_char = 8'h0A;
-                    endcase
-                end
-            endcase
-        end else if (char_idx == send_msg_len) begin
-            cur_char = 8'h0A;
-        end else if (char_idx == send_msg_len - 4'd1) begin
-            cur_char = 8'h0D;
-        end else begin
-            case (send_msg_type)
-                MSG_READY: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "R";
-                        4'd1:    cur_char = "E";
-                        4'd2:    cur_char = "A";
-                        4'd3:    cur_char = "D";
-                        default: cur_char = "Y";
-                    endcase
-                end
-                MSG_OLED_OK, MSG_OLED_NACK: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "O";
-                        4'd1:    cur_char = "L";
-                        4'd2:    cur_char = "E";
-                        4'd3:    cur_char = "D";
-                        4'd4:    cur_char = " ";
-                        4'd5:    cur_char = (send_msg_type == MSG_OLED_OK) ? "O" : "N";
-                        4'd6:    cur_char = (send_msg_type == MSG_OLED_OK) ? "K" : "A";
-                        4'd7:    cur_char = "C";
-                        default: cur_char = "K";
-                    endcase
-                end
-                MSG_ADC_ERR: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "A";
-                        4'd1:    cur_char = "D";
-                        4'd2:    cur_char = "C";
-                        4'd3:    cur_char = " ";
-                        4'd4:    cur_char = "E";
-                        4'd5:    cur_char = "R";
-                        4'd6:    cur_char = "R";
-                        4'd7:    cur_char = "=";
-                        default: cur_char = 8'h30 + {5'd0, send_ecode};
-                    endcase
-                end
-                MSG_NOTE: begin
-                    case (char_idx)
-                        4'd0:    cur_char = "N";
-                        4'd1:    cur_char = "O";
-                        4'd2:    cur_char = "T";
-                        4'd3:    cur_char = "E";
-                        4'd4:    cur_char = "=";
-                        default: cur_char = 8'h30 + {5'd0, send_note};
-                    endcase
-                end
-                default: cur_char = " ";
-            endcase
-        end
-    end
-
-    always @(posedge clk or negedge rst_n_sync) begin
-        if (!rst_n_sync) begin
-            tx_fsm        <= ST_IDLE;
-            send_msg_type <= MSG_NONE;
-            send_msg_len  <= 4'd0;
-            char_idx      <= 4'd0;
-            ch_idx        <= 2'd0;
-            send_ecode    <= 3'd0;
-            send_note     <= 3'd0;
-            uart_tx_byte  <= 8'h00;
-            uart_tx_valid <= 1'b0;
-        end else begin
-            uart_tx_valid <= 1'b0;
-
-            case (tx_fsm)
-                ST_IDLE: begin
-                    char_idx <= 4'd0;
-                    if (boot_pending) begin
-                        send_msg_type <= MSG_READY;
-                        send_msg_len  <= 4'd6;
-                        tx_fsm        <= ST_SEND;
-                    end else if (oled_err_pending) begin
-                        send_msg_type <= MSG_OLED_NACK;
-                        send_msg_len  <= 4'd10;
-                        tx_fsm        <= ST_SEND;
-                    end else if (oled_ok_pending) begin
-                        send_msg_type <= MSG_OLED_OK;
-                        send_msg_len  <= 4'd8;
-                        tx_fsm        <= ST_SEND;
-                    end else if (adc_err_pending) begin
-                        send_msg_type <= MSG_ADC_ERR;
-                        send_msg_len  <= 4'd10;
-                        send_ecode    <= latched_ecode;
-                        tx_fsm        <= ST_SEND;
-                    end else if (note_pending) begin
-                        send_msg_type <= MSG_NOTE;
-                        send_msg_len  <= 4'd7;
-                        send_note     <= latched_note;
-                        tx_fsm        <= ST_SEND;
-                    end else if (adc_ok_pending) begin
-                        send_msg_type <= MSG_ADC_OK;
-                        ch_idx        <= 2'd0;
-                        tx_fsm        <= ST_SEND;
-                    end
-                end
-
-                ST_SEND: begin
-                    if (uart_tx_ready) begin
-                        uart_tx_byte  <= cur_char;
-                        uart_tx_valid <= 1'b1;
-                        tx_fsm        <= ST_WAIT;
-                    end
-                end
-
-                ST_WAIT: begin
-                    uart_tx_valid <= 1'b0;
-                    if (uart_tx_ready && !uart_tx_valid) begin
-                        if (send_msg_type == MSG_ADC_OK) begin
-                            case (ch_idx)
-                                2'd0: begin
-                                    if (char_idx == 4'd7) begin
-                                        ch_idx   <= 2'd1;
-                                        char_idx <= 4'd0;
-                                        tx_fsm   <= ST_SEND;
-                                    end else begin
-                                        char_idx <= char_idx + 4'd1;
-                                        tx_fsm   <= ST_SEND;
-                                    end
-                                end
-                                2'd1: begin
-                                    if (char_idx == 4'd6) begin
-                                        ch_idx   <= 2'd2;
-                                        char_idx <= 4'd0;
-                                        tx_fsm   <= ST_SEND;
-                                    end else begin
-                                        char_idx <= char_idx + 4'd1;
-                                        tx_fsm   <= ST_SEND;
-                                    end
-                                end
-                                2'd2: begin
-                                    if (char_idx == 4'd7) begin
-                                        ch_idx   <= 2'd3;
-                                        char_idx <= 4'd0;
-                                        tx_fsm   <= ST_SEND;
-                                    end else begin
-                                        char_idx <= char_idx + 4'd1;
-                                        tx_fsm   <= ST_SEND;
-                                    end
-                                end
-                                default: begin
-                                    if (char_idx == 4'd11) begin
-                                        tx_fsm <= ST_IDLE;
-                                    end else begin
-                                        char_idx <= char_idx + 4'd1;
-                                        tx_fsm   <= ST_SEND;
-                                    end
-                                end
-                            endcase
-                        end else begin
-                            if (char_idx == send_msg_len) begin
-                                tx_fsm <= ST_IDLE;
-                            end else begin
-                                char_idx <= char_idx + 4'd1;
-                                tx_fsm   <= ST_SEND;
-                            end
-                        end
-                    end
-                end
-
-                default: tx_fsm <= ST_IDLE;
-            endcase
-        end
-    end
-
-    uart_tx #(
-        .CLK_HZ    (`SYS_CLK_HZ),
-        .BAUD_RATE (UART_BAUD_RATE)
-    ) u_uart_tx (
-        .clk        (clk),
-        .rst_n_sync (rst_n_sync),
-        .tx_byte    (uart_tx_byte),
-        .tx_valid   (uart_tx_valid),
-        .tx_ready   (uart_tx_ready),
-        .tx_pin     (uart_tx)
-    );
 
 endmodule

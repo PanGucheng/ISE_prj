@@ -160,7 +160,7 @@
   "constraintsReviewed": true,
   "optimization": "Area",
   "optimizationLevel": 1,
-  "mapPackFactor": 80,
+  "mapPackFactor": 100,
   "simulations": [
     {
       "name": "uart_reporter_equivalence",
@@ -769,11 +769,6 @@
       },
       {
         "id": "Xst:1710",
-        "pattern": "FF/Latch <(uart_tx_byte_7|u_uart_tx/tx_shift_7)>",
-        "expected": 2
-      },
-      {
-        "id": "Xst:1710",
         "pattern": "FF/Latch <GEN_ADC\\.m_wdata_2>",
         "expected": 1
       },
@@ -805,11 +800,6 @@
       {
         "id": "Xst:1895",
         "pattern": "u_dac/GEN_DAC\\.m_cmd_0",
-        "expected": 1
-      },
-      {
-        "id": "Xst:2677",
-        "pattern": "Node <send_msg_type_0>",
         "expected": 1
       }
     ]

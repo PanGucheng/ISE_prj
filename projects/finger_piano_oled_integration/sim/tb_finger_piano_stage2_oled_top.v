@@ -61,7 +61,8 @@ module tb_finger_piano_stage2_oled_top;
     //-------------------------------------------------------------------------
     finger_piano_stage2_oled_top #(
         .SIM_FAST_INIT    (TB_FAST_INIT),
-        .ADC_NOTE_TRIGGER (0)
+        .ADC_NOTE_TRIGGER (0),
+        .AUTO_PLAY        (0)
     ) u_top (
         .clk           (clk),
         .rst_n         (rst_n),
@@ -361,41 +362,7 @@ module tb_finger_piano_stage2_oled_top;
         // 5. 错误隔离测试：在真实 OLED I2C 事务中注入 NACK
         $display("[TB] Testing OLED error isolation with REAL NACK injection during active transaction...");
         
-        fork
-            begin : RX_STAGE5
-                integer rx_len;
-                integer li;
-
-                // 5.1 接收音符切换产生的 NOTE=3
-                recv_line(rx_len);
-                $write("[TB] Received UART message (%0d chars): \"", rx_len);
-                for (li = 0; li < rx_len; li = li + 1) begin
-                    if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
-                end
-                $display("\"");
-                if (rx_len !== 8 || line_buf[0] !== "N" || line_buf[5] !== "3") begin
-                    $display("[TB] ERROR: Expected NOTE=3\\r\\n, got rx_len=%0d", rx_len);
-                    errors = errors + 1;
-                end else begin
-                    $display("[TB] NOTE=3\\r\\n verified over UART (P110)!");
-                end
-
-                // 5.2 接收 NACK 故障停机报文 OLED NACK
-                recv_line(rx_len);
-                $write("[TB] Received UART message (%0d chars): \"", rx_len);
-                for (li = 0; li < rx_len; li = li + 1) begin
-                    if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
-                end
-                $display("\"");
-                if (rx_len !== 11 || line_buf[0] !== "O" || line_buf[5] !== "N" || line_buf[8] !== "K") begin
-                    $display("[TB] ERROR: Expected OLED NACK\\r\\n, got rx_len=%0d", rx_len);
-                    errors = errors + 1;
-                end else begin
-                    $display("[TB] OLED NACK\\r\\n verified over UART (P110)!");
-                end
-            end
-
-            begin : STIM_STAGE5
+        begin : STIM_STAGE5
                 // 触发一次新的音符切换 (切到 E4 / 3'b011)，使 OLED 控制器启动新的刷新事务
                 sensor_async = 3'b011;
                 repeat (STABLE_CYC + 200) @(posedge clk);
@@ -478,7 +445,6 @@ module tb_finger_piano_stage2_oled_top;
                     $display("[TB] OLED I2C bus cleanly released to high-Z after error.");
                 end
             end
-        join
 
         // 6. 确认在 OLED 严重停机故障期间，ADC 和 DAC 持续完全不受干扰地正常运行
         $display("[TB] Verifying ADC and DAC continuous operation during OLED error state...");
@@ -529,57 +495,7 @@ module tb_finger_piano_stage2_oled_top;
         rst_n = 1'b1;
         repeat (100) @(posedge clk);
 
-        // 8. 验证串口多通道诊断输出：READY, OLED OK, ADC ERR=1
-        $display("[TB] Testing UART diagnostics: READY, OLED OK, and ADC ERR=1...");
-        begin : TEST_ADC_UART
-            integer rx_len;
-            integer li;
-
-            // 8.1 接收复位后启动标语 READY
-            recv_line(rx_len);
-            $write("[TB] Received UART message (%0d chars): \"", rx_len);
-            for (li = 0; li < rx_len; li = li + 1) begin
-                if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
-            end
-            $display("\"");
-            if (rx_len !== 7 || line_buf[0] !== "R" || line_buf[4] !== "Y") begin
-                $display("[TB] ERROR: Expected READY\\r\\n, got rx_len=%0d", rx_len);
-                errors = errors + 1;
-            end else begin
-                $display("[TB] READY\\r\\n verified over UART (P110)!");
-            end
-
-            // 8.2 接收复位后恢复当前按键音符报文 NOTE=3
-            recv_line(rx_len);
-            $write("[TB] Received UART message (%0d chars): \"", rx_len);
-            for (li = 0; li < rx_len; li = li + 1) begin
-                if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
-            end
-            $display("\"");
-            if (rx_len !== 8 || line_buf[0] !== "N" || line_buf[5] !== "3") begin
-                $display("[TB] ERROR: Expected NOTE=3\\r\\n, got rx_len=%0d", rx_len);
-                errors = errors + 1;
-            end else begin
-                $display("[TB] NOTE=3\\r\\n verified over UART (P110)!");
-            end
-
-            // 8.3 注入 ADC NACK 并接收 ADC ERR=1
-            adc_nack_addr = 1'b1;
-            recv_line(rx_len);
-            adc_nack_addr = 1'b0;
-            $write("[TB] Received UART message (%0d chars): \"", rx_len);
-            for (li = 0; li < rx_len; li = li + 1) begin
-                if (line_buf[li] >= 32 && line_buf[li] <= 126) $write("%c", line_buf[li]);
-            end
-            $display("\"");
-            if (rx_len !== 11 || line_buf[0] !== "A" || line_buf[1] !== "D" || line_buf[2] !== "C" ||
-                line_buf[7] !== "=" || line_buf[8] !== "1") begin
-                $display("[TB] ERROR: Expected ADC ERR=1\\r\\n, got rx_len=%0d", rx_len);
-                errors = errors + 1;
-            end else begin
-                $display("[TB] ADC ERR=1\\r\\n verified over UART (P110)!");
-            end
-        end
+        // 8. 串口已裁剪，直接检查心跳与调试信号
 
         // 9. 检查 dbg_unused 与 dbg_heartbeat 信号
         if (dbg_unused !== 1'b0) begin
